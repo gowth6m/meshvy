@@ -32,8 +32,10 @@ struct CanvasNode: Identifiable {
     /// Top-left in world coordinates.
     var position: CGPoint
     var size: CGSize
-    /// Repo group this node belongs to, when known.
-    var repoID: String?
+    /// Section this node belongs to.
+    var sectionID: String?
+    /// Stack this node belongs to, when it is part of one.
+    var stackID: UUID?
     /// True when the user has dragged this node; auto-layout then leaves it alone.
     var isPinned: Bool = false
 
@@ -65,13 +67,15 @@ struct CanvasEdge: Identifiable {
     var id: String { from.storageKey + "->" + to.storageKey }
 }
 
-/// Translucent container drawn behind the nodes of one repository.
+/// Translucent container drawn behind the nodes of one section.
 struct CanvasGroup: Identifiable {
     var id: String
+    var kind: GroupKind
     var title: String
     var subtitle: String
     var rect: CGRect
     var seed: String
+    var stackID: UUID?
 }
 
 /// What the canvas renders for the current filter + layout state.

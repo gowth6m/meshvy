@@ -5,6 +5,7 @@ import SwiftUI
 /// pinch, drag a card to pin it where you want it.
 struct CanvasView: View {
     @Bindable var store: ForgeStore
+    @Binding var sheet: ForgeSheet?
 
     @State private var panOrigin: CGPoint?
     @State private var dragOrigin: CGPoint?
@@ -170,6 +171,7 @@ struct CanvasView: View {
             Button("Open transcript") { store.reveal(node.id) }
             Divider()
             Button("Resume in Terminal") { store.resumeSession(summary) }
+            Button("Launch agent here…") { sheet = .launchAgent(node.id) }
             Button("Open folder in editor") { store.openInEditor(summary.resolvedPath) }
             Button("Open folder in Terminal") { store.openInTerminal(summary.resolvedPath) }
             Button("Reveal folder in Finder") { store.revealInFinder(summary.resolvedPath) }
@@ -178,6 +180,17 @@ struct CanvasView: View {
             Button("Copy session ID") { store.copyToClipboard(summary.id) }
             Button("Copy path") { store.copyToClipboard(summary.resolvedPath) }
         case .worktree(let worktree):
+            Button("Launch agent here…") { sheet = .launchAgent(node.id) }
+            if let stack = store.stack(containing: node.id) {
+                Divider()
+                Button("Remove stack “\(stack.name)”") {
+                    store.removeStack(stack.id, force: false, deleteBranch: false)
+                }
+                Button("Remove stack and discard changes") {
+                    store.removeStack(stack.id, force: true, deleteBranch: true)
+                }
+            }
+            Divider()
             Button("Open in editor") { store.openInEditor(worktree.path) }
             Button("Open in Terminal") { store.openInTerminal(worktree.path) }
             Button("Reveal in Finder") { store.revealInFinder(worktree.path) }
@@ -219,7 +232,10 @@ struct CanvasView: View {
                 deltaX *= 12
                 deltaY *= 12
             }
-            if event.isDirectionInvertedFromDevice {
+            // AppKit has already applied the "natural scrolling" preference to
+            // these deltas. `isDirectionInvertedFromDevice` only reports that it
+            // did — negating on it inverts the gesture a second time.
+            if store.invertScroll {
                 deltaX = -deltaX
                 deltaY = -deltaY
             }

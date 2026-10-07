@@ -4,6 +4,7 @@ import SwiftUI
 /// reader for sessions.
 struct InspectorView: View {
     @Bindable var store: ForgeStore
+    @Binding var sheet: ForgeSheet?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +67,7 @@ struct InspectorView: View {
                 Text(summary.displayTitle)
                     .font(Theme.ui(15, .bold))
                     .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
 
@@ -168,6 +170,9 @@ struct InspectorView: View {
                 FieldGrid(rows: worktreeFields(worktree))
 
                 HStack(spacing: 6) {
+                    ChromeButton(icon: "sparkles", label: "Launch agent") {
+                        sheet = .launchAgent(.worktree(worktree.path))
+                    }
                     ChromeButton(icon: "chevron.left.forwardslash.chevron.right", label: "Editor") {
                         store.openInEditor(worktree.path)
                     }

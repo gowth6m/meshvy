@@ -77,30 +77,53 @@ struct CanvasBackdrop: View {
         let visible = viewport.visibleWorldRect()
         for group in graph.groups where group.rect.intersects(visible) {
             let rect = viewport.project(group.rect)
-            let tint = Theme.repoTint(group.seed)
+            let style = GroupStyle(kind: group.kind, seed: group.seed)
             let corner = Theme.groupCorner * viewport.scale
             let path = Path(roundedRect: rect, cornerRadius: corner, style: .continuous)
 
             context.fill(path, with: .color(Theme.canvasDeep.opacity(0.55)))
-            context.fill(path, with: .color(tint.opacity(0.045)))
-            context.stroke(path, with: .color(tint.opacity(0.26)), lineWidth: max(0.6, viewport.scale))
+            context.fill(path, with: .color(style.tint.opacity(style.fillOpacity)))
+            context.stroke(
+                path,
+                with: .color(style.tint.opacity(style.strokeOpacity)),
+                style: StrokeStyle(
+                    lineWidth: max(0.6, style.lineWidth * viewport.scale),
+                    dash: style.isDashed ? [6 * viewport.scale, 5 * viewport.scale] : []
+                )
+            )
 
             guard viewport.scale > 0.1 else { continue }
             let titleSize = max(11, 15 * viewport.scale)
             let titleFont = Theme.ui(titleSize, .bold)
             let baseline = rect.minY - 7
+            var cursorX = rect.minX + 2
 
+            // A stack spans several repositories, so it earns a marker that says
+            // so even when the board is zoomed too far out to read the lanes.
+            if style.badge != nil, viewport.scale > 0.3 {
+                let glyphSize = titleSize * 0.92
+                context.draw(
+                    Text(Image(systemName: style.badge!))
+                        .font(Theme.ui(glyphSize, .semibold))
+                        .foregroundStyle(style.tint),
+                    at: CGPoint(x: cursorX, y: baseline),
+                    anchor: .bottomLeading
+                )
+                cursorX += glyphSize * 1.5
+            }
+
+            let available = rect.width - (cursorX - rect.minX)
             guard let (title, titleWidth) = fitted(
-                group.title, font: titleFont, maxWidth: rect.width, context: context
+                group.title, font: titleFont, maxWidth: available, context: context
             ) else { continue }
 
             context.draw(
-                title.foregroundStyle(tint.opacity(0.95)),
-                at: CGPoint(x: rect.minX + 2, y: baseline),
+                title.foregroundStyle(style.tint.opacity(0.95)),
+                at: CGPoint(x: cursorX, y: baseline),
                 anchor: .bottomLeading
             )
 
-            let remaining = rect.width - titleWidth - 12
+            let remaining = available - titleWidth - 12
             guard viewport.scale > 0.35, remaining > 60 else { continue }
             let subtitleFont = Theme.mono(max(9, 10.5 * viewport.scale))
             if let (subtitle, _) = fitted(
@@ -108,11 +131,65 @@ struct CanvasBackdrop: View {
             ) {
                 context.draw(
                     subtitle.foregroundStyle(Theme.textTertiary),
-                    at: CGPoint(x: rect.minX + titleWidth + 12, y: baseline),
+                    at: CGPoint(x: cursorX + titleWidth + 12, y: baseline),
                     anchor: .bottomLeading
                 )
             }
         }
+    }
+
+    /// How a container is drawn, per section kind.
+    private struct GroupStyle {
+        var tint: Color
+        var fillOpacity: Double
+        var strokeOpacity: Double
+        var lineWidth: CGFloat
+        var isDashed: Bool
+        var badge: String?
+
+        init(kind: GroupKind, seed: String) {
+            switch kind {
+            case .stack:
+                tint = Theme.repoTint(seed)
+                fillOpacity = 0.07
+                strokeOpacity = 0.45
+                lineWidth = 1.4
+                isDashed = false
+                badge = "square.stack.3d.up.fill"
+            case .main:
+                tint = Theme.worktree
+                fillOpacity = 0.045
+                strokeOpacity = 0.3
+                lineWidth = 1
+                isDashed = false
+                badge = "shippingbox.fill"
+            case .repo:
+                tint = Theme.repoTint(seed)
+                fillOpacity = 0.045
+                strokeOpacity = 0.26
+                lineWidth = 1
+                isDashed = false
+                badge = nil
+            case .other:
+                tint = Theme.textSecondary
+                fillOpacity = 0.03
+                strokeOpacity = 0.2
+                lineWidth = 1
+                isDashed = false
+                badge = nil
+            case .archived:
+                tint = Theme.ended
+                fillOpacity = 0.025
+                strokeOpacity = 0.3
+                lineWidth = 1
+                isDashed = true
+                badge = "archivebox"
+            }
+        }
+    }
+
+    private func abbreviate(_ path: String) -> String {
+        path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
 
     /// Truncates `string` with an ellipsis until it fits `maxWidth`, returning the
@@ -140,10 +217,6 @@ struct CanvasBackdrop: View {
             count -= 1
         }
         return nil
-    }
-
-    private func abbreviate(_ path: String) -> String {
-        path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
 
     // MARK: Edges

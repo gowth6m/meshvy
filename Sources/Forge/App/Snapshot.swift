@@ -33,6 +33,117 @@ struct SnapshotRequest {
     }
 }
 
+/// Headless end-to-end exercise of the workspace flow, for development:
+/// `Forge --selftest <repoA> <repoB> …`. Creates a throwaway workspace, cuts a
+/// stack across every repo, reports what git actually did, then removes it.
+@MainActor
+enum SelfTest {
+    static var keep = false
+
+    static func request(arguments: [String]) -> [String]? {
+        guard let flag = arguments.firstIndex(of: "--selftest") else { return nil }
+        let paths = arguments[(flag + 1)...].filter { !$0.hasPrefix("--") }
+        return paths.isEmpty ? nil : Array(paths)
+    }
+
+    static func run(repoPaths: [String], keep: Bool = false) {
+        let store = ForgeStore()
+        store.bootstrap()
+        Self.keep = keep
+
+        let found = store.inspectRepos(at: repoPaths)
+        print("inspect: \(found.repos.count) repos, rejected \(found.rejected)")
+        guard !found.repos.isEmpty else { exit(1) }
+
+        let workspace = store.createWorkspace(name: "Forge Selftest", repos: found.repos)
+        print("workspace: \(workspace.name) root=\(workspace.worktreeRoot)")
+
+        store.createStack(
+            name: "selftest-feature", branch: "selftest-feature", baseRef: nil,
+            intent: "Prove that one branch can span every repo in the workspace"
+        )
+        poll(store: store, workspaceID: workspace.id, attempts: 80)
+    }
+
+    private static func poll(store: ForgeStore, workspaceID: UUID, attempts: Int) {
+        guard let current = store.workspaces.first(where: { $0.id == workspaceID }) else { exit(1) }
+        if let stack = current.stacks.first {
+            print("stack: \(stack.name) branch=\(stack.branch) members=\(stack.members.count)")
+            var allGood = true
+            for member in stack.members {
+                let exists = FileManager.default.fileExists(atPath: member.path)
+                let branch = Shell.git(["rev-parse", "--abbrev-ref", "HEAD"], cwd: member.path, timeout: 5)
+                let head = branch.ok ? (branch.lines.first ?? "?") : "n/a"
+                print("  - \(member.repoName): onDisk=\(exists) branch=\(head) failure=\(member.failure ?? "none")")
+                if !exists || head != stack.branch { allGood = false }
+            }
+            print("sections: \(store.sections.map { "\($0.title)(\($0.lanes.count) lanes)" }.joined(separator: ", "))")
+            print("nodes: \(store.graph.nodes.count) groups: \(store.graph.groups.count)")
+
+            if Self.keep {
+                print("SELFTEST KEPT — workspace left in place for snapshotting")
+                exit(allGood ? 0 : 1)
+            }
+            store.removeStack(stack.id, force: true, deleteBranch: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                MainActor.assumeIsolated {
+                    let after = store.workspaces.first(where: { $0.id == workspaceID })
+                    let removed = after?.stacks.isEmpty ?? false
+                    let gone = stack.members.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }
+                    print("teardown: recordRemoved=\(removed) dirsRemoved=\(gone)")
+                    store.deleteWorkspace(workspaceID)
+                    print(allGood && removed && gone ? "SELFTEST OK" : "SELFTEST FAILED")
+                    exit(allGood && removed && gone ? 0 : 1)
+                }
+            }
+            return
+        }
+        guard attempts > 0 else { print("SELFTEST TIMEOUT"); exit(1) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            MainActor.assumeIsolated { poll(store: store, workspaceID: workspaceID, attempts: attempts - 1) }
+        }
+    }
+}
+
+/// Proves the launch path: starts a real agent in the active workspace's newest
+/// stack and waits for it to register as live. `Forge --launchtest`.
+@MainActor
+enum LaunchTest {
+    static func run() {
+        let store = ForgeStore()
+        store.bootstrap()
+        guard store.hasWorkspace else { print("no workspace"); exit(1) }
+
+        var request = store.launchTemplate(for: nil)
+        request.role = .orchestrator
+        request.prompt = "Reply with exactly: FORGE-LAUNCH-OK. Do not use any tools."
+        request.model = "claude-haiku-4-5-20251001"
+        request.runsInBackground = true
+        print("cwd: \(request.cwd)")
+        print("addDirs: \(request.additionalDirs)")
+        print("promptPreview: \(AgentLauncher.composePrompt(request).prefix(160))…")
+
+        store.launchAgent(request)
+        poll(store: store, cwd: request.cwd, attempts: 60)
+    }
+
+    private static func poll(store: ForgeStore, cwd: String, attempts: Int) {
+        store.refreshLive()
+        let target = PathIndex.canonicalize(cwd)
+        if let session = store.live.values.first(where: {
+            $0.cwd.map { PathIndex.canonicalize($0) == target } == true
+        }) {
+            print("LIVE: name=\(session.name ?? "-") status=\(session.status.rawValue) pid=\(session.pid)")
+            print("LAUNCHTEST OK")
+            exit(0)
+        }
+        guard attempts > 0 else { print("LAUNCHTEST TIMEOUT"); exit(1) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            MainActor.assumeIsolated { poll(store: store, cwd: cwd, attempts: attempts - 1) }
+        }
+    }
+}
+
 @MainActor
 enum Snapshot {
     static func run(_ request: SnapshotRequest) {

@@ -177,8 +177,15 @@ enum Format {
         if let bracket = name.firstIndex(of: "[") { name = String(name[name.startIndex..<bracket]) }
         // Drop trailing date stamps like `-20251001`.
         let parts = name.split(separator: "-").filter { !($0.count == 8 && Int($0) != nil) }
-        let family = parts.first.map(String.init)?.capitalized
-        let rest = parts.dropFirst().joined(separator: " ")
-        return [family, rest.isEmpty ? nil : rest].compactMap { $0 }.joined(separator: " ")
+        guard let first = parts.first else { return nil }
+        let family = String(first).capitalized
+        // Version segments are split on hyphens upstream (`haiku-4-5`), so numeric
+        // tails rejoin with dots and anything else stays spaced.
+        let rest = parts.dropFirst()
+        let version = rest.prefix { Int($0) != nil }.joined(separator: ".")
+        let trailing = rest.drop { Int($0) != nil }.joined(separator: " ")
+        return [family, version.isEmpty ? nil : version, trailing.isEmpty ? nil : trailing]
+            .compactMap { $0 }
+            .joined(separator: " ")
     }
 }

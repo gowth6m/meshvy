@@ -1,22 +1,26 @@
 import SwiftUI
 
-/// Left rail: what is running right now, and the repository tree. Selecting a
-/// row pans the canvas to that node rather than replacing the view, so the board
-/// stays the primary surface.
+/// Left rail: what is running right now, the stacks in this workspace, and the
+/// repositories behind them. Selecting a row pans the canvas to that card rather
+/// than replacing the view, so the board stays the primary surface.
 struct Sidebar: View {
     @Bindable var store: ForgeStore
-    @State private var collapsedRepos: Set<String> = []
+    @Binding var sheet: ForgeSheet?
+    @State private var collapsed: Set<String> = []
 
-    private var liveSessions: [(LiveSession, SessionSummary?)] {
+    private var liveRows: [(LiveSession, SessionSummary?)] {
         store.live.values
             .sorted { lhs, rhs in
                 if lhs.status != rhs.status { return lhs.status == .busy }
                 return (lhs.updatedAt ?? .distantPast) > (rhs.updatedAt ?? .distantPast)
             }
-            .map { live in (live, store.graph.nodes.compactMap { node -> SessionSummary? in
-                guard case .session(let summary, _, _) = node.kind, summary.id == live.sessionId else { return nil }
-                return summary
-            }.first) }
+            .map { live in
+                let summary = store.graph.nodes.compactMap { node -> SessionSummary? in
+                    guard case .session(let summary, _, _) = node.kind, summary.id == live.sessionId else { return nil }
+                    return summary
+                }.first
+                return (live, summary)
+            }
     }
 
     var body: some View {
@@ -25,30 +29,38 @@ struct Sidebar: View {
             Divider().overlay(Theme.hairline)
             ScrollableStack(alignment: .leading) {
                 VStack(alignment: .leading, spacing: 2) {
-                    if !liveSessions.isEmpty {
-                        SectionHeader(title: "Live now", count: liveSessions.count, tint: Theme.busy)
-                        ForEach(liveSessions, id: \.0.pid) { live, summary in
+                    if !liveRows.isEmpty {
+                        SectionHeader(title: "Live now", count: liveRows.count, tint: Theme.busy)
+                        ForEach(liveRows, id: \.0.pid) { live, summary in
                             liveRow(live, summary)
                         }
                         Spacer().frame(height: 14)
                     }
 
                     SectionHeader(
-                        title: "Repositories",
-                        count: store.boardRepos.count,
-                        tint: Theme.textTertiary,
-                        trailing: store.isLoadingGit ? "scanning…" : nil
+                        title: "Stacks",
+                        count: store.activeWorkspace?.stacks.count ?? 0,
+                        tint: Theme.accent,
+                        action: ("plus", "New stack", { sheet = .newStack })
                     )
-                    ForEach(store.boardRepos) { repo in
-                        repoSection(repo)
+                    ForEach(store.activeWorkspace?.stacks.sorted { $0.createdAt > $1.createdAt } ?? []) { stack in
+                        stackSection(stack)
+                    }
+                    if store.activeWorkspace?.stacks.isEmpty == true {
+                        hint("No stacks yet. A stack cuts one branch across every repo at once.")
                     }
 
-                    if store.boardRepos.isEmpty && !store.isLoadingGit {
-                        Text("No git repositories found in your session history.")
-                            .font(Theme.ui(11))
-                            .foregroundStyle(Theme.textTertiary)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 6)
+                    Spacer().frame(height: 14)
+
+                    SectionHeader(
+                        title: "Repositories",
+                        count: store.activeWorkspace?.repos.count ?? 0,
+                        tint: Theme.textTertiary,
+                        trailing: store.isLoadingGit ? "scanning…" : nil,
+                        action: ("plus", "Add repositories", { sheet = .addRepos })
+                    )
+                    ForEach(store.activeWorkspace?.repos ?? []) { repo in
+                        repoSection(repo)
                     }
                 }
                 .padding(.vertical, 10)
@@ -73,9 +85,7 @@ struct Sidebar: View {
                 Text("\(store.matchingNodes.count)")
                     .font(Theme.mono(10, .semibold))
                     .foregroundStyle(Theme.accent)
-                Button {
-                    store.searchQuery = ""
-                } label: {
+                Button { store.searchQuery = "" } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(Theme.ui(11))
                         .foregroundStyle(Theme.textTertiary)
@@ -85,6 +95,15 @@ struct Sidebar: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 38)
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.ui(10.5))
+            .foregroundStyle(Theme.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
     }
 
     // MARK: Rows
@@ -97,11 +116,11 @@ struct Sidebar: View {
             HStack(spacing: 7) {
                 StatusDot(status: live.status, zoom: Zoom(scale: 1))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(summary?.displayTitle ?? live.name ?? live.sessionId.prefix(8).description)
+                    Text(summary?.displayTitle ?? live.name ?? String(live.sessionId.prefix(8)))
                         .font(Theme.ui(11.5, .medium))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
-                    Text(workspaceLabel(live))
+                    Text(live.name ?? URL(fileURLWithPath: live.cwd ?? "—").lastPathComponent)
                         .font(Theme.mono(9.5))
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
@@ -115,32 +134,27 @@ struct Sidebar: View {
         }
     }
 
-    private func workspaceLabel(_ live: LiveSession) -> String {
-        if let name = live.name, !name.isEmpty { return name }
-        guard let cwd = live.cwd else { return "—" }
-        return URL(fileURLWithPath: cwd).lastPathComponent
-    }
-
-    private func repoSection(_ repo: Repo) -> some View {
-        let isCollapsed = collapsedRepos.contains(repo.id)
+    private func stackSection(_ stack: Stack) -> some View {
+        let key = "stack:" + stack.id.uuidString
+        let isCollapsed = collapsed.contains(key)
         return VStack(alignment: .leading, spacing: 2) {
             Button {
-                if isCollapsed { collapsedRepos.remove(repo.id) } else { collapsedRepos.insert(repo.id) }
+                toggle(key)
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                         .font(Theme.ui(8.5, .bold))
                         .foregroundStyle(Theme.textTertiary)
                         .frame(width: 10)
-                    Circle()
-                        .fill(Theme.repoTint(repo.id))
-                        .frame(width: 7, height: 7)
-                    Text(repo.name)
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(Theme.ui(9.5))
+                        .foregroundStyle(Theme.repoTint(stack.branch))
+                    Text(stack.name)
                         .font(Theme.ui(12, .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    Text("\(repo.worktrees.count)")
+                    Text("\(stack.members.filter(\.isReady).count)")
                         .font(Theme.mono(9.5, .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }
@@ -149,9 +163,86 @@ struct Sidebar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button("Launch agent here…") { sheet = .launchAgent(firstNode(of: stack)) }
+                Divider()
+                Button("Remove stack") { store.removeStack(stack.id, force: false, deleteBranch: false) }
+                Button("Remove stack and discard changes") {
+                    store.removeStack(stack.id, force: true, deleteBranch: true)
+                }
+            }
 
             if !isCollapsed {
-                ForEach(repo.worktrees) { worktree in
+                ForEach(stack.members) { member in
+                    memberRow(member, branch: stack.branch)
+                }
+            }
+        }
+    }
+
+    private func memberRow(_ member: StackMember, branch: String) -> some View {
+        SidebarRow(
+            isSelected: store.selection == .worktree(member.path),
+            action: { store.reveal(.worktree(member.path)) }
+        ) {
+            HStack(spacing: 6) {
+                Image(systemName: member.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
+                    .font(Theme.ui(9))
+                    .foregroundStyle(member.isReady ? Theme.worktree : Theme.dirty)
+                    .frame(width: 12)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(member.repoName)
+                        .font(Theme.ui(11.5))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Text(member.failure ?? branch)
+                        .font(Theme.mono(9.5))
+                        .foregroundStyle(member.isReady ? Theme.branch.opacity(0.85) : Theme.dirty)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 16)
+        }
+    }
+
+    private func repoSection(_ repo: WorkspaceRepo) -> some View {
+        let key = "repo:" + repo.id
+        let isCollapsed = collapsed.contains(key)
+        let worktrees = store.worktreesByRepo[repo.id] ?? []
+        return VStack(alignment: .leading, spacing: 2) {
+            Button {
+                toggle(key)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(Theme.ui(8.5, .bold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 10)
+                    Circle().fill(Theme.repoTint(repo.id)).frame(width: 7, height: 7)
+                    Text(repo.name)
+                        .font(Theme.ui(12, .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text("\(worktrees.count)")
+                        .font(Theme.mono(9.5, .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button("Open in editor") { store.openInEditor(repo.path) }
+                Button("Reveal in Finder") { store.revealInFinder(repo.path) }
+                Divider()
+                Button("Remove from workspace") { store.removeRepo(repo.id) }
+            }
+
+            if !isCollapsed {
+                ForEach(worktrees) { worktree in
                     worktreeRow(worktree)
                 }
             }
@@ -159,8 +250,7 @@ struct Sidebar: View {
     }
 
     private func worktreeRow(_ worktree: Worktree) -> some View {
-        let sessionCount = store.graph.edges.filter { $0.to == .worktree(worktree.path) }.count
-        let liveCount = store.graph.edges.filter { $0.to == .worktree(worktree.path) && $0.isLive }.count
+        let sessions = store.graph.edges.filter { $0.to == .worktree(worktree.path) }
         return SidebarRow(
             isSelected: store.selection == .worktree(worktree.path),
             action: { store.reveal(.worktree(worktree.path)) }
@@ -181,17 +271,25 @@ struct Sidebar: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                if liveCount > 0 {
+                if sessions.contains(where: \.isLive) {
                     Circle().fill(Theme.busy).frame(width: 5, height: 5)
                 }
-                if sessionCount > 0 {
-                    Text("\(sessionCount)")
+                if !sessions.isEmpty {
+                    Text("\(sessions.count)")
                         .font(Theme.mono(9.5, .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
             .padding(.leading, 16)
         }
+    }
+
+    private func firstNode(of stack: Stack) -> NodeID? {
+        stack.members.first(where: \.isReady).map { NodeID.worktree($0.path) }
+    }
+
+    private func toggle(_ key: String) {
+        if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) }
     }
 }
 
@@ -200,6 +298,7 @@ private struct SectionHeader: View {
     var count: Int
     var tint: Color
     var trailing: String?
+    var action: (icon: String, help: String, run: () -> Void)?
 
     var body: some View {
         HStack(spacing: 5) {
@@ -212,9 +311,16 @@ private struct SectionHeader: View {
                 .foregroundStyle(Theme.textTertiary)
             Spacer(minLength: 0)
             if let trailing {
-                Text(trailing)
-                    .font(Theme.ui(9.5))
-                    .foregroundStyle(Theme.textTertiary)
+                Text(trailing).font(Theme.ui(9.5)).foregroundStyle(Theme.textTertiary)
+            }
+            if let action {
+                Button(action: action.run) {
+                    Image(systemName: action.icon)
+                        .font(Theme.ui(9.5, .bold))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help(action.help)
             }
         }
         .padding(.horizontal, 6)

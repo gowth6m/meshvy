@@ -4,20 +4,33 @@ import SwiftUI
 
 /// Everything the board renders from, plus the refresh machinery.
 ///
-/// Three refresh paths run at different costs: live status is cheap and frequent,
-/// transcript indexing is incremental and triggered by filesystem events, and git
-/// status is the slowest so it runs on a longer timer.
+/// The unit of work is a workspace: a set of repositories you treat as one
+/// project. A fresh install has none, so the board starts empty and the user
+/// picks what goes on it. Refresh runs on three paths at different costs — live
+/// agent status is cheap and frequent, transcript indexing is incremental and
+/// driven by filesystem events, and git status is the slowest so it runs on a
+/// longer timer.
 @MainActor
 @Observable
 final class ForgeStore {
+    // MARK: Workspaces
+    private(set) var workspaces: [Workspace] = []
+    private(set) var activeWorkspaceID: UUID?
+
+    var activeWorkspace: Workspace? {
+        guard let activeWorkspaceID else { return nil }
+        return workspaces.first { $0.id == activeWorkspaceID }
+    }
+
+    var hasWorkspace: Bool { activeWorkspace != nil }
+
     // MARK: Data
-    private(set) var sessions: [SessionSummary] = []
-    /// Real git state, as reported by `git worktree list`.
-    private(set) var repos: [Repo] = []
-    /// What the board shows: `repos` plus archived lanes reconstructed from
-    /// session history. Derived on every rebuild; never written to git.
-    private(set) var boardRepos: [Repo] = []
+    /// Every transcript on disk, indexed once and reused across workspaces.
+    private(set) var allSessions: [SessionSummary] = []
+    /// Live git state for the active workspace, keyed by repo id.
+    private(set) var worktreesByRepo: [String: [Worktree]] = [:]
     private(set) var live: [String: LiveSession] = [:]
+    private(set) var sections: [BoardSection] = []
     private(set) var graph = CanvasGraph()
 
     // MARK: View state
@@ -26,13 +39,24 @@ final class ForgeStore {
     var searchQuery = "" { didSet { recomputeMatches() } }
     private(set) var matchingNodes: Set<String> = []
 
-    var groupByRepo = true { didSet { rebuild(); persistLayout() } }
+    var grouping: BoardComposer.Grouping = .stack { didSet { rebuild(); persistLayout() } }
     var showEndedSessions = true { didSet { rebuild(); persistLayout() } }
-
+    var invertScroll = false { didSet { persistLayout() } }
     var inspectorVisible = true
+
     private(set) var isIndexing = false
     private(set) var isLoadingGit = false
-    private(set) var statusLine = "Starting up"
+    private(set) var isWorking = false
+    private(set) var statusLine = "No workspace"
+    private(set) var banner: Banner?
+
+    struct Banner: Identifiable {
+        enum Kind { case info, success, failure }
+        var id = UUID()
+        var kind: Kind
+        var title: String
+        var detail: String?
+    }
 
     // MARK: Transcript reader
     private(set) var transcript: Transcript?
@@ -41,10 +65,12 @@ final class ForgeStore {
 
     // MARK: Collaborators
     private let indexer = SessionIndexer()
-    private let assembler = RepoAssembler()
-    private let scanner = WorkspaceScanner()
     private let liveMonitor = LiveSessionMonitor()
     private let git = GitService()
+    private let stacks = StackService()
+    private let launcher = AgentLauncher()
+    private let composer = BoardComposer()
+    private let workspaceStore = WorkspaceStore()
     private let layoutStore = FileStore<SavedLayout>(filename: "layout.json")
     private let transcriptLoader = TranscriptLoader()
 
@@ -55,45 +81,331 @@ final class ForgeStore {
     private var gitTimer: Timer?
     private var hasFitInitially = false
     private var sessionIndexByID: [String: Int] = [:]
+    private var hasBootstrapped = false
 
     // MARK: - Lifecycle
-
-    private var hasBootstrapped = false
 
     func bootstrap() {
         guard !hasBootstrapped else { return }
         hasBootstrapped = true
+
         loadSavedLayout()
+        let document = workspaceStore.load()
+        workspaces = document.workspaces
+        activeWorkspaceID = document.activeWorkspaceID ?? document.workspaces.first?.id
 
-        // First frame: filesystem metadata only, so the board is never empty.
-        let files = indexer.transcriptFiles()
-        sessions = indexer.quickSummaries(files: files).sorted { $0.lastActivityAt > $1.lastActivityAt }
-        reindexLookup()
         refreshLive(rebuildGraph: false)
-        rebuild()
-        statusLine = "\(sessions.count) sessions"
-
-        startIndexing(files: files)
-        startGitDiscovery()
         startWatching()
         startTimers()
+
+        guard hasWorkspace else {
+            statusLine = "No workspace — add one to get started"
+            return
+        }
+        loadActiveWorkspace()
     }
 
     private func loadSavedLayout() {
         guard let stored = layoutStore.load() else { return }
         saved = stored
         pinned = stored.pinned.mapValues { CGPoint(x: $0.x, y: $0.y) }
-        groupByRepo = stored.groupByRepo
+        grouping = BoardComposer.Grouping(rawValue: stored.grouping) ?? .stack
         showEndedSessions = stored.showEndedSessions
+        invertScroll = stored.invertScroll
         viewport.center = CGPoint(x: stored.cameraX, y: stored.cameraY)
         viewport.scale = max(Viewport.minScale, min(Viewport.maxScale, stored.scale))
         hasFitInitially = stored.scale > 0
     }
 
+    /// Indexes transcripts and reads git state for the active workspace.
+    private func loadActiveWorkspace() {
+        let files = indexer.transcriptFiles()
+        allSessions = indexer.quickSummaries(files: files).sorted { $0.lastActivityAt > $1.lastActivityAt }
+        reindexLookup()
+        rebuild()
+        startIndexing(files: files)
+        refreshGitStatus()
+    }
+
+    // MARK: - Workspace management
+
+    @discardableResult
+    func createWorkspace(name: String, repos: [WorkspaceRepo]) -> Workspace {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = trimmed.isEmpty ? "Workspace" : trimmed
+        let workspace = Workspace(
+            name: resolved,
+            repos: repos,
+            worktreeRoot: Workspace.defaultWorktreeRoot(for: resolved)
+        )
+        workspaces.append(workspace)
+        activeWorkspaceID = workspace.id
+        persistWorkspaces()
+        hasFitInitially = false
+        loadActiveWorkspace()
+        return workspace
+    }
+
+    func activate(_ id: UUID) {
+        guard id != activeWorkspaceID else { return }
+        activeWorkspaceID = id
+        selection = nil
+        transcript = nil
+        transcriptSessionID = nil
+        worktreesByRepo = [:]
+        hasFitInitially = false
+        persistWorkspaces()
+        loadActiveWorkspace()
+    }
+
+    func deleteWorkspace(_ id: UUID) {
+        // Removes Forge's record only; checkouts on disk are left alone.
+        workspaces.removeAll { $0.id == id }
+        if activeWorkspaceID == id {
+            activeWorkspaceID = workspaces.first?.id
+            worktreesByRepo = [:]
+            hasFitInitially = false
+        }
+        persistWorkspaces()
+        if hasWorkspace { loadActiveWorkspace() } else { sections = []; graph = CanvasGraph() }
+        statusLine = hasWorkspace ? summaryLine() : "No workspace — add one to get started"
+    }
+
+    func renameWorkspace(_ id: UUID, to name: String) {
+        guard let position = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        workspaces[position].name = name
+        persistWorkspaces()
+        rebuild()
+    }
+
+    /// Resolves picked folders into repositories, skipping anything that is not
+    /// a git checkout and anything already in the workspace.
+    func inspectRepos(at paths: [String]) -> (repos: [WorkspaceRepo], rejected: [String]) {
+        var repos: [WorkspaceRepo] = []
+        var rejected: [String] = []
+        var seen = Set<String>()
+        for path in paths {
+            guard let repo = stacks.inspectRepo(at: path) else {
+                rejected.append(URL(fileURLWithPath: path).lastPathComponent)
+                continue
+            }
+            guard seen.insert(repo.id).inserted else { continue }
+            repos.append(repo)
+        }
+        return (repos, rejected)
+    }
+
+    func addRepos(_ repos: [WorkspaceRepo]) {
+        guard var workspace = activeWorkspace else { return }
+        let existing = Set(workspace.repos.map(\.id))
+        let fresh = repos.filter { !existing.contains($0.id) }
+        guard !fresh.isEmpty else {
+            show(.init(kind: .info, title: "Already in this workspace", detail: nil))
+            return
+        }
+        workspace.repos.append(contentsOf: fresh)
+        update(workspace)
+        show(.init(
+            kind: .success,
+            title: "Added \(fresh.count) \(fresh.count == 1 ? "repository" : "repositories")",
+            detail: fresh.map(\.name).joined(separator: ", ")
+        ))
+        refreshGitStatus()
+    }
+
+    func removeRepo(_ repoID: String) {
+        guard var workspace = activeWorkspace else { return }
+        workspace.repos.removeAll { $0.id == repoID }
+        for position in workspace.stacks.indices {
+            workspace.stacks[position].members.removeAll { $0.repoID == repoID }
+        }
+        worktreesByRepo[repoID] = nil
+        update(workspace)
+    }
+
+    /// Clones remotes into the workspace's checkout root and adds them.
+    func cloneRepos(_ references: [String]) {
+        guard let workspace = activeWorkspace else { return }
+        let directory = workspace.worktreeRoot + "/repos"
+        let service = stacks
+        isWorking = true
+        show(.init(kind: .info, title: "Cloning \(references.count)…", detail: nil))
+
+        Task.detached(priority: .userInitiated) {
+            var cloned: [WorkspaceRepo] = []
+            var failures: [String] = []
+            for reference in references {
+                switch service.clone(reference, into: directory) {
+                case .cloned(let repo): cloned.append(repo)
+                case .failed(let message): failures.append("\(reference): \(message)")
+                }
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isWorking = false
+                if !cloned.isEmpty { self.addRepos(cloned) }
+                if !failures.isEmpty {
+                    self.show(.init(
+                        kind: .failure,
+                        title: "\(failures.count) clone\(failures.count == 1 ? "" : "s") failed",
+                        detail: failures.joined(separator: "\n")
+                    ))
+                }
+            }
+        }
+    }
+
+    private func update(_ workspace: Workspace) {
+        guard let position = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
+        workspaces[position] = workspace
+        persistWorkspaces()
+        rebuild()
+    }
+
+    private func persistWorkspaces() {
+        workspaceStore.save(.init(workspaces: workspaces, activeWorkspaceID: activeWorkspaceID))
+    }
+
+    // MARK: - Stacks
+
+    /// Creates the same branch as a worktree in every repo of the workspace.
+    func createStack(name: String, branch: String, baseRef: String?, intent: String?) {
+        guard let workspace = activeWorkspace else { return }
+        let service = stacks
+        isWorking = true
+        show(.init(kind: .info, title: "Creating worktrees in \(workspace.repos.count) repos…", detail: nil))
+
+        Task.detached(priority: .userInitiated) {
+            let outcome = service.createStack(
+                name: name, branch: branch, baseRef: baseRef, intent: intent, in: workspace
+            )
+            await MainActor.run { [weak self] in
+                guard let self, var current = self.activeWorkspace else { return }
+                self.isWorking = false
+                current.stacks.append(outcome.stack)
+                self.update(current)
+
+                let ready = outcome.stack.members.filter(\.isReady).count
+                if outcome.succeeded {
+                    self.show(.init(
+                        kind: .success,
+                        title: "Stack “\(name)” ready in \(ready) \(ready == 1 ? "repo" : "repos")",
+                        detail: outcome.stack.members.first?.path
+                    ))
+                } else {
+                    self.show(.init(
+                        kind: .failure,
+                        title: "Stack “\(name)” created in \(ready) of \(outcome.stack.members.count) repos",
+                        detail: outcome.failures.joined(separator: "\n")
+                    ))
+                }
+                self.refreshGitStatus()
+                self.hasFitInitially = false
+                self.fitIfNeeded()
+            }
+        }
+    }
+
+    func removeStack(_ stackID: UUID, force: Bool, deleteBranch: Bool) {
+        guard let workspace = activeWorkspace,
+              let stack = workspace.stacks.first(where: { $0.id == stackID }) else { return }
+        let service = stacks
+        isWorking = true
+
+        Task.detached(priority: .userInitiated) {
+            let failures = service.removeStack(stack, in: workspace, force: force, deleteBranch: deleteBranch)
+            await MainActor.run { [weak self] in
+                guard let self, var current = self.activeWorkspace else { return }
+                self.isWorking = false
+                if failures.isEmpty {
+                    current.stacks.removeAll { $0.id == stackID }
+                    self.update(current)
+                    self.show(.init(kind: .success, title: "Removed stack “\(stack.name)”", detail: nil))
+                } else {
+                    self.show(.init(
+                        kind: .failure,
+                        title: "Could not remove every worktree",
+                        detail: failures.joined(separator: "\n") + "\n\nUse “force” to discard uncommitted work."
+                    ))
+                }
+                self.refreshGitStatus()
+            }
+        }
+    }
+
+    func stack(for id: UUID?) -> Stack? {
+        guard let id, let workspace = activeWorkspace else { return nil }
+        return workspace.stacks.first { $0.id == id }
+    }
+
+    /// The stack a node belongs to, for the launch sheet and context menus.
+    func stack(containing node: NodeID) -> Stack? {
+        stack(for: graph.node(node)?.stackID)
+    }
+
+    // MARK: - Agents
+
+    func launchAgent(_ request: AgentLaunch) {
+        do {
+            let launched = try launcher.launch(request)
+            show(.init(
+                kind: .success,
+                title: "Launched \(launched.name)",
+                detail: request.runsInBackground
+                    ? "Running in the background — it will appear on the board in a moment."
+                    : "Opened in Terminal."
+            ))
+            // The CLI registers itself within about half a second; poll briefly
+            // so the card shows up without waiting for the next tick.
+            Task {
+                for _ in 0..<12 {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    refreshLive()
+                    if live[launched.sessionID] != nil { break }
+                }
+            }
+        } catch {
+            show(.init(
+                kind: .failure,
+                title: "Could not launch the agent",
+                detail: error.localizedDescription
+            ))
+        }
+    }
+
+    /// Prefilled launch request for a node, carrying the stack's sibling repos
+    /// so one agent can work across all of them.
+    func launchTemplate(for node: NodeID?) -> AgentLaunch {
+        var request = AgentLaunch()
+        guard let workspace = activeWorkspace else { return request }
+
+        if let node, let stack = stack(containing: node) {
+            let ready = stack.members.filter(\.isReady)
+            request.cwd = (node.worktreePath.flatMap { path in
+                ready.first { $0.path == path }?.path
+            }) ?? ready.first?.path ?? workspace.repos.first?.path ?? ""
+            request.additionalDirs = ready.map(\.path)
+            request.stackSummary = AgentLauncher.stackSummary(stack: stack, workspace: workspace)
+            request.name = ""
+        } else if let path = node?.worktreePath {
+            request.cwd = path
+            request.additionalDirs = [path]
+        } else if let newest = workspace.stacks.max(by: { $0.createdAt < $1.createdAt }) {
+            let ready = newest.members.filter(\.isReady)
+            request.cwd = ready.first?.path ?? ""
+            request.additionalDirs = ready.map(\.path)
+            request.stackSummary = AgentLauncher.stackSummary(stack: newest, workspace: workspace)
+        } else {
+            request.cwd = workspace.repos.first?.path ?? ""
+            request.additionalDirs = workspace.repos.map(\.path)
+        }
+        return request
+    }
+
     // MARK: - Indexing
 
     /// `quiet` suppresses the progress text. Live sessions append constantly, so
-    /// the follow-up passes must not strobe the status line.
+    /// follow-up passes must not strobe the status line.
     private func startIndexing(files: [URL], quiet: Bool = false) {
         isIndexing = true
         if !quiet { statusLine = "Indexing \(files.count) transcripts…" }
@@ -101,98 +413,89 @@ final class ForgeStore {
 
         Task.detached(priority: .userInitiated) {
             indexer.index(files: files) { batch in
-                Task { @MainActor [weak self] in
-                    self?.merge(batch)
-                }
+                Task { @MainActor [weak self] in self?.merge(batch) }
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isIndexing = false
                 self.rebuild()
+                self.fitIfNeeded()
                 self.statusLine = self.summaryLine()
             }
         }
     }
 
     private func merge(_ batch: [SessionSummary]) {
-        var touched = false
         for summary in batch {
             if let position = sessionIndexByID[summary.id] {
-                sessions[position] = summary
+                allSessions[position] = summary
             } else {
-                sessions.append(summary)
-                sessionIndexByID[summary.id] = sessions.count - 1
+                allSessions.append(summary)
+                sessionIndexByID[summary.id] = allSessions.count - 1
             }
-            touched = true
         }
-        guard touched else { return }
-        // Cheap in-place refresh of node payloads; full relayout waits for the
-        // end of the pass so cards do not jump around while indexing.
+        guard !batch.isEmpty else { return }
         rebuild()
     }
 
     private func reindexLookup() {
         sessionIndexByID = Dictionary(
-            sessions.enumerated().map { ($0.element.id, $0.offset) },
+            allSessions.enumerated().map { ($0.element.id, $0.offset) },
             uniquingKeysWith: { _, last in last }
         )
     }
 
+    private func reindexChangedTranscripts() {
+        guard hasWorkspace, !isIndexing else { return }
+        startIndexing(files: indexer.transcriptFiles(), quiet: true)
+    }
+
+    func refreshAll() {
+        guard hasWorkspace else { return }
+        statusLine = "Refreshing…"
+        refreshLive(rebuildGraph: false)
+        startIndexing(files: indexer.transcriptFiles())
+        refreshGitStatus()
+    }
+
     // MARK: - Git
 
-    private func startGitDiscovery() {
-        isLoadingGit = true
-        let candidates = gitCandidatePaths()
-        let git = self.git
-
-        Task.detached(priority: .utility) {
-            let discovered = git.discoverRepos(candidates: candidates)
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.repos = discovered
-                self.rebuild()
-                self.fitIfNeeded()
-                self.statusLine = self.summaryLine()
-            }
-            await self.enrich(repos: discovered, relist: false)
-        }
-    }
-
     func refreshGitStatus() {
-        guard !isLoadingGit else { return }
+        guard let workspace = activeWorkspace, !isLoadingGit else { return }
         isLoadingGit = true
-        let snapshot = repos
+        let repos = workspace.repos
+
         Task.detached(priority: .utility) { [weak self] in
-            await self?.enrich(repos: snapshot, relist: true)
+            await self?.readGitState(for: repos)
         }
     }
 
-    /// Fills in dirty counts, divergence and tip commits.
-    ///
-    /// This is by far the slowest refresh — several `git` invocations per
-    /// worktree, and a busy machine can have fifty of them — so repos run in
-    /// bounded parallel waves and the board updates as each one lands rather
-    /// than waiting for the whole sweep.
-    private nonisolated func enrich(repos snapshot: [Repo], relist: Bool) async {
+    /// Lists each repo's worktrees, then fills in dirty counts, divergence and
+    /// tip commits. This is by far the slowest refresh — several `git`
+    /// invocations per worktree — so repos run in bounded parallel waves and the
+    /// board updates as each one lands.
+    private nonisolated func readGitState(for repos: [WorkspaceRepo]) async {
         let git = GitService()
-        let waveSize = 6
+        let waveSize = 4
         var index = 0
 
-        while index < snapshot.count {
-            let wave = Array(snapshot[index..<min(index + waveSize, snapshot.count)])
+        while index < repos.count {
+            let wave = Array(repos[index..<min(index + waveSize, repos.count)])
             index += waveSize
 
-            await withTaskGroup(of: Repo.self) { group in
+            await withTaskGroup(of: (String, [Worktree]).self) { group in
                 for repo in wave {
                     group.addTask {
-                        var updated = repo
-                        let worktrees = relist ? git.listWorktrees(cwd: repo.mainPath) : repo.worktrees
-                        updated.worktrees = worktrees.map(git.status(for:))
-                        return updated
+                        let listed = git.listWorktrees(cwd: repo.path)
+                        return (repo.id, listed.map(git.status(for:)))
                     }
                 }
-                for await updated in group {
-                    await MainActor.run { [weak self] in self?.apply(updated) }
+                for await (repoID, worktrees) in group {
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        self.worktreesByRepo[repoID] = worktrees
+                        self.rebuild()
+                    }
                 }
             }
         }
@@ -200,33 +503,9 @@ final class ForgeStore {
         await MainActor.run { [weak self] in
             guard let self else { return }
             self.isLoadingGit = false
+            self.fitIfNeeded()
             self.statusLine = self.summaryLine()
         }
-    }
-
-    /// Merges one repo's freshly read git state into the board.
-    private func apply(_ repo: Repo) {
-        guard !repo.worktrees.isEmpty,
-              let position = repos.firstIndex(where: { $0.id == repo.id }) else { return }
-        repos[position] = repo
-        rebuild()
-    }
-
-    /// Any directory that might sit inside a repository. `git worktree list`
-    /// expands one hit into every linked worktree, so this does not need to be
-    /// exhaustive — just one path per repo.
-    private func gitCandidatePaths() -> [String] {
-        var candidates = Set<String>()
-        for session in sessions {
-            let path = session.resolvedPath
-            if FileManager.default.fileExists(atPath: path) { candidates.insert(path) }
-        }
-        for session in live.values {
-            if let cwd = session.cwd, FileManager.default.fileExists(atPath: cwd) { candidates.insert(cwd) }
-        }
-        // Repos you have not opened with Claude yet still belong on the board.
-        candidates.formUnion(scanner.candidateDirectories())
-        return Array(candidates)
     }
 
     // MARK: - Live sessions
@@ -251,16 +530,10 @@ final class ForgeStore {
     private func startWatching() {
         let home = NSHomeDirectory()
         watchers = [
-            DirectoryWatcher(
-                paths: [home + "/.claude/sessions"],
-                debounce: 0.3
-            ) { [weak self] in
+            DirectoryWatcher(paths: [home + "/.claude/sessions"], debounce: 0.3) { [weak self] in
                 Task { @MainActor in self?.refreshLive() }
             },
-            DirectoryWatcher(
-                paths: [home + "/.claude/projects"],
-                debounce: 1.5
-            ) { [weak self] in
+            DirectoryWatcher(paths: [home + "/.claude/projects"], debounce: 1.5) { [weak self] in
                 Task { @MainActor in self?.reindexChangedTranscripts() }
             }
         ]
@@ -275,49 +548,41 @@ final class ForgeStore {
         }
     }
 
-    /// Re-runs the indexer. Unchanged files hit the cache and growing files only
-    /// scan their appended bytes, so this stays cheap enough to run on every
-    /// burst of transcript writes.
-    private func reindexChangedTranscripts() {
-        guard !isIndexing else { return }
-        let files = indexer.transcriptFiles()
-        let known = Set(sessions.map(\.id))
-        let discovered = files.map { $0.deletingPathExtension().lastPathComponent }
-        let hasNewSessions = !Set(discovered).subtracting(known).isEmpty
-        startIndexing(files: files, quiet: true)
-        if hasNewSessions { hasFitInitially = hasFitInitially && !pinned.isEmpty }
-    }
-
-    func refreshAll() {
-        statusLine = "Refreshing…"
-        refreshLive(rebuildGraph: false)
-        startIndexing(files: indexer.transcriptFiles())
-        refreshGitStatus()
-    }
-
     // MARK: - Graph
 
     private func rebuild() {
-        let statuses = Dictionary(
-            uniqueKeysWithValues: sessions.map { ($0.id, live[$0.id]?.status ?? .ended) }
-        )
-        let visible = showEndedSessions
-            ? sessions
-            : sessions.filter { statuses[$0.id]?.isLive == true }
+        guard let workspace = activeWorkspace else {
+            sections = []
+            graph = CanvasGraph()
+            return
+        }
 
-        let assembled = assembler.assemble(repos: repos, sessions: visible)
-        boardRepos = assembled.repos
+        let statuses = Dictionary(
+            uniqueKeysWithValues: allSessions.map { ($0.id, live[$0.id]?.status ?? .ended) }
+        )
+
+        // Scope to this workspace: only sessions that ran somewhere under one of
+        // its repositories, including worktrees that have since been removed.
+        let scope = WorkspaceScope(workspace: workspace, worktreesByRepo: worktreesByRepo)
+        var visible = allSessions.filter { scope.contains($0.resolvedPath) }
+        if !showEndedSessions {
+            visible = visible.filter { statuses[$0.id]?.isLive == true }
+        }
+
+        sections = composer.compose(.init(
+            workspace: workspace,
+            worktreesByRepo: worktreesByRepo,
+            sessions: visible,
+            grouping: grouping
+        ))
 
         graph = BoardLayout().build(.init(
-            repos: assembled.repos,
-            sessions: visible,
-            attachment: assembled.attachment,
-            unattached: assembled.unattached,
+            sections: sections,
             statuses: statuses,
             live: live,
-            pinned: pinned,
-            groupByRepo: groupByRepo
+            pinned: pinned
         ))
+
         recomputeMatches()
         if let selection, graph.node(selection) == nil { self.selection = nil }
     }
@@ -338,13 +603,30 @@ final class ForgeStore {
     func matches(_ id: NodeID) -> Bool { matchingNodes.contains(id.storageKey) }
 
     private func summaryLine() -> String {
-        let liveCount = live.count
+        guard let workspace = activeWorkspace else { return "No workspace — add one to get started" }
+        let worktrees = worktreesByRepo.values.reduce(0) { $0 + $1.count }
+        let sessionCount = sections.reduce(0) { $0 + $1.sessionCount }
         let busy = live.values.filter { $0.status == .busy }.count
-        let worktreeCount = repos.reduce(0) { $0 + $1.worktrees.count }
-        var parts = ["\(sessions.count) sessions", "\(repos.count) repos", "\(worktreeCount) worktrees"]
-        if liveCount > 0 { parts.append("\(liveCount) live" + (busy > 0 ? " · \(busy) working" : "")) }
+        var parts = [
+            "\(workspace.repos.count) \(workspace.repos.count == 1 ? "repo" : "repos")",
+            "\(workspace.stacks.count) \(workspace.stacks.count == 1 ? "stack" : "stacks")",
+            "\(worktrees) worktrees",
+            "\(sessionCount) sessions"
+        ]
+        if busy > 0 { parts.append("\(busy) working") }
         return parts.joined(separator: "  ·  ")
     }
+
+    func show(_ banner: Banner) {
+        self.banner = banner
+        let id = banner.id
+        Task {
+            try? await Task.sleep(for: .seconds(banner.kind == .failure ? 12 : 4))
+            if self.banner?.id == id { self.banner = nil }
+        }
+    }
+
+    func dismissBanner() { banner = nil }
 
     // MARK: - Interaction
 
@@ -355,15 +637,13 @@ final class ForgeStore {
     }
 
     func moveNode(_ id: NodeID, to position: CGPoint) {
-        guard let position0 = graph.nodes.firstIndex(where: { $0.id == id }) else { return }
-        graph.nodes[position0].position = position
-        graph.nodes[position0].isPinned = true
+        guard let index = graph.nodes.firstIndex(where: { $0.id == id }) else { return }
+        graph.nodes[index].position = position
+        graph.nodes[index].isPinned = true
         pinned[id.storageKey] = position
     }
 
-    func commitMove() {
-        persistLayout()
-    }
+    func commitMove() { persistLayout() }
 
     func resetLayout() {
         pinned.removeAll()
@@ -377,8 +657,9 @@ final class ForgeStore {
         saved.cameraX = viewport.center.x
         saved.cameraY = viewport.center.y
         saved.scale = viewport.scale
-        saved.groupByRepo = groupByRepo
+        saved.grouping = grouping.rawValue
         saved.showEndedSessions = showEndedSessions
+        saved.invertScroll = invertScroll
         layoutStore.save(saved)
     }
 
@@ -409,11 +690,8 @@ final class ForgeStore {
         persistLayout()
     }
 
-    /// Frames the current search hits, or everything when the query is empty.
     func focusMatches() {
-        let targets = isSearching
-            ? graph.nodes.filter { matches($0.id) }
-            : graph.nodes
+        let targets = isSearching ? graph.nodes.filter { matches($0.id) } : graph.nodes
         guard let rect = CGRect.bounding(targets.map(\.frame)) else { return }
         withAnimation(.easeOut(duration: 0.25)) { viewport.fit(rect, margin: 140) }
         persistLayout()
@@ -433,7 +711,7 @@ final class ForgeStore {
 
     private func loadTranscript(_ sessionID: String) {
         guard transcriptSessionID != sessionID else { return }
-        guard let summary = sessions.first(where: { $0.id == sessionID }) else { return }
+        guard let summary = allSessions.first(where: { $0.id == sessionID }) else { return }
         transcriptSessionID = sessionID
         transcript = nil
         isLoadingTranscript = true
@@ -462,25 +740,19 @@ final class ForgeStore {
     }
 
     func openInTerminal(_ path: String) {
-        let escaped = path.replacingOccurrences(of: "\"", with: "\\\"")
-        let script = """
+        runAppleScript("""
         tell application "Terminal"
             activate
-            do script "cd \\"\(escaped)\\""
+            do script "cd \(AgentLauncher.appleScriptEscape(AgentLauncher.shellQuote(path)))"
         end tell
-        """
-        guard let appleScript = NSAppleScript(source: script) else { return }
-        var error: NSDictionary?
-        appleScript.executeAndReturnError(&error)
+        """)
     }
 
     func openInEditor(_ path: String) {
-        // Falls back to whatever the user has associated with the folder.
         let url = URL(fileURLWithPath: path)
         for bundleID in ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "com.apple.dt.Xcode"] {
             if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-                let config = NSWorkspace.OpenConfiguration()
-                NSWorkspace.shared.open([url], withApplicationAt: app, configuration: config)
+                NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
                 return
             }
         }
@@ -493,22 +765,59 @@ final class ForgeStore {
     }
 
     func revealTranscriptFile(_ summary: SessionSummary) {
-        NSWorkspace.shared.selectFile(summary.fileURL.path, inFileViewerRootedAtPath: summary.fileURL.deletingLastPathComponent().path)
+        NSWorkspace.shared.selectFile(
+            summary.fileURL.path,
+            inFileViewerRootedAtPath: summary.fileURL.deletingLastPathComponent().path
+        )
     }
 
-    /// Resumes a session in Terminal with `claude --resume <id>` in its own cwd.
     func resumeSession(_ summary: SessionSummary) {
         let path = summary.resolvedPath
-        guard FileManager.default.fileExists(atPath: path) else { return }
-        let escapedPath = path.replacingOccurrences(of: "\"", with: "\\\"")
-        let script = """
+        guard FileManager.default.fileExists(atPath: path) else {
+            show(.init(kind: .failure, title: "That folder no longer exists", detail: path))
+            return
+        }
+        let command = "cd \(AgentLauncher.shellQuote(path)) && claude --resume \(summary.id)"
+        runAppleScript("""
         tell application "Terminal"
             activate
-            do script "cd \\"\(escapedPath)\\" && claude --resume \(summary.id)"
+            do script "\(AgentLauncher.appleScriptEscape(command))"
         end tell
-        """
-        guard let appleScript = NSAppleScript(source: script) else { return }
+        """)
+    }
+
+    private func runAppleScript(_ source: String) {
+        guard let script = NSAppleScript(source: source) else { return }
         var error: NSDictionary?
-        appleScript.executeAndReturnError(&error)
+        script.executeAndReturnError(&error)
+        if let error, let message = error[NSAppleScript.errorMessage] as? String {
+            show(.init(kind: .failure, title: "Terminal did not open", detail: message))
+        }
+    }
+}
+
+/// Tests whether a path belongs to a workspace.
+///
+/// Matches live worktrees first, then falls back to the repo and stack paths on
+/// record — so a session whose checkout has since been deleted still lands in
+/// the workspace it was run from.
+private struct WorkspaceScope {
+    private let index: PathIndex
+
+    init(workspace: Workspace, worktreesByRepo: [String: [Worktree]]) {
+        var paths = worktreesByRepo.values.flatMap { $0.map(\.path) }
+        paths.append(contentsOf: workspace.repos.map(\.path))
+        paths.append(contentsOf: workspace.stacks.flatMap(\.paths))
+        paths.append(workspace.worktreeRoot)
+        index = PathIndex(paths: paths)
+    }
+
+    func contains(_ path: String) -> Bool { index.owner(of: path) != nil }
+}
+
+extension NodeID {
+    var worktreePath: String? {
+        if case .worktree(let path) = self { return path }
+        return nil
     }
 }
