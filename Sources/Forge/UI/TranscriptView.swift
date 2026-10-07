@@ -1,0 +1,196 @@
+import SwiftUI
+
+/// Reader for one transcript. Tool calls, results and thinking blocks start
+/// collapsed so the conversation stays legible; expand what you need.
+struct TranscriptView: View {
+    var transcript: Transcript
+    @Environment(\.forgeSnapshotMode) private var isSnapshot
+    @State private var expanded: Set<String> = []
+    @State private var hiddenKinds: Set<String> = ["tool"]
+
+    private var filtered: [TranscriptEvent] {
+        transcript.events.filter { event in
+            switch event.kind {
+            case .toolUse, .toolResult: return !hiddenKinds.contains("tool")
+            case .thinking: return !hiddenKinds.contains("thinking")
+            case .system, .attachment: return !hiddenKinds.contains("system")
+            default: return true
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            filterBar
+            Divider().overlay(Theme.hairline)
+            ScrollableStack(alignment: .leading) {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if transcript.truncated {
+                        Text("Showing the most recent \(TranscriptLoader.maxEvents.formatted()) events.")
+                            .font(Theme.ui(10.5))
+                            .foregroundStyle(Theme.textTertiary)
+                            .padding(.bottom, 4)
+                    }
+                    ForEach(isSnapshot ? Array(filtered.prefix(12)) : filtered) { event in
+                        EventRow(
+                            event: event,
+                            isExpanded: expanded.contains(event.id) || !event.startsCollapsed,
+                            toggle: {
+                                if expanded.contains(event.id) { expanded.remove(event.id) }
+                                else { expanded.insert(event.id) }
+                            }
+                        )
+                    }
+                    if filtered.isEmpty {
+                        Text("Nothing to show with the current filters.")
+                            .font(Theme.ui(11))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private var filterBar: some View {
+        HStack(spacing: 6) {
+            toggle("Tools", key: "tool", count: transcript.toolUseCounts.values.reduce(0, +))
+            toggle("Thinking", key: "thinking", count: transcript.events.filter { $0.kind == .thinking }.count)
+            toggle("System", key: "system", count: transcript.events.filter {
+                if case .system = $0.kind { return true }
+                if case .attachment = $0.kind { return true }
+                return false
+            }.count)
+            Spacer(minLength: 0)
+            Text("\(filtered.count) events")
+                .font(Theme.mono(9.5))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+    }
+
+    private func toggle(_ label: String, key: String, count: Int) -> some View {
+        let isOn = !hiddenKinds.contains(key)
+        return Button {
+            if isOn { hiddenKinds.insert(key) } else { hiddenKinds.remove(key) }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                    .font(Theme.ui(9))
+                Text(label).font(Theme.ui(10.5, .medium))
+                if count > 0 {
+                    Text("\(count)").font(Theme.mono(9)).foregroundStyle(Theme.textTertiary)
+                }
+            }
+            .foregroundStyle(isOn ? Theme.textSecondary : Theme.textTertiary)
+        }
+        .buttonStyle(.plain)
+        .disabled(count == 0)
+    }
+}
+
+private struct EventRow: View {
+    var event: TranscriptEvent
+    var isExpanded: Bool
+    var toggle: () -> Void
+
+    private var tint: Color {
+        switch event.kind {
+        case .userMessage: return Theme.accent
+        case .assistantMessage: return Theme.textPrimary
+        case .thinking: return Theme.sidechain
+        case .toolUse: return Theme.worktree
+        case .toolResult(let ok): return ok ? Theme.clean : Theme.dirty
+        case .system: return Theme.textTertiary
+        case .attachment: return Theme.textTertiary
+        }
+    }
+
+    private var icon: String {
+        switch event.kind {
+        case .userMessage: return "person.fill"
+        case .assistantMessage: return "sparkle"
+        case .thinking: return "brain"
+        case .toolUse: return "wrench.and.screwdriver.fill"
+        case .toolResult(let ok): return ok ? "arrow.turn.down.right" : "exclamationmark.triangle.fill"
+        case .system: return "gearshape"
+        case .attachment: return "paperclip"
+        }
+    }
+
+    private var isMonospaced: Bool {
+        switch event.kind {
+        case .toolUse, .toolResult, .system: return true
+        default: return false
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button(action: toggle) {
+                HStack(spacing: 5) {
+                    Image(systemName: icon)
+                        .font(Theme.ui(9, .semibold))
+                        .foregroundStyle(tint)
+                        .frame(width: 13)
+                    Text(event.kind.label)
+                        .font(Theme.ui(10.5, .semibold))
+                        .foregroundStyle(tint)
+                    if let model = Format.model(event.model), case .assistantMessage = event.kind {
+                        Text(model)
+                            .font(Theme.ui(9.5))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    Spacer(minLength: 0)
+                    if let timestamp = event.timestamp {
+                        Text(timestamp, format: .dateTime.hour().minute().second())
+                            .font(Theme.mono(9))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    if event.startsCollapsed {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(Theme.ui(8, .bold))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!event.startsCollapsed)
+
+            if isExpanded {
+                Text(event.text)
+                    .font(isMonospaced ? Theme.mono(10.5) : Theme.ui(11.5))
+                    .foregroundStyle(event.kind == .thinking ? Theme.textSecondary : Theme.textPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(event.text.prefix(140).replacingOccurrences(of: "\n", with: " "))
+                    .font(Theme.mono(10))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(backgroundTint)
+        )
+        .overlay(alignment: .leading) {
+            if case .userMessage = event.kind {
+                Rectangle().fill(Theme.accent).frame(width: 2)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var backgroundTint: Color {
+        switch event.kind {
+        case .userMessage: return Theme.accent.opacity(0.07)
+        case .assistantMessage: return Theme.surface
+        default: return Theme.surfaceSunken
+        }
+    }
+}
