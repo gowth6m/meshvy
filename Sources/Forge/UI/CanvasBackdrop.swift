@@ -137,9 +137,9 @@ struct CanvasBackdrop: View {
         }
     }
 
-    /// How a container is drawn, per section kind.
+    /// How the workspace container is drawn.
     private struct GroupStyle {
-        var tint: Color
+        var tint: SwiftUI.Color
         var fillOpacity: Double
         var strokeOpacity: Double
         var lineWidth: CGFloat
@@ -147,43 +147,12 @@ struct CanvasBackdrop: View {
         var badge: String?
 
         init(kind: GroupKind, seed: String) {
-            switch kind {
-            case .link:
-                tint = Theme.repoTint(seed)
-                fillOpacity = 0.07
-                strokeOpacity = 0.45
-                lineWidth = 1.4
-                isDashed = false
-                badge = "square.link.3d.up.fill"
-            case .main:
-                tint = Theme.worktree
-                fillOpacity = 0.045
-                strokeOpacity = 0.3
-                lineWidth = 1
-                isDashed = false
-                badge = "shippingbox.fill"
-            case .repo:
-                tint = Theme.repoTint(seed)
-                fillOpacity = 0.045
-                strokeOpacity = 0.26
-                lineWidth = 1
-                isDashed = false
-                badge = nil
-            case .other:
-                tint = Theme.textSecondary
-                fillOpacity = 0.03
-                strokeOpacity = 0.2
-                lineWidth = 1
-                isDashed = false
-                badge = nil
-            case .archived:
-                tint = Theme.ended
-                fillOpacity = 0.025
-                strokeOpacity = 0.3
-                lineWidth = 1
-                isDashed = true
-                badge = "archivebox"
-            }
+            tint = Theme.repoTint(seed)
+            fillOpacity = 0.06
+            strokeOpacity = 0.4
+            lineWidth = 1.4
+            isDashed = false
+            badge = "rectangle.3.group.fill"
         }
     }
 
@@ -244,7 +213,9 @@ struct CanvasBackdrop: View {
                 control1: CGPoint(x: start.x - dx * 0.9, y: start.y),
                 control2: CGPoint(x: end.x + dx * 0.9, y: end.y)
             )
-            if edge.isLive { active.addPath(path) } else { idle.addPath(path) }
+            // A terminal's ownership of a checkout is drawn in the accent so
+            // the parent/child shape of the workspace is readable at a glance.
+            if edge.kind == .owns || edge.isLive { active.addPath(path) } else { idle.addPath(path) }
         }
 
         context.stroke(
@@ -269,7 +240,7 @@ struct CanvasBackdrop: View {
             let path = Path(roundedRect: rect, cornerRadius: corner, style: .continuous)
             let dimmed = isSearching && !matching.contains(node.id.storageKey)
 
-            let (fill, accent): (Color, Color) = {
+            let (fill, accent): (SwiftUI.Color, SwiftUI.Color) = {
                 switch node.kind {
                 case .session(let summary, let status, _):
                     switch status {
@@ -279,6 +250,10 @@ struct CanvasBackdrop: View {
                     }
                 case .worktree(let worktree):
                     return (Theme.surfaceSunken, worktree.isDirty ? Theme.dirty : Theme.worktree)
+                case .terminal:
+                    // Terminals keep their own live view at every zoom; the
+                    // block layer never needs to stand in for one.
+                    return (Theme.canvasDeep, Theme.accent)
                 }
             }()
 

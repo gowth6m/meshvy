@@ -1,192 +1,181 @@
+import CoreGraphics
 import Foundation
 
-/// Decides what goes on the board and how it is grouped.
+/// Decides what goes on the board for one workspace.
 ///
-/// The layout engine only positions sections and lanes; everything about what a
-/// section *means* — a link, a repo's main checkout, history whose directory is
-/// gone — is decided here.
+/// A workspace is the parent: its repositories are lanes beneath it, and
+/// terminal nodes float freely where the user drops them. An orchestrator
+/// terminal draws an edge to every repository so the parent/child shape the
+/// workspace actually has is visible.
 struct BoardComposer {
-    enum Grouping: String, Codable, CaseIterable, Hashable {
-        /// Group by link: one section per linked branch spanning repos.
-        case link
-        /// Group by repository, with its worktrees as lanes.
-        case repo
-
-        var label: String {
-            switch self {
-            case .link: return "Linked worktrees"
-            case .repo: return "Repositories"
-            }
-        }
-
-        var icon: String {
-            switch self {
-            case .link: return "link"
-            case .repo: return "shippingbox"
-            }
-        }
-    }
-
     struct Input {
         var workspace: Workspace
-        /// Live git state for the workspace's repos, keyed by repo id.
-        var worktreesByRepo: [String: [Worktree]]
+        /// Live git state keyed by the worktree path.
+        var worktrees: [String: Worktree]
         var sessions: [SessionSummary]
-        var grouping: Grouping
+        var statuses: [String: SessionStatus]
+        var live: [String: LiveSession]
+        var pinned: [String: CGPoint]
+        /// Sessions already represented by a terminal node, so we do not draw
+        /// a duplicate card for them.
+        var claimedSessions: Set<String>
+        var showEnded: Bool
     }
 
-    func compose(_ input: Input) -> [BoardSection] {
-        let allWorktrees = input.worktreesByRepo.values.flatMap { $0 }
-        let index = PathIndex(paths: allWorktrees.map(\.path))
+    private var gap: CGFloat { 20 }
+    private var padding: CGFloat { 26 }
+    private var headerHeight: CGFloat { 10 }
+    private var sessionsPerLane: Int { 4 }
 
-        // Attach every session to the checkout it ran in.
-        var byPath: [String: [SessionSummary]] = [:]
-        var orphans: [SessionSummary] = []
+    func compose(_ input: Input) -> CanvasGraph {
+        var graph = CanvasGraph()
+        let workspace = input.workspace
+
+        // Attach sessions to the checkout they ran in.
+        let index = PathIndex(paths: workspace.repos.map(\.worktreePath))
+        var byRepo: [String: [SessionSummary]] = [:]
         for session in input.sessions {
-            if let path = index.owner(of: session.resolvedPath) {
-                byPath[path, default: []].append(session)
-            } else {
-                orphans.append(session)
-            }
+            guard !input.claimedSessions.contains(session.id) else { continue }
+            let status = input.statuses[session.id] ?? .ended
+            guard input.showEnded || status.isLive else { continue }
+            guard let path = index.owner(of: session.resolvedPath) else { continue }
+            byRepo[path, default: []].append(session)
         }
 
-        var sections = input.grouping == .link
-            ? linkSections(input, worktrees: allWorktrees, sessions: byPath)
-            : repoSections(input, sessions: byPath)
+        // One lane per repository.
+        var nodes: [CanvasNode] = []
+        var edges: [CanvasEdge] = []
+        var y = headerHeight + padding
+        var widestLane: CGFloat = Theme.worktreeNodeSize.width
 
-        if !orphans.isEmpty {
-            sections.append(BoardSection(
-                id: "forge.archived",
-                kind: .archived,
-                title: "Archived",
-                subtitle: "Sessions whose checkout is gone",
-                seed: "archived",
-                lanes: [BoardLane(worktree: nil, sessions: orphans)]
-            ))
-        }
-        return sections
-    }
-
-    // MARK: - Grouped by link
-
-    private func linkSections(
-        _ input: Input, worktrees: [Worktree], sessions: [String: [SessionSummary]]
-    ) -> [BoardSection] {
-        var claimed = Set<String>()
-        var sections: [BoardSection] = []
-
-        for link in input.workspace.linkedWorktrees.sorted(by: { $0.createdAt > $1.createdAt }) {
-            var lanes: [BoardLane] = []
-            for checkout in link.checkouts {
-                claimed.insert(checkout.path)
-                let existing = worktrees.first { $0.path == checkout.path }
-                let worktree = existing ?? Worktree(
-                    path: checkout.path,
-                    branch: link.branch,
-                    head: nil,
-                    isMain: false,
-                    isDetached: false,
-                    isLocked: false,
-                    // A checkout whose `git worktree add` failed, or that has since
-                    // been removed on disk, still earns a card saying so.
-                    isPrunable: checkout.failure != nil,
-                    isArchived: !FileManager.default.fileExists(atPath: checkout.path),
-                    displayName: checkout.repoName
-                )
-                lanes.append(BoardLane(worktree: worktree, sessions: sessions[checkout.path] ?? []))
-            }
-            sections.append(BoardSection(
-                id: "link." + link.id.uuidString,
-                kind: .link,
-                title: link.name,
-                subtitle: link.intent ?? link.branch,
-                seed: link.branch,
-                lanes: lanes,
-                linkID: link.id,
-                branch: link.branch
-            ))
-        }
-
-        // The repos themselves, so the workspace is visible before any link exists.
-        var mainLanes: [BoardLane] = []
-        var otherLanes: [BoardLane] = []
-        for repo in input.workspace.repos {
-            for worktree in input.worktreesByRepo[repo.id] ?? [] {
-                guard !claimed.contains(worktree.path) else { continue }
-                let lane = BoardLane(worktree: worktree, sessions: sessions[worktree.path] ?? [])
-                if worktree.isMain { mainLanes.append(lane) } else { otherLanes.append(lane) }
-            }
-        }
-
-        if !mainLanes.isEmpty {
-            sections.insert(BoardSection(
-                id: "forge.main",
-                kind: .main,
-                title: input.workspace.name,
-                subtitle: "\(mainLanes.count) repositories",
-                seed: input.workspace.id.uuidString,
-                lanes: mainLanes
-            ), at: 0)
-        }
-        if !otherLanes.isEmpty {
-            sections.append(BoardSection(
-                id: "forge.other",
-                kind: .other,
-                title: "Other worktrees",
-                subtitle: "Not part of a link",
-                seed: "other",
-                lanes: otherLanes.sorted { ($0.worktree?.name ?? "") < ($1.worktree?.name ?? "") }
-            ))
-        }
-        return sections
-    }
-
-    // MARK: - Grouped by repository
-
-    private func repoSections(_ input: Input, sessions: [String: [SessionSummary]]) -> [BoardSection] {
-        input.workspace.repos.map { repo in
-            let worktrees = (input.worktreesByRepo[repo.id] ?? []).sorted { lhs, rhs in
-                if lhs.isMain != rhs.isMain { return lhs.isMain }
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
-            return BoardSection(
-                id: "repo." + repo.id,
-                kind: .repo,
-                title: repo.name,
-                subtitle: repo.path,
-                seed: repo.id,
-                lanes: worktrees.map { BoardLane(worktree: $0, sessions: sessions[$0.path] ?? []) }
+        for repo in workspace.repos {
+            let worktree = input.worktrees[repo.worktreePath] ?? Worktree(
+                path: repo.worktreePath,
+                branch: workspace.branch,
+                head: nil,
+                isMain: false,
+                isDetached: false,
+                isLocked: false,
+                isPrunable: repo.failure != nil,
+                isArchived: !FileManager.default.fileExists(atPath: repo.worktreePath),
+                displayName: repo.name,
+                failureReason: repo.failure
             )
+            let nodeID = NodeID.worktree(repo.worktreePath)
+            nodes.append(CanvasNode(
+                id: nodeID,
+                kind: .worktree(worktree),
+                position: CGPoint(x: padding, y: y),
+                size: Theme.worktreeNodeSize,
+                sectionID: "workspace",
+                repoID: repo.id
+            ))
+
+            let sessions = (byRepo[repo.worktreePath] ?? []).sorted { $0.lastActivityAt > $1.lastActivityAt }
+            var laneHeight = Theme.worktreeNodeSize.height
+            let originX = padding + Theme.worktreeNodeSize.width + gap
+
+            for (position, session) in sessions.enumerated() {
+                let row = position / sessionsPerLane
+                let column = position % sessionsPerLane
+                let status = input.statuses[session.id] ?? .ended
+                nodes.append(CanvasNode(
+                    id: .session(session.id),
+                    kind: .session(session, status: status, live: input.live[session.id]),
+                    position: CGPoint(
+                        x: originX + CGFloat(column) * (Theme.sessionNodeSize.width + gap),
+                        y: y + CGFloat(row) * (Theme.sessionNodeSize.height + gap)
+                    ),
+                    size: Theme.sessionNodeSize,
+                    sectionID: "workspace",
+                    repoID: repo.id
+                ))
+                edges.append(CanvasEdge(from: .session(session.id), to: nodeID, isLive: status.isLive))
+                laneHeight = max(laneHeight, CGFloat(row + 1) * (Theme.sessionNodeSize.height + gap) - gap)
+                widestLane = max(
+                    widestLane,
+                    Theme.worktreeNodeSize.width + gap
+                        + CGFloat(min(sessions.count, sessionsPerLane)) * (Theme.sessionNodeSize.width + gap) - gap
+                )
+            }
+            y += laneHeight + gap
+        }
+
+        let sectionSize = CGSize(
+            width: widestLane + padding * 2,
+            height: max(y - gap + padding, Theme.worktreeNodeSize.height + padding * 2 + headerHeight)
+        )
+        graph.groups.append(CanvasGroup(
+            id: "workspace",
+            kind: .workspace,
+            title: workspace.name,
+            subtitle: workspace.branch + "  ·  " + workspace.root.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
+            rect: CGRect(origin: .zero, size: sectionSize),
+            seed: workspace.branch
+        ))
+        graph.nodes = nodes
+        graph.edges = edges
+
+        // Terminals float where they were dropped; a fresh one is parked to the
+        // right of the workspace so it never lands on top of the repositories.
+        var terminalOrigin = CGPoint(x: sectionSize.width + 70, y: 0)
+        for terminal in workspace.terminals {
+            var position = terminal.position
+            if position == .zero {
+                position = terminalOrigin
+                terminalOrigin.y += terminal.size.height + 28
+            }
+            graph.nodes.append(CanvasNode(
+                id: .terminal(terminal.id),
+                kind: .terminal(terminal),
+                position: position,
+                size: terminal.size,
+                sectionID: nil,
+                repoID: terminal.repoID
+            ))
+
+            // An orchestrator owns every repository; a repo terminal owns one.
+            switch terminal.role {
+            case .orchestrator:
+                for repo in workspace.readyRepos {
+                    graph.edges.append(CanvasEdge(
+                        from: .terminal(terminal.id),
+                        to: .worktree(repo.worktreePath),
+                        isLive: true,
+                        kind: .owns
+                    ))
+                }
+            case .repo, .shell:
+                if let repoID = terminal.repoID,
+                   let repo = workspace.repos.first(where: { $0.id == repoID }) {
+                    graph.edges.append(CanvasEdge(
+                        from: .terminal(terminal.id),
+                        to: .worktree(repo.worktreePath),
+                        isLive: true,
+                        kind: .owns
+                    ))
+                }
+            }
+        }
+
+        applyPinned(&graph, pinned: input.pinned)
+        return graph
+    }
+
+    private func applyPinned(_ graph: inout CanvasGraph, pinned: [String: CGPoint]) {
+        guard !pinned.isEmpty else { return }
+        for (offset, node) in graph.nodes.enumerated() {
+            // Terminals carry their own saved position on the model.
+            if case .terminal = node.kind { continue }
+            guard let position = pinned[node.id.storageKey] else { continue }
+            graph.nodes[offset].position = position
+            graph.nodes[offset].isPinned = true
         }
     }
-}
-
-/// One container on the board.
-struct BoardSection: Identifiable {
-    var id: String
-    var kind: GroupKind
-    var title: String
-    var subtitle: String
-    var seed: String
-    var lanes: [BoardLane]
-    var linkID: UUID?
-    var branch: String?
-
-    var sessionCount: Int { lanes.reduce(0) { $0 + $1.sessions.count } }
-}
-
-/// A worktree and the sessions that ran in it.
-struct BoardLane {
-    var worktree: Worktree?
-    var sessions: [SessionSummary]
 }
 
 enum GroupKind {
-    case link
-    case main
-    case other
-    case repo
-    case archived
+    case workspace
 }
 
 /// Longest-prefix path ownership, with symlinks resolved.

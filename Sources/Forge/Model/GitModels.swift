@@ -14,8 +14,8 @@ struct Worktree: Identifiable, Hashable {
     var isArchived: Bool = false
     /// Overrides `name` for synthesized lanes.
     var displayName: String?
-    /// How many distinct vanished workspaces an archived lane stands for.
-    var archivedWorkspaces: Int = 0
+    /// Why this checkout could not be created, when it could not.
+    var failureReason: String?
 
     // Filled in by a second, slower pass so the canvas can draw immediately.
     var dirtyFiles: Int?

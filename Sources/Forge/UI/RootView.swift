@@ -38,8 +38,6 @@ struct RootView: View {
             switch which {
             case .newWorkspace: NewWorkspaceSheet(store: store)
             case .addRepos: AddReposSheet(store: store)
-            case .newLink: NewLinkSheet(store: store)
-            case .launchAgent(let node): LaunchAgentSheet(store: store, node: node)
             }
         }
         .onAppear { store.bootstrap() }
@@ -47,9 +45,9 @@ struct RootView: View {
         .onReceive(of: .forgeToggleInspector) { store.inspectorVisible.toggle() }
         .onReceive(of: .forgeFocusSearch) { sidebarVisible = true }
         .onReceive(of: .forgeNewWorkspace) { sheet = .newWorkspace }
-        .onReceive(of: .forgeNewLink) { if store.hasWorkspace { sheet = .newLink } }
         .onReceive(of: .forgeAddRepos) { if store.hasWorkspace { sheet = .addRepos } }
-        .onReceive(of: .forgeLaunchAgent) { if store.hasWorkspace { sheet = .launchAgent(store.selection) } }
+        .onReceive(of: .forgeOpenOrchestrator) { if store.hasWorkspace { store.openTerminal(role: .orchestrator) } }
+        .onReceive(of: .forgeOpenShell) { if store.hasWorkspace { store.openTerminal(role: .shell) } }
     }
 }
 
@@ -72,9 +70,10 @@ struct EmptyStateView: View {
                         .font(Theme.ui(19, .bold))
                         .foregroundStyle(Theme.textPrimary)
                     Text("""
-                    A workspace is the set of repositories you work on together. \
-                    Add them once, then cut a link — the same branch as a worktree \
-                    in every repo — and put agents to work across all of it.
+                    A workspace is the repositories you work on together, each \
+                    checked out on one shared branch under ~/.forge. Open an \
+                    orchestrator terminal at its root and it can put a sub-agent \
+                    on every repo at once.
                     """)
                         .font(Theme.ui(12))
                         .foregroundStyle(Theme.textSecondary)
@@ -136,19 +135,16 @@ private struct TopBar: View {
             if store.hasWorkspace {
                 Divider().frame(height: 16).overlay(Theme.hairline).padding(.horizontal, 2)
 
-                ChromeButton(icon: "link.badge.plus", label: "Link worktree") { sheet = .newLink }
-                AccentButton(icon: "sparkles", label: "Launch agent") {
-                    sheet = .launchAgent(store.selection)
+                AccentButton(icon: "point.3.connected.trianglepath.dotted", label: "Orchestrator") {
+                    store.openTerminal(role: .orchestrator)
+                }
+                .help("Opens a Claude terminal at the workspace root, with every repo beneath it")
+                ChromeButton(icon: "terminal", label: "Shell") {
+                    store.openTerminal(role: .shell)
                 }
 
                 Spacer(minLength: 16)
 
-                SegmentedControl(
-                    options: BoardComposer.Grouping.allCases,
-                    selection: $store.grouping,
-                    label: \.label,
-                    icon: \.icon
-                )
 
                 ChromeButton(
                     icon: "clock.badge.checkmark",
@@ -222,8 +218,14 @@ private struct TopBar: View {
             if let active = store.activeWorkspace {
                 Button("Add repositories…") { sheet = .addRepos }
                 Divider()
-                Button("Reveal worktree folder") { store.revealInFinder(active.worktreeRoot) }
-                Button("Close “\(active.name)”", role: .destructive) { store.deleteWorkspace(active.id) }
+                Button("Reveal folder in Finder") { store.revealInFinder(active.root) }
+                Divider()
+                Button("Close (keep worktrees)") {
+                    store.deleteWorkspace(active.id, removeWorktrees: false, force: false)
+                }
+                Button("Delete worktrees") {
+                    store.deleteWorkspace(active.id, removeWorktrees: true, force: false)
+                }
             }
         } label: {
             HStack(spacing: 6) {
@@ -251,8 +253,7 @@ private struct TopBar: View {
 
     private func counts(_ workspace: Workspace) -> String {
         let repos = workspace.repos.count
-        let links = workspace.linkedWorktrees.count
-        return "\(repos) \(repos == 1 ? "repo" : "repos") · \(links) linked"
+        return "\(repos) \(repos == 1 ? "repo" : "repos") · \(workspace.branch)"
     }
 }
 
@@ -417,9 +418,9 @@ extension Notification.Name {
     static let forgeToggleInspector = Notification.Name("forge.toggleInspector")
     static let forgeFocusSearch = Notification.Name("forge.focusSearch")
     static let forgeNewWorkspace = Notification.Name("forge.newWorkspace")
-    static let forgeNewLink = Notification.Name("forge.newLink")
     static let forgeAddRepos = Notification.Name("forge.addRepos")
-    static let forgeLaunchAgent = Notification.Name("forge.launchAgent")
+    static let forgeOpenOrchestrator = Notification.Name("forge.openOrchestrator")
+    static let forgeOpenShell = Notification.Name("forge.openShell")
 }
 
 extension View {

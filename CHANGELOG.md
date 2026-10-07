@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0] - 2026-10-07
+
+Simplified to one concept, and terminals now live on the canvas.
+
+- **A workspace is the worktrees.** Creating one is a single step: name it, pick
+  repositories, choose a base branch. Forge cuts that branch in every repo and
+  checks each out under `~/.forge/<workspace>/`. The separate "linked worktree"
+  layer is gone — a workspace *is* the linked set.
+- **Terminal nodes.** Real PTYs on the canvas, via SwiftTerm. An orchestrator
+  runs `claude` at the workspace root with every repository as a subdirectory
+  beneath it, briefed to dispatch a sub-agent per repo with the Agent tool; an
+  agent terminal runs inside one checkout; a shell is just a shell. Drag by the
+  title bar, resize from the corner.
+- **The sidebar lists every workspace** with its repositories nested underneath,
+  not just the open one.
+- Terminals are owned by a registry rather than by the view, so panning and
+  zooming no longer restarts the shell. They are not restored after a quit.
+
 ## [0.3.0] - 2026-10-07
 
 Workspace-first, and a much faster inspector.

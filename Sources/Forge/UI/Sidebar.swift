@@ -1,27 +1,14 @@
 import SwiftUI
 
-/// Left rail: what is running right now, the linkedWorktrees in this workspace, and the
-/// repositories behind them. Selecting a row pans the canvas to that card rather
-/// than replacing the view, so the board stays the primary surface.
+/// Left rail: every workspace, with its repositories nested underneath.
+///
+/// Workspaces are the organising unit, so they are all listed here — not just
+/// the open one. Clicking a repository pans the canvas to its card; clicking a
+/// different workspace switches the board.
 struct Sidebar: View {
     @Bindable var store: ForgeStore
     @Binding var sheet: ForgeSheet?
-    @State private var collapsed: Set<String> = []
-
-    private var liveRows: [(LiveSession, SessionSummary?)] {
-        store.live.values
-            .sorted { lhs, rhs in
-                if lhs.status != rhs.status { return lhs.status == .busy }
-                return (lhs.updatedAt ?? .distantPast) > (rhs.updatedAt ?? .distantPast)
-            }
-            .map { live in
-                let summary = store.graph.nodes.compactMap { node -> SessionSummary? in
-                    guard case .session(let summary, _, _) = node.kind, summary.id == live.sessionId else { return nil }
-                    return summary
-                }.first
-                return (live, summary)
-            }
-    }
+    @State private var collapsed: Set<UUID> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,45 +16,30 @@ struct Sidebar: View {
             Divider().overlay(Theme.hairline)
             ScrollableStack(alignment: .leading) {
                 VStack(alignment: .leading, spacing: 2) {
-                    if !liveRows.isEmpty {
-                        SectionHeader(title: "Live now", count: liveRows.count, tint: Theme.busy)
-                        ForEach(liveRows, id: \.0.pid) { live, summary in
-                            liveRow(live, summary)
-                        }
-                        Spacer().frame(height: 14)
-                    }
-
+                    runningSection
                     SectionHeader(
-                        title: "Linked worktrees",
-                        count: store.activeWorkspace?.linkedWorktrees.count ?? 0,
-                        tint: Theme.accent,
-                        action: ("plus", "New link", { sheet = .newLink })
-                    )
-                    ForEach(store.activeWorkspace?.linkedWorktrees.sorted { $0.createdAt > $1.createdAt } ?? []) { link in
-                        linkSection(link)
-                    }
-                    if store.activeWorkspace?.linkedWorktrees.isEmpty == true {
-                        hint("No linkedWorktrees yet. A link cuts one branch across every repo at once.")
-                    }
-
-                    Spacer().frame(height: 14)
-
-                    SectionHeader(
-                        title: "Repositories",
-                        count: store.activeWorkspace?.repos.count ?? 0,
+                        title: "Workspaces",
+                        count: store.workspaces.count,
                         tint: Theme.textTertiary,
                         trailing: store.isLoadingGit ? "scanning…" : nil,
-                        action: ("plus", "Add repositories", { sheet = .addRepos })
+                        action: ("plus", "New workspace", { sheet = .newWorkspace })
                     )
-                    ForEach(store.activeWorkspace?.repos ?? []) { repo in
-                        repoSection(repo)
+                    ForEach(store.workspaces) { workspace in
+                        workspaceSection(workspace)
+                    }
+                    if store.workspaces.isEmpty {
+                        Text("No workspaces yet.")
+                            .font(Theme.ui(10.5))
+                            .foregroundStyle(Theme.textTertiary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
                     }
                 }
                 .padding(.vertical, 10)
                 .padding(.horizontal, 8)
             }
         }
-        .frame(width: 258)
+        .frame(width: 262)
         .background(Theme.chrome)
     }
 
@@ -97,183 +69,143 @@ struct Sidebar: View {
         .frame(height: 38)
     }
 
-    private func hint(_ text: String) -> some View {
-        Text(text)
-            .font(Theme.ui(10.5))
-            .foregroundStyle(Theme.textTertiary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-    }
-
-    // MARK: Rows
-
-    private func liveRow(_ live: LiveSession, _ summary: SessionSummary?) -> some View {
-        SidebarRow(
-            isSelected: store.selection == .session(live.sessionId),
-            action: { store.reveal(.session(live.sessionId)) }
-        ) {
-            HStack(spacing: 7) {
-                StatusDot(status: live.status, zoom: Zoom(scale: 1))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(summary?.displayTitle ?? live.name ?? String(live.sessionId.prefix(8)))
-                        .font(Theme.ui(11.5, .medium))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    Text(live.name ?? URL(fileURLWithPath: live.cwd ?? "—").lastPathComponent)
-                        .font(Theme.mono(9.5))
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
+    @ViewBuilder
+    private var runningSection: some View {
+        let running = store.activeWorkspace?.terminals.filter { store.terminals.isRunning($0.id) } ?? []
+        if !running.isEmpty {
+            SectionHeader(title: "Running", count: running.count, tint: Theme.busy)
+            ForEach(running) { terminal in
+                SidebarRow(
+                    isSelected: store.selection == .terminal(terminal.id),
+                    action: { store.reveal(.terminal(terminal.id)) }
+                ) {
+                    HStack(spacing: 7) {
+                        Image(systemName: terminal.role.icon)
+                            .font(Theme.ui(9.5))
+                            .foregroundStyle(terminal.role == .orchestrator ? Theme.accent : Theme.worktree)
+                            .frame(width: 13)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(terminal.title)
+                                .font(Theme.ui(11.5, .medium))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                            Text(terminal.role.label)
+                                .font(Theme.mono(9.5))
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        Spacer(minLength: 0)
+                        Circle().fill(Theme.clean).frame(width: 5, height: 5)
+                    }
                 }
-                Spacer(minLength: 0)
-                Text(live.status == .busy ? "working" : "idle")
-                    .font(Theme.ui(9, .semibold))
-                    .foregroundStyle(live.status == .busy ? Theme.busy : Theme.idle)
             }
+            Spacer().frame(height: 14)
         }
     }
 
-    private func linkSection(_ link: LinkedWorktree) -> some View {
-        let key = "link:" + link.id.uuidString
-        let isCollapsed = collapsed.contains(key)
+    private func workspaceSection(_ workspace: Workspace) -> some View {
+        let isActive = workspace.id == store.activeWorkspaceID
+        let isCollapsed = collapsed.contains(workspace.id)
         return VStack(alignment: .leading, spacing: 2) {
             Button {
-                toggle(key)
+                if isActive {
+                    if isCollapsed { collapsed.remove(workspace.id) } else { collapsed.insert(workspace.id) }
+                } else {
+                    store.activate(workspace.id)
+                    collapsed.remove(workspace.id)
+                }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    Image(systemName: isCollapsed || !isActive ? "chevron.right" : "chevron.down")
                         .font(Theme.ui(8.5, .bold))
                         .foregroundStyle(Theme.textTertiary)
                         .frame(width: 10)
-                    Image(systemName: "square.link.3d.up.fill")
+                    Image(systemName: "rectangle.3.group.fill")
                         .font(Theme.ui(9.5))
-                        .foregroundStyle(Theme.repoTint(link.branch))
-                    Text(link.name)
-                        .font(Theme.ui(12, .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
+                        .foregroundStyle(Theme.repoTint(workspace.branch))
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(workspace.name)
+                            .font(Theme.ui(12, .semibold))
+                            .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
+                            .lineLimit(1)
+                        Text(workspace.branch)
+                            .font(Theme.mono(9))
+                            .foregroundStyle(Theme.branch.opacity(0.8))
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 0)
-                    Text("\(link.checkouts.filter(\.isReady).count)")
+                    Text("\(workspace.repos.count)")
                         .font(Theme.mono(9.5, .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .padding(.horizontal, 6)
                 .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isActive ? Theme.accent.opacity(0.1) : .clear)
+                )
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .contextMenu {
-                Button("Launch agent here…") { sheet = .launchAgent(firstNode(of: link)) }
+                Button("Open orchestrator terminal") {
+                    store.activate(workspace.id)
+                    store.openTerminal(role: .orchestrator)
+                }
+                Button("Add repositories…") {
+                    store.activate(workspace.id)
+                    sheet = .addRepos
+                }
                 Divider()
-                Button("Remove link") { store.removeLink(link.id, force: false, deleteBranch: false) }
-                Button("Remove link and discard changes") {
-                    store.removeLink(link.id, force: true, deleteBranch: true)
-                }
-            }
-
-            if !isCollapsed {
-                ForEach(link.checkouts) { checkout in
-                    memberRow(checkout, branch: link.branch)
-                }
-            }
-        }
-    }
-
-    private func memberRow(_ checkout: LinkedCheckout, branch: String) -> some View {
-        SidebarRow(
-            isSelected: store.selection == .worktree(checkout.path),
-            action: { store.reveal(.worktree(checkout.path)) }
-        ) {
-            HStack(spacing: 6) {
-                Image(systemName: checkout.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
-                    .font(Theme.ui(9))
-                    .foregroundStyle(checkout.isReady ? Theme.worktree : Theme.dirty)
-                    .frame(width: 12)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(checkout.repoName)
-                        .font(Theme.ui(11.5))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    Text(checkout.failure ?? branch)
-                        .font(Theme.mono(9.5))
-                        .foregroundStyle(checkout.isReady ? Theme.branch.opacity(0.85) : Theme.dirty)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 16)
-        }
-    }
-
-    private func repoSection(_ repo: WorkspaceRepo) -> some View {
-        let key = "repo:" + repo.id
-        let isCollapsed = collapsed.contains(key)
-        let worktrees = store.worktreesByRepo[repo.id] ?? []
-        return VStack(alignment: .leading, spacing: 2) {
-            Button {
-                toggle(key)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                        .font(Theme.ui(8.5, .bold))
-                        .foregroundStyle(Theme.textTertiary)
-                        .frame(width: 10)
-                    Circle().fill(Theme.repoTint(repo.id)).frame(width: 7, height: 7)
-                    Text(repo.name)
-                        .font(Theme.ui(12, .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Text("\(worktrees.count)")
-                        .font(Theme.mono(9.5, .medium))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 5)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                Button("Open in editor") { store.openInEditor(repo.path) }
-                Button("Reveal in Finder") { store.revealInFinder(repo.path) }
+                Button("Reveal folder in Finder") { store.revealInFinder(workspace.root) }
+                Button("Copy branch name") { store.copyToClipboard(workspace.branch) }
                 Divider()
-                Button("Remove from workspace") { store.removeRepo(repo.id) }
+                Button("Close (keep worktrees)") {
+                    store.deleteWorkspace(workspace.id, removeWorktrees: false, force: false)
+                }
+                Button("Delete worktrees") {
+                    store.deleteWorkspace(workspace.id, removeWorktrees: true, force: false)
+                }
+                Button("Delete and discard changes", role: .destructive) {
+                    store.deleteWorkspace(workspace.id, removeWorktrees: true, force: true)
+                }
             }
 
-            if !isCollapsed {
-                ForEach(worktrees) { worktree in
-                    worktreeRow(worktree)
+            if isActive && !isCollapsed {
+                ForEach(workspace.repos) { repo in
+                    repoRow(repo, workspace: workspace)
                 }
             }
         }
     }
 
-    private func worktreeRow(_ worktree: Worktree) -> some View {
-        let sessions = store.graph.edges.filter { $0.to == .worktree(worktree.path) }
+    private func repoRow(_ repo: WorkspaceRepo, workspace: Workspace) -> some View {
+        let worktree = store.worktrees[repo.worktreePath]
+        let sessions = store.graph.edges.filter {
+            $0.to == .worktree(repo.worktreePath) && $0.kind == .ranIn
+        }
         return SidebarRow(
-            isSelected: store.selection == .worktree(worktree.path),
-            action: { store.reveal(.worktree(worktree.path)) }
+            isSelected: store.selection == .worktree(repo.worktreePath),
+            action: { store.reveal(.worktree(repo.worktreePath)) }
         ) {
             HStack(spacing: 6) {
-                Image(systemName: worktree.isMain ? "shippingbox.fill" : "square.on.square")
+                Image(systemName: repo.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
                     .font(Theme.ui(9))
-                    .foregroundStyle(worktree.isDirty ? Theme.dirty : Theme.worktree)
+                    .foregroundStyle(
+                        !repo.isReady ? Theme.dirty
+                            : (worktree?.isDirty == true ? Theme.dirty : Theme.worktree)
+                    )
                     .frame(width: 12)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(worktree.name)
+                    Text(repo.name)
                         .font(Theme.ui(11.5))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
-                    Text(worktree.branchLabel)
+                    Text(repo.failure ?? (worktree.map(describe) ?? "checking…"))
                         .font(Theme.mono(9.5))
-                        .foregroundStyle(Theme.branch.opacity(0.85))
+                        .foregroundStyle(repo.isReady ? Theme.textTertiary : Theme.dirty)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                if sessions.contains(where: \.isLive) {
-                    Circle().fill(Theme.busy).frame(width: 5, height: 5)
-                }
                 if !sessions.isEmpty {
                     Text("\(sessions.count)")
                         .font(Theme.mono(9.5, .medium))
@@ -282,21 +214,28 @@ struct Sidebar: View {
             }
             .padding(.leading, 16)
         }
+        .contextMenu {
+            Button("Open agent terminal here") { store.openTerminal(role: .repo, repoID: repo.id) }
+            Button("Open shell here") { store.openTerminal(role: .shell, repoID: repo.id) }
+            Divider()
+            Button("Open in editor") { store.openInEditor(repo.worktreePath) }
+            Button("Reveal in Finder") { store.revealInFinder(repo.worktreePath) }
+            Divider()
+            Button("Remove from workspace") { store.removeRepo(repo.id) }
+        }
     }
 
-    private func firstNode(of link: LinkedWorktree) -> NodeID? {
-        link.checkouts.first(where: \.isReady).map { NodeID.worktree($0.path) }
-    }
-
-    private func toggle(_ key: String) {
-        if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) }
+    private func describe(_ worktree: Worktree) -> String {
+        guard worktree.hasStatus else { return "checking…" }
+        let dirty = (worktree.dirtyFiles ?? 0) + (worktree.untrackedFiles ?? 0)
+        return dirty == 0 ? "clean" : "\(dirty) changed"
     }
 }
 
 private struct SectionHeader: View {
     var title: String
     var count: Int
-    var tint: Color
+    var tint: SwiftUI.Color
     var trailing: String?
     var action: (icon: String, help: String, run: () -> Void)?
 
@@ -342,7 +281,7 @@ private struct SidebarRow<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isSelected ? Theme.accent.opacity(0.16) : (hovering ? Color.white.opacity(0.05) : .clear))
+                        .fill(isSelected ? Theme.accent.opacity(0.16) : (hovering ? SwiftUI.Color.white.opacity(0.05) : .clear))
                 )
                 .contentShape(Rectangle())
         }

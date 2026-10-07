@@ -37,6 +37,9 @@ struct CanvasView: View {
                     .gesture(panGesture)
                     .onTapGesture { store.select(nil) }
 
+                // Terminals always render as real views: dropping them would
+                // tear down the PTY, so they stay mounted at every zoom.
+                terminalLayer
                 if detail != .block {
                     nodeLayer
                 }
@@ -65,11 +68,67 @@ struct CanvasView: View {
         }
     }
 
+    private var terminalLayer: some View {
+        let terminals = store.graph.nodes.filter {
+            if case .terminal = $0.kind { return true } else { return false }
+        }
+        return ForEach(terminals) { node in
+            if case .terminal(let terminal) = node.kind {
+                let rect = store.viewport.project(node.frame)
+                TerminalNodeView(
+                    node: terminal,
+                    store: store,
+                    zoom: zoom,
+                    isSelected: store.selection == node.id,
+                    isDimmed: store.isSearching && !store.matches(node.id),
+                    onResize: { store.moveTerminal(terminal.id, to: node.position, size: $0) }
+                )
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+                .gesture(terminalDrag(node))
+                .onTapGesture { store.select(node.id) }
+                .contextMenu {
+                    Button("Restart") { store.restartTerminal(terminal.id) }
+                    Button("Reveal folder in Finder") { store.revealInFinder(terminal.cwd) }
+                    Button("Copy folder path") { store.copyToClipboard(terminal.cwd) }
+                    Divider()
+                    Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
+                }
+            }
+        }
+    }
+
+    /// Terminals are dragged by their header so the body keeps normal text
+    /// selection and keyboard focus.
+    private func terminalDrag(_ node: CanvasNode) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .local)
+            .onChanged { value in
+                guard value.startLocation.y <= store.viewport.project(node.frame).minY + zoom.s(28) else { return }
+                if draggingNode != node.id {
+                    draggingNode = node.id
+                    dragOrigin = node.position
+                }
+                guard let origin = dragOrigin else { return }
+                store.moveNode(node.id, to: CGPoint(
+                    x: origin.x + value.translation.width / store.viewport.scale,
+                    y: origin.y + value.translation.height / store.viewport.scale
+                ))
+            }
+            .onEnded { _ in
+                draggingNode = nil
+                dragOrigin = nil
+                store.commitTerminalMove()
+            }
+    }
+
     // MARK: - Cards
 
     private var nodeLayer: some View {
         let visible = store.viewport.visibleWorldRect()
-        let nodes = store.graph.nodes.filter { $0.frame.intersects(visible) }
+        let nodes = store.graph.nodes.filter { node in
+            if case .terminal = node.kind { return false }
+            return node.frame.intersects(visible)
+        }
         return ForEach(nodes) { node in
             let rect = store.viewport.project(node.frame)
             card(for: node)
@@ -101,6 +160,8 @@ struct CanvasView: View {
                 isHovered: hoveredNode == node.id,
                 isDimmed: dimmed
             )
+        case .terminal:
+            EmptyView()
         case .worktree(let worktree):
             let attached = attachedSessions(to: worktree.path)
             WorktreeNodeView(
@@ -170,29 +231,24 @@ struct CanvasView: View {
         case .session(let summary, _, _):
             Button("Open transcript") { store.reveal(node.id) }
             Divider()
-            Button("Resume in Terminal") { store.resumeSession(summary) }
-            Button("Launch agent here…") { sheet = .launchAgent(node.id) }
+            Button("Reveal transcript file") { store.revealTranscriptFile(summary) }
             Button("Open folder in editor") { store.openInEditor(summary.resolvedPath) }
-            Button("Open folder in Terminal") { store.openInTerminal(summary.resolvedPath) }
             Button("Reveal folder in Finder") { store.revealInFinder(summary.resolvedPath) }
             Divider()
-            Button("Reveal transcript file") { store.revealTranscriptFile(summary) }
             Button("Copy session ID") { store.copyToClipboard(summary.id) }
             Button("Copy path") { store.copyToClipboard(summary.resolvedPath) }
+        case .terminal(let terminal):
+            Button("Restart") { store.restartTerminal(terminal.id) }
+            Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
         case .worktree(let worktree):
-            Button("Launch agent here…") { sheet = .launchAgent(node.id) }
-            if let link = store.linkedWorktree(containing: node.id) {
-                Divider()
-                Button("Remove link “\(link.name)”") {
-                    store.removeLink(link.id, force: false, deleteBranch: false)
-                }
-                Button("Remove link and discard changes") {
-                    store.removeLink(link.id, force: true, deleteBranch: true)
-                }
+            Button("Open agent terminal here") {
+                store.openTerminal(role: .repo, repoID: node.repoID)
+            }
+            Button("Open shell here") {
+                store.openTerminal(role: .shell, repoID: node.repoID)
             }
             Divider()
             Button("Open in editor") { store.openInEditor(worktree.path) }
-            Button("Open in Terminal") { store.openInTerminal(worktree.path) }
             Button("Reveal in Finder") { store.revealInFinder(worktree.path) }
             Divider()
             Button("Copy path") { store.copyToClipboard(worktree.path) }

@@ -1,27 +1,40 @@
+import CoreGraphics
 import Foundation
 
-/// A set of repositories worked on together.
+/// A workspace is a set of worktrees — one per repository — all cut from the
+/// same base on the same branch, living side by side under one folder.
 ///
-/// The board shows one workspace at a time. Everything else — worktrees,
-/// sessions, agents — hangs off the repos listed here.
+/// That folder is the parent the orchestrator works from: the repositories are
+/// literally its subdirectories, so an agent started there can see and change
+/// all of them without any extra plumbing.
 struct Workspace: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var name: String
+    /// Branch checked out in every repository of this workspace.
+    var branch: String
+    /// What the branch was cut from. Nil means each repo's own default branch.
+    var baseRef: String?
+    /// `~/.forge/<slug>` — contains one subdirectory per repository.
+    var root: String
     var repos: [WorkspaceRepo] = []
-    var linkedWorktrees: [LinkedWorktree] = []
-    /// Where `git worktree add` puts new checkouts. Each link gets a folder
-    /// under here with one subfolder per repo.
-    var worktreeRoot: String
+    /// Terminal nodes placed on this workspace's board.
+    var terminals: [TerminalNode] = []
     var createdAt: Date = Date()
+    var notes: String?
 
-    static func defaultWorktreeRoot(for name: String) -> String {
-        NSHomeDirectory() + "/Forge/" + Workspace.slug(name)
+    var readyRepos: [WorkspaceRepo] { repos.filter(\.isReady) }
+    var worktreePaths: [String] { readyRepos.map(\.worktreePath) }
+
+    static func root(for name: String) -> String {
+        Workspace.forgeHome + "/" + Workspace.slug(name)
     }
 
-    /// Filesystem-safe form of a display name.
+    /// Everything Forge creates lives here, out of the way of your own folders.
+    static var forgeHome: String { NSHomeDirectory() + "/.forge" }
+
+    /// Filesystem- and branch-safe form of a display name.
     static func slug(_ raw: String) -> String {
-        let lowered = raw.lowercased()
-        let mapped = lowered.map { character -> Character in
+        let mapped = raw.lowercased().map { character -> Character in
             character.isLetter || character.isNumber ? character : "-"
         }
         let collapsed = String(mapped)
@@ -29,62 +42,80 @@ struct Workspace: Identifiable, Codable, Hashable {
             .joined(separator: "-")
         return collapsed.isEmpty ? "workspace" : collapsed
     }
-
-    func link(named branch: String) -> LinkedWorktree? {
-        linkedWorktrees.first { $0.branch == branch }
-    }
-
-    /// Every checkout path this workspace knows about, for scoping the board.
-    var allRepoPaths: [String] { repos.map(\.path) }
 }
 
-/// One repository inside a workspace, identified by its shared git directory so
-/// it stays the same object no matter which worktree you came in through.
+/// One repository's checkout inside a workspace.
 struct WorkspaceRepo: Identifiable, Codable, Hashable {
-    /// Resolved `--git-common-dir`.
+    /// Resolved `--git-common-dir` of the source repository; stable across worktrees.
     var id: String
-    /// Main working tree.
-    var path: String
     var name: String
-    /// Branch new linkedWorktrees are cut from when nothing else is specified.
-    var defaultBranch: String?
-}
-
-/// A branch created across every repo in the workspace at once, with one
-/// worktree per repo. This is the unit of parallel work: one task, one branch
-/// name, N checkouts that move together.
-struct LinkedWorktree: Identifiable, Codable, Hashable {
-    var id: UUID = UUID()
-    /// Display name. Usually the same as the branch.
-    var name: String
-    var branch: String
-    var baseRef: String?
-    var createdAt: Date = Date()
-    var checkouts: [LinkedCheckout] = []
-    /// Free-form note — what this link is for.
-    var intent: String?
-
-    func checkout(repoID: String) -> LinkedCheckout? {
-        checkouts.first { $0.repoID == repoID }
-    }
-
-    var paths: [String] { checkouts.map(\.path) }
-}
-
-/// One repo's checkout within a link.
-struct LinkedCheckout: Codable, Hashable, Identifiable {
-    var repoID: String
-    var repoName: String
-    var path: String
-    /// Set when the worktree could not be created, so the UI can say why.
+    /// The repository this was cut from.
+    var originPath: String
+    /// `<workspace root>/<name>` — the checkout the workspace actually works in.
+    var worktreePath: String
+    /// Set when `git worktree add` failed, so the board can say why.
     var failure: String?
 
-    var id: String { repoID }
     var isReady: Bool { failure == nil }
 }
 
-/// What a launched session is there to do. Only affects the preamble Forge puts
-/// in front of the prompt and how the card is labelled.
+/// A terminal placed on the canvas.
+///
+/// Position and size are persisted so a board keeps its shape; the running
+/// process is not — terminals are re-opened on demand rather than resurrected.
+struct TerminalNode: Identifiable, Codable, Hashable {
+    enum Role: String, Codable {
+        /// Runs at the workspace root, with every repository beneath it.
+        case orchestrator
+        /// Runs in one repository's checkout.
+        case repo
+        /// A plain shell, no agent.
+        case shell
+
+        var label: String {
+            switch self {
+            case .orchestrator: return "Orchestrator"
+            case .repo: return "Agent"
+            case .shell: return "Shell"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .orchestrator: return "point.3.connected.trianglepath.dotted"
+            case .repo: return "hammer.fill"
+            case .shell: return "terminal.fill"
+            }
+        }
+    }
+
+    var id: UUID = UUID()
+    var role: Role
+    var title: String
+    var cwd: String
+    /// Repository this terminal belongs to, when it is not the workspace parent.
+    var repoID: String?
+    /// Session id pre-assigned to the `claude` process, so the board can match
+    /// the transcript to this node instead of drawing a duplicate card.
+    var sessionID: String?
+    var x: Double = 0
+    var y: Double = 0
+    var width: Double = 620
+    var height: Double = 380
+    var createdAt: Date = Date()
+
+    var position: CGPoint {
+        get { CGPoint(x: x, y: y) }
+        set { x = newValue.x; y = newValue.y }
+    }
+
+    var size: CGSize {
+        get { CGSize(width: width, height: height) }
+        set { width = newValue.width; height = newValue.height }
+    }
+}
+
+/// Role an agent plays, used for the brief Forge writes.
 enum AgentRole: String, Codable, CaseIterable, Identifiable {
     case orchestrator
     case worker
@@ -101,7 +132,7 @@ enum AgentRole: String, Codable, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .orchestrator:
-            return "Plans the work across every repo in the link and dispatches teammates to do it."
+            return "Plans across every repo in the workspace and dispatches sub-agents to do the work."
         case .worker:
             return "Carries out one scoped task."
         }
@@ -113,50 +144,4 @@ enum AgentRole: String, Codable, CaseIterable, Identifiable {
         case .worker: return "hammer"
         }
     }
-}
-
-/// What an agent is pointed at.
-enum AgentScope: Hashable {
-    /// Every repository in the workspace and every linked worktree in it.
-    case workspace
-    /// One linked worktree — the same branch across every repo.
-    case link(UUID)
-    /// A single checkout.
-    case checkout(String)
-
-    var label: String {
-        switch self {
-        case .workspace: return "Whole workspace"
-        case .link: return "This linked worktree"
-        case .checkout: return "This checkout"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .workspace: return "rectangle.3.group"
-        case .link: return "link"
-        case .checkout: return "square.on.square"
-        }
-    }
-}
-
-/// Everything needed to start a `claude` process.
-struct AgentLaunch {
-    var scope: AgentScope = .workspace
-    var role: AgentRole = .orchestrator
-    var name: String = ""
-    var prompt: String = ""
-    /// Working directory — the link checkout the agent starts in.
-    var cwd: String = ""
-    /// Sibling repos granted tool access via `--add-dir`.
-    var additionalDirs: [String] = []
-    var model: String? = ModelDefaults.modelID
-    var permissionMode: String = "acceptEdits"
-    /// Run headless in the background rather than opening a Terminal window.
-    var runsInBackground: Bool = true
-    /// Context Forge prepends to the prompt describing what the agent owns.
-    var brief: String?
-
-    static let permissionModes = ["default", "acceptEdits", "plan", "bypassPermissions"]
 }

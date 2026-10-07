@@ -13,7 +13,9 @@ struct InspectorView: View {
                 case .session(let summary, let status, let live):
                     sessionInspector(summary, status: status, live: live)
                 case .worktree(let worktree):
-                    worktreeInspector(worktree)
+                    worktreeInspector(worktree, repoID: node.repoID)
+                case .terminal(let terminal):
+                    terminalInspector(terminal)
                 }
             } else {
                 emptyState
@@ -74,11 +76,9 @@ struct InspectorView: View {
                 FieldGrid(rows: sessionFields(summary, live: live))
 
                 HStack(spacing: 6) {
-                    ChromeButton(icon: "play.circle", label: "Resume") { store.resumeSession(summary) }
                     ChromeButton(icon: "chevron.left.forwardslash.chevron.right", label: "Editor") {
                         store.openInEditor(summary.resolvedPath)
                     }
-                    ChromeButton(icon: "terminal", label: "Terminal") { store.openInTerminal(summary.resolvedPath) }
                     ChromeButton(icon: "doc.text.magnifyingglass") { store.revealTranscriptFile(summary) }
                     Spacer(minLength: 0)
                     ChromeButton(icon: "arrow.clockwise") { store.reloadTranscript() }
@@ -155,7 +155,44 @@ struct InspectorView: View {
 
     // MARK: - Worktree
 
-    private func worktreeInspector(_ worktree: Worktree) -> some View {
+    private func terminalInspector(_ terminal: TerminalNode) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: terminal.role.icon)
+                    .foregroundStyle(terminal.role == .orchestrator ? Theme.accent : Theme.worktree)
+                Text(terminal.title)
+                    .font(Theme.ui(15, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+                Text(store.terminals.isRunning(terminal.id) ? "running" : "exited")
+                    .font(Theme.ui(10, .heavy))
+                    .foregroundStyle(store.terminals.isRunning(terminal.id) ? Theme.clean : Theme.textTertiary)
+            }
+            FieldGrid(rows: [
+                .init(label: "Role", value: terminal.role.label),
+                .init(
+                    label: "Folder",
+                    value: terminal.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
+                    mono: true, copyable: terminal.cwd
+                ),
+                .init(label: "Session ID", value: terminal.sessionID ?? "—", mono: true, copyable: terminal.sessionID)
+            ])
+            HStack(spacing: 6) {
+                ChromeButton(icon: "arrow.clockwise", label: "Restart") { store.restartTerminal(terminal.id) }
+                ChromeButton(icon: "chevron.left.forwardslash.chevron.right", label: "Editor") {
+                    store.openInEditor(terminal.cwd)
+                }
+                ChromeButton(icon: "folder") { store.revealInFinder(terminal.cwd) }
+                Spacer(minLength: 0)
+                ChromeButton(icon: "xmark") { store.closeTerminal(terminal.id) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+    }
+
+    private func worktreeInspector(_ worktree: Worktree, repoID: String?) -> some View {
         let sessions = attachedSessions(worktree.path)
         return ScrollableStack(alignment: .leading) {
             VStack(alignment: .leading, spacing: 12) {
@@ -177,13 +214,15 @@ struct InspectorView: View {
                 FieldGrid(rows: worktreeFields(worktree))
 
                 HStack(spacing: 6) {
-                    ChromeButton(icon: "sparkles", label: "Launch agent") {
-                        sheet = .launchAgent(.worktree(worktree.path))
+                    ChromeButton(icon: "hammer.fill", label: "Agent") {
+                        store.openTerminal(role: .repo, repoID: repoID)
+                    }
+                    ChromeButton(icon: "terminal", label: "Shell") {
+                        store.openTerminal(role: .shell, repoID: repoID)
                     }
                     ChromeButton(icon: "chevron.left.forwardslash.chevron.right", label: "Editor") {
                         store.openInEditor(worktree.path)
                     }
-                    ChromeButton(icon: "terminal", label: "Terminal") { store.openInTerminal(worktree.path) }
                     ChromeButton(icon: "folder") { store.revealInFinder(worktree.path) }
                     Spacer(minLength: 0)
                     ChromeButton(icon: "arrow.clockwise") { store.refreshGitStatus() }

@@ -26,19 +26,18 @@ struct ForgeCommands: Commands {
                 NotificationCenter.default.post(name: .forgeNewWorkspace, object: nil)
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
-            Button("New LinkedWorktree…") {
-                NotificationCenter.default.post(name: .forgeNewLink, object: nil)
+            Button("Open Orchestrator Terminal") {
+                NotificationCenter.default.post(name: .forgeOpenOrchestrator, object: nil)
             }
-            .keyboardShortcut("n", modifiers: .command)
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            Button("Open Shell") {
+                NotificationCenter.default.post(name: .forgeOpenShell, object: nil)
+            }
+            .keyboardShortcut("t", modifiers: .command)
             Button("Add Repositories…") {
                 NotificationCenter.default.post(name: .forgeAddRepos, object: nil)
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
-            Divider()
-            Button("Launch Agent…") {
-                NotificationCenter.default.post(name: .forgeLaunchAgent, object: nil)
-            }
-            .keyboardShortcut("l", modifiers: [.command, .shift])
         }
 
         CommandMenu("View") {
@@ -51,10 +50,6 @@ struct ForgeCommands: Commands {
             Button("Actual Size") { store.zoomToActualSize() }
                 .keyboardShortcut("1", modifiers: .command)
             Divider()
-            Button("Group by LinkedWorktree or Repository") {
-                store.grouping = store.grouping == .link ? .repo : .link
-            }
-            .keyboardShortcut("g", modifiers: [.command, .shift])
             Button("Invert Scroll Direction") { store.invertScroll.toggle() }
             Button("Show Ended Sessions") { store.showEndedSessions.toggle() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
@@ -95,13 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
-        if CommandLine.arguments.contains("--perftest") {
+        let arguments = CommandLine.arguments
+        if arguments.contains("--perftest") {
             PerfTest.run()
-        } else if CommandLine.arguments.contains("--launchtest") {
+        } else if arguments.contains("--launchtest") {
             LaunchTest.run()
-        } else if let repos = SelfTest.request(arguments: CommandLine.arguments) {
-            SelfTest.run(repoPaths: repos, keep: CommandLine.arguments.contains("--keep"))
-        } else if let request = SnapshotRequest(arguments: CommandLine.arguments) {
+        } else if let repos = SelfTest.repoPaths(arguments: arguments) {
+            SelfTest.run(repoPaths: repos, keep: arguments.contains("--keep"))
+        } else if let request = SnapshotRequest(arguments: arguments) {
             Snapshot.run(request)
         }
     }

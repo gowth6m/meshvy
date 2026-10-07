@@ -1,153 +1,161 @@
 import AppKit
 import SwiftUI
 
-/// Offscreen renderer for development: `Forge --snapshot out.png`.
-///
-/// Renders the real view tree against the real `~/.claude` data with
-/// `ImageRenderer`, so the UI can be inspected (and diffed) from a terminal
-/// without a visible window or screen-recording permission.
-struct SnapshotRequest {
-    var output: URL
-    var size: CGSize
-    var waitSeconds: Double
-    var selectNewestSession: Bool
-    var zoomToFit: Bool
-    /// Explicit zoom, centred on the selection. Overrides fit-to-content.
-    var zoom: Double?
-
-    init?(arguments: [String]) {
-        guard let flag = arguments.firstIndex(of: "--snapshot"), flag + 1 < arguments.count else { return nil }
-        output = URL(fileURLWithPath: arguments[flag + 1])
-
-        func value(_ name: String) -> String? {
-            guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else { return nil }
-            return arguments[index + 1]
-        }
-        let width = value("--width").flatMap(Double.init) ?? 1560
-        let height = value("--height").flatMap(Double.init) ?? 960
-        size = CGSize(width: width, height: height)
-        waitSeconds = value("--wait").flatMap(Double.init) ?? 6
-        selectNewestSession = !arguments.contains("--no-select")
-        zoom = value("--zoom").flatMap(Double.init)
-        zoomToFit = zoom == nil && !arguments.contains("--no-fit")
-    }
-}
-
-/// Headless end-to-end exercise of the workspace flow, for development:
-/// `Forge --selftest <repoA> <repoB> …`. Creates a throwaway workspace, cuts a
-/// link across every repo, reports what git actually did, then removes it.
+/// Headless exercise of the workspace flow, for development:
+/// `Forge --selftest <repoA> <repoB> … [--keep]`. Creates a throwaway
+/// workspace, checks every worktree landed on the shared branch, then removes
+/// it again unless `--keep` is passed.
 @MainActor
 enum SelfTest {
     static var keep = false
 
-    static func request(arguments: [String]) -> [String]? {
+    static func repoPaths(arguments: [String]) -> [String]? {
         guard let flag = arguments.firstIndex(of: "--selftest") else { return nil }
         let paths = arguments[(flag + 1)...].filter { !$0.hasPrefix("--") }
         return paths.isEmpty ? nil : Array(paths)
     }
 
-    static func run(repoPaths: [String], keep: Bool = false) {
+    static func run(repoPaths: [String], keep: Bool) {
+        Self.keep = keep
         let store = ForgeStore()
         store.bootstrap()
-        Self.keep = keep
 
         let found = store.inspectRepos(at: repoPaths)
         print("inspect: \(found.repos.count) repos, rejected \(found.rejected)")
         guard !found.repos.isEmpty else { exit(1) }
 
-        let workspace = store.createWorkspace(name: "Forge Selftest", repos: found.repos)
-        print("workspace: \(workspace.name) root=\(workspace.worktreeRoot)")
-
-        store.createLink(
-            name: "selftest-feature", branch: "selftest-feature", baseRef: nil,
-            intent: "Prove that one branch can span every repo in the workspace"
+        store.createWorkspace(
+            name: "Forge Selftest", repos: found.repos, baseRef: nil, branch: "selftest-feature"
         )
-        poll(store: store, workspaceID: workspace.id, attempts: 80)
+        poll(store: store, attempts: 80)
     }
 
-    private static func poll(store: ForgeStore, workspaceID: UUID, attempts: Int) {
-        guard let current = store.workspaces.first(where: { $0.id == workspaceID }) else { exit(1) }
-        if let link = current.linkedWorktrees.first {
-            print("link: \(link.name) branch=\(link.branch) checkouts=\(link.checkouts.count)")
-            var allGood = true
-            for checkout in link.checkouts {
-                let exists = FileManager.default.fileExists(atPath: checkout.path)
-                let branch = Shell.git(["rev-parse", "--abbrev-ref", "HEAD"], cwd: checkout.path, timeout: 5)
-                let head = branch.ok ? (branch.lines.first ?? "?") : "n/a"
-                print("  - \(checkout.repoName): onDisk=\(exists) branch=\(head) failure=\(checkout.failure ?? "none")")
-                if !exists || head != link.branch { allGood = false }
-            }
-            print("sections: \(store.sections.map { "\($0.title)(\($0.lanes.count) lanes)" }.joined(separator: ", "))")
-            print("nodes: \(store.graph.nodes.count) groups: \(store.graph.groups.count)")
-
-            if Self.keep {
-                print("SELFTEST KEPT — workspace left in place for snapshotting")
-                exit(allGood ? 0 : 1)
-            }
-            store.removeLink(link.id, force: true, deleteBranch: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                MainActor.assumeIsolated {
-                    let after = store.workspaces.first(where: { $0.id == workspaceID })
-                    let removed = after?.linkedWorktrees.isEmpty ?? false
-                    let gone = link.checkouts.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }
-                    print("teardown: recordRemoved=\(removed) dirsRemoved=\(gone)")
-                    store.deleteWorkspace(workspaceID)
-                    print(allGood && removed && gone ? "SELFTEST OK" : "SELFTEST FAILED")
-                    exit(allGood && removed && gone ? 0 : 1)
-                }
+    private static func poll(store: ForgeStore, attempts: Int) {
+        guard let workspace = store.workspaces.first(where: { $0.name == "Forge Selftest" }) else {
+            guard attempts > 0 else { print("SELFTEST TIMEOUT"); exit(1) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                MainActor.assumeIsolated { poll(store: store, attempts: attempts - 1) }
             }
             return
         }
-        guard attempts > 0 else { print("SELFTEST TIMEOUT"); exit(1) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            MainActor.assumeIsolated { poll(store: store, workspaceID: workspaceID, attempts: attempts - 1) }
+
+        print("workspace: \(workspace.name) branch=\(workspace.branch) root=\(workspace.root)")
+        var healthy = true
+        for repo in workspace.repos {
+            let exists = FileManager.default.fileExists(atPath: repo.worktreePath)
+            let head = Shell.git(["rev-parse", "--abbrev-ref", "HEAD"], cwd: repo.worktreePath, timeout: 5)
+            let branch = head.ok ? (head.lines.first ?? "?") : "n/a"
+            print("  - \(repo.name): onDisk=\(exists) branch=\(branch) failure=\(repo.failure ?? "none")")
+            if !exists || branch != workspace.branch { healthy = false }
+        }
+        print("nodes: \(store.graph.nodes.count) groups: \(store.graph.groups.count)")
+        print("orchestrator cwd would be: \(workspace.root)")
+
+        if keep {
+            print(healthy ? "SELFTEST KEPT" : "SELFTEST FAILED")
+            exit(healthy ? 0 : 1)
+        }
+
+        store.deleteWorkspace(workspace.id, removeWorktrees: true, force: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            MainActor.assumeIsolated {
+                let gone = workspace.repos.allSatisfy { !FileManager.default.fileExists(atPath: $0.worktreePath) }
+                let forgotten = !store.workspaces.contains { $0.id == workspace.id }
+                print("teardown: recordRemoved=\(forgotten) dirsRemoved=\(gone)")
+                print(healthy && gone && forgotten ? "SELFTEST OK" : "SELFTEST FAILED")
+                exit(healthy && gone && forgotten ? 0 : 1)
+            }
         }
     }
 }
 
-/// Proves the launch path: starts a real agent in the active workspace's newest
-/// link and waits for it to register as live. `Forge --launchtest`.
+/// Opens an orchestrator terminal in the active workspace and waits for the
+/// agent to register itself. `Forge --launchtest`.
 @MainActor
 enum LaunchTest {
     static func run() {
         let store = ForgeStore()
         store.bootstrap()
-        guard store.hasWorkspace else { print("no workspace"); exit(1) }
+        guard let workspace = store.activeWorkspace else { print("no workspace"); exit(1) }
 
-        var request = store.workspaceLaunchTemplate()
-        request.role = .orchestrator
-        request.prompt = "Reply with exactly: FORGE-LAUNCH-OK. Do not use any tools."
-        request.model = "claude-haiku-4-5-20251001"
-        request.runsInBackground = true
-        print("cwd: \(request.cwd)")
-        print("addDirs: \(request.additionalDirs)")
+        print("root: \(workspace.root)")
         print("--- brief ---")
-        print(AgentLauncher.composePrompt(request))
+        print(AgentCommand.orchestratorBrief(workspace: workspace))
         print("--- end brief ---")
 
-        store.launchAgent(request)
-        poll(store: store, cwd: request.cwd, attempts: 60)
+        guard let node = store.openTerminal(role: .orchestrator) else {
+            print("LAUNCHTEST FAILED: terminal did not open"); exit(1)
+        }
+        print("terminal: \(node.title) cwd=\(node.cwd)")
+        // Claude Code asks the user to trust a folder it has not seen before.
+        // Answer it the way a person would, then wait for the agent to register.
+        answerStartupPrompts(store: store, node: node, attempts: 60, answered: 0)
     }
 
-    private static func poll(store: ForgeStore, cwd: String, attempts: Int) {
+    /// Clears the prompts Claude Code shows on first run in a new folder, the
+    /// way a person at the keyboard would, so the harness reaches the agent.
+    private static func answerStartupPrompts(
+        store: ForgeStore, node: TerminalNode, attempts: Int, answered: Int
+    ) {
+        guard let session = store.terminals.session(for: node.id) else {
+            print("LAUNCHTEST FAILED: no session"); exit(1)
+        }
+        let screen = session.screenText
+
+        if screen.contains("I trust this folder") {
+            print("answered: workspace trust")
+            session.send("\r")
+        } else if screen.contains("Continue without these settings") {
+            // This machine's ~/.claude/settings.json is malformed; carry on
+            // without it rather than letting the harness stall.
+            print("answered: skip malformed settings")
+            session.send("3\r")
+        } else if answered > 0, screen.contains("│ >") || screen.contains("? for shortcuts") {
+            print("agent prompt reached")
+            poll(store: store, sessionID: node.sessionID, attempts: 80)
+            return
+        }
+
+        guard attempts > 0 else {
+            poll(store: store, sessionID: node.sessionID, attempts: 60)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            MainActor.assumeIsolated {
+                answerStartupPrompts(
+                    store: store, node: node,
+                    attempts: attempts - 1,
+                    answered: answered + (screen.contains("confirm") ? 1 : 0)
+                )
+            }
+        }
+    }
+
+    private static func poll(store: ForgeStore, sessionID: String?, attempts: Int) {
         store.refreshLive()
-        let target = PathIndex.canonicalize(cwd)
-        if let session = store.live.values.first(where: {
-            $0.cwd.map { PathIndex.canonicalize($0) == target } == true
-        }) {
+        if let sessionID, let session = store.live[sessionID] {
             print("LIVE: name=\(session.name ?? "-") status=\(session.status.rawValue) pid=\(session.pid)")
             print("LAUNCHTEST OK")
             exit(0)
         }
-        guard attempts > 0 else { print("LAUNCHTEST TIMEOUT"); exit(1) }
+        guard attempts > 0 else {
+            print("LAUNCHTEST TIMEOUT")
+            if let session = store.terminals.session(for: store.activeWorkspace?.terminals.last?.id ?? UUID()) {
+                print("running=\(session.isRunning) exit=\(String(describing: session.exitCode))")
+                print("--- terminal screen ---")
+                print(session.screenText)
+                print("--- end screen ---")
+            }
+            exit(1)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            MainActor.assumeIsolated { poll(store: store, cwd: cwd, attempts: attempts - 1) }
+            MainActor.assumeIsolated { poll(store: store, sessionID: sessionID, attempts: attempts - 1) }
         }
     }
 }
 
-/// Measures the work the inspector used to repeat on every render.
-/// `Forge --perftest` — picks the largest transcript on disk.
+/// Measures transcript loading on the largest session on disk.
+/// `Forge --perftest`.
 @MainActor
 enum PerfTest {
     static func run() {
@@ -158,43 +166,11 @@ enum PerfTest {
         }
         let summary = indexer.quickSummaries(files: [biggest])[0]
 
-        var clock = Date()
+        let clock = Date()
         let transcript = TranscriptLoader().load(summary)
         let loadMs = Date().timeIntervalSince(clock) * 1000
         print("transcript: \(transcript.events.count) events from \(size(biggest) / 1_000_000) MB")
         print("load: \(String(format: "%.0f", loadMs)) ms (once, off the main thread)")
-
-        // What the filter bar + list used to do on every single render.
-        clock = Date()
-        for _ in 0..<10 {
-            let shown = transcript.events.filter { event in
-                switch event.kind {
-                case .toolUse, .toolResult: return false
-                default: return true
-                }
-            }
-            let tools = transcript.events.filter {
-                if case .toolUse = $0.kind { return true }
-                if case .toolResult = $0.kind { return true }
-                return false
-            }.count
-            let thinking = transcript.events.filter { $0.kind == .thinking }.count
-            let system = transcript.events.filter {
-                if case .system = $0.kind { return true }
-                if case .attachment = $0.kind { return true }
-                return false
-            }.count
-            _ = (shown.count, tools, thinking, system, shown.isEmpty)
-        }
-        let beforeMs = Date().timeIntervalSince(clock) * 100
-        print("per render BEFORE (recounted every time): \(String(format: "%.2f", beforeMs)) ms")
-
-        clock = Date()
-        for _ in 0..<10 {
-            _ = (transcript.toolEventCount, transcript.thinkingEventCount, transcript.systemEventCount)
-        }
-        let afterMs = Date().timeIntervalSince(clock) * 100
-        print("per render AFTER  (precomputed):          \(String(format: "%.3f", afterMs)) ms")
         exit(0)
     }
 
@@ -203,39 +179,59 @@ enum PerfTest {
     }
 }
 
+/// Offscreen renderer for development: `Forge --snapshot out.png`.
+///
+/// Renders the real view tree against the real data with `ImageRenderer`, so
+/// the UI can be reviewed from a terminal without a visible window.
+struct SnapshotRequest {
+    var output: URL
+    var size: CGSize
+    var waitSeconds: Double
+    var zoom: Double?
+    var zoomToFit: Bool
+
+    init?(arguments: [String]) {
+        guard let flag = arguments.firstIndex(of: "--snapshot"), flag + 1 < arguments.count else { return nil }
+        output = URL(fileURLWithPath: arguments[flag + 1])
+
+        func value(_ name: String) -> String? {
+            guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else { return nil }
+            return arguments[index + 1]
+        }
+        size = CGSize(
+            width: value("--width").flatMap(Double.init) ?? 1560,
+            height: value("--height").flatMap(Double.init) ?? 960
+        )
+        waitSeconds = value("--wait").flatMap(Double.init) ?? 6
+        zoom = value("--zoom").flatMap(Double.init)
+        zoomToFit = zoom == nil && !arguments.contains("--no-fit")
+    }
+}
+
 @MainActor
 enum Snapshot {
     static func run(_ request: SnapshotRequest) {
         let store = ForgeStore()
-
-        // The canvas normally learns its size from a GeometryReader; there is no
-        // window here, so derive it from the requested image size.
-        let chromeHeight: CGFloat = 46 + 26 + 2
-        let panels: CGFloat = 258 + 430 + 2
+        let chromeHeight: CGFloat = 48 + 26 + 2
+        let panels: CGFloat = 262 + 430 + 2
         store.viewport.size = CGSize(
             width: max(200, request.size.width - panels),
             height: max(200, request.size.height - chromeHeight)
         )
         store.bootstrap()
-
-        let deadline = Date().addingTimeInterval(request.waitSeconds)
-        poll(store: store, request: request, deadline: deadline)
+        poll(store: store, request: request, deadline: Date().addingTimeInterval(request.waitSeconds))
     }
 
-    /// Waits for indexing and git discovery, then renders. Polls rather than
-    /// awaits so the main run loop keeps servicing the store's own callbacks.
     private static func poll(store: ForgeStore, request: SnapshotRequest, deadline: Date) {
         let settled = !store.isIndexing && !store.isLoadingGit && !store.graph.nodes.isEmpty
-        let expired = Date() >= deadline
-
-        guard settled || expired else {
+        guard settled || Date() >= deadline else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 MainActor.assumeIsolated { poll(store: store, request: request, deadline: deadline) }
             }
             return
         }
 
-        if request.selectNewestSession, store.selection == nil {
+        if store.selection == nil {
             let newest = store.graph.nodes
                 .filter { if case .session = $0.kind { return true } else { return false } }
                 .max { $0.sortDate < $1.sortDate }
@@ -252,7 +248,6 @@ enum Snapshot {
             store.fit()
         }
 
-        // One more short wait so the transcript load and a layout pass land.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             MainActor.assumeIsolated { render(store: store, request: request) }
         }
@@ -269,21 +264,18 @@ enum Snapshot {
         renderer.isOpaque = true
 
         guard let image = renderer.cgImage else {
-            FileHandle.standardError.write(Data("snapshot: ImageRenderer produced no image\n".utf8))
-            exit(1)
+            FileHandle.standardError.write(Data("snapshot: no image\n".utf8)); exit(1)
         }
         let rep = NSBitmapImageRep(cgImage: image)
         guard let data = rep.representation(using: .png, properties: [:]) else {
-            FileHandle.standardError.write(Data("snapshot: PNG encode failed\n".utf8))
-            exit(1)
+            FileHandle.standardError.write(Data("snapshot: PNG encode failed\n".utf8)); exit(1)
         }
         do {
             try data.write(to: request.output)
             print("snapshot: wrote \(request.output.path) (\(image.width)×\(image.height))")
             print("snapshot: \(store.statusLine)")
         } catch {
-            FileHandle.standardError.write(Data("snapshot: \(error)\n".utf8))
-            exit(1)
+            FileHandle.standardError.write(Data("snapshot: \(error)\n".utf8)); exit(1)
         }
         exit(0)
     }

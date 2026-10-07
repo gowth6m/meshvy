@@ -54,6 +54,8 @@ enum ModelDefaults {
 @Observable
 final class ModelCatalog {
     private(set) var models: [ClaudeModel] = ModelDefaults.builtIn
+    /// Model new terminals launch with.
+    var selectedModelID: String? = ModelDefaults.modelID
     private(set) var source: ModelSource = .builtIn
     private(set) var isRefreshing = false
 
