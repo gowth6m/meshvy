@@ -34,8 +34,8 @@ struct CanvasNode: Identifiable {
     var size: CGSize
     /// Section this node belongs to.
     var sectionID: String?
-    /// Stack this node belongs to, when it is part of one.
-    var stackID: UUID?
+    /// LinkedWorktree this node belongs to, when it is part of one.
+    var linkID: UUID?
     /// True when the user has dragged this node; auto-layout then leaves it alone.
     var isPinned: Bool = false
 
@@ -75,7 +75,7 @@ struct CanvasGroup: Identifiable {
     var subtitle: String
     var rect: CGRect
     var seed: String
-    var stackID: UUID?
+    var linkID: UUID?
 }
 
 /// What the canvas renders for the current filter + layout state.

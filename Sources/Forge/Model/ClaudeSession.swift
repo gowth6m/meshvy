@@ -124,6 +124,16 @@ struct TranscriptEvent: Identifiable, Hashable {
     var isSidechain: Bool
     /// Collapsed by default when the body is long or machine-facing.
     var startsCollapsed: Bool
+
+    /// One-line summary shown while collapsed. Built once at load rather than
+    /// sliced out of `text` on every render.
+    var preview: String = ""
+
+    static func makePreview(_ text: String) -> String {
+        String(text.prefix(140))
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+    }
 }
 
 /// Full transcript plus totals that are only knowable from a complete parse.
@@ -134,5 +144,31 @@ struct Transcript {
     var totalOutputTokens: Int
     var cacheReadTokens: Int
     var toolUseCounts: [String: Int]
+    /// True when only the tail of the transcript was decoded, so the counts and
+    /// token totals describe the shown window rather than the whole session.
     var truncated: Bool
+
+    /// Counts for the reader's filter bar. Computed once here rather than in the
+    /// view body — a long session has thousands of events, and recounting them
+    /// on every render is what made opening the panel feel slow.
+    var toolEventCount = 0
+    var thinkingEventCount = 0
+    var systemEventCount = 0
+
+    mutating func tallyEventKinds() {
+        var tools = 0
+        var thinking = 0
+        var system = 0
+        for event in events {
+            switch event.kind {
+            case .toolUse, .toolResult: tools += 1
+            case .thinking: thinking += 1
+            case .system, .attachment: system += 1
+            default: break
+            }
+        }
+        toolEventCount = tools
+        thinkingEventCount = thinking
+        systemEventCount = system
+    }
 }

@@ -4,27 +4,29 @@ A native macOS app for running coding agents across several repositories at once
 laid out on an infinite canvas.
 
 Forge starts empty. You add the repositories you work on together as a
-**workspace**, cut a **stack** — the same branch checked out as a worktree in
-every repo — and then put agents to work across all of it. Running agents appear
+**workspace**, cut a **linked worktree** — the same branch checked out in every
+repo at once — and then put agents to work across all of it. Running agents appear
 on the board live, and you can read any transcript without leaving the app.
 
 ![The board](docs/board.png)
 
 ## The model
 
-**Workspace** — the set of repositories you treat as one project. Add local
-clones with the folder picker, or paste a GitHub URL and Forge clones it for you.
+**Workspace** — the set of repositories you treat as one project, and the
+organising unit for everything else. Add local clones with the folder picker, or
+paste a GitHub URL and Forge clones it for you.
 
-**Stack** — one branch name, realised as a `git worktree` in every repo of the
-workspace. A change that spans three services is one stack: three checkouts, one
-branch, moving together. Removing the stack tears down every worktree (and the
-branch, if you ask).
+**Linked worktree** — one branch name, checked out as a `git worktree` in every
+repo of the workspace. A change that spans three services is one linked
+worktree: three checkouts, one branch, moving together. Removing it tears down
+every checkout (and the branch, if you ask).
 
-**Agent** — a real `claude` process started in a stack, with the sibling repos
-granted through `--add-dir` so a single agent can change all of them. Launch it
-as an *orchestrator*, and Forge briefs it to plan the work and dispatch teammates
-with the Agent tool rather than doing everything itself; launch it as a *worker*
-for one scoped task.
+**Agent** — a real `claude` process, scoped to the whole workspace, one linked
+worktree, or a single checkout. Everything in scope is granted through
+`--add-dir`, so an agent pointed at the workspace can change all three repos and
+every linked worktree in one session. Launch it as an *orchestrator* and Forge
+briefs it to plan the work and dispatch teammates with the Agent tool rather than
+doing everything itself; launch it as a *worker* for one scoped task.
 
 Forge does not host the agent. It starts the real CLI with a pre-assigned
 session id, so a launched agent registers itself in `~/.claude/sessions` and
@@ -42,7 +44,8 @@ pulsing dot means the agent is working right now.
 counts, divergence from upstream, and the tip commit. Sessions connect by a line
 to the checkout they ran in.
 
-**Sections** group the board either by stack (default) or by repository.
+**Sections** group the board by linked worktree (default) or by repository. The
+workspace's own checkouts are always the first section.
 
 ![Empty state](docs/empty.png)
 
@@ -51,7 +54,7 @@ to the checkout they ran in.
 | | |
 |---|---|
 | New workspace | ⇧⌘N |
-| New stack | ⌘N |
+| New linked worktree | ⌘N |
 | Add repositories | ⇧⌘O |
 | Launch agent | ⇧⌘L |
 | Pan | drag empty canvas, or scroll |
@@ -64,6 +67,12 @@ to the checkout they ran in.
 
 Right-click any card to launch an agent there, resume the session in Terminal,
 open the folder in your editor, or copy a path, branch or session id.
+
+Models come from a current built-in list, defaulting to Opus 5. Give Forge an
+Anthropic API key (the key button beside the model picker, stored in your
+keychain) and it lists models live from `GET /v1/models` instead, so newly
+released ones appear without an app update. The key is only used for that —
+launching an agent uses the CLI's own sign-in.
 
 Scrolling follows the system "natural scrolling" preference. If you want the
 opposite, **View → Invert Scroll Direction**.
@@ -99,9 +108,17 @@ files takes roughly **0.35 s**. Results are cached in
 transcripts are append-only, a file that has grown is re-scanned from its last
 complete record rather than from the start.
 
+Opening a session decodes only the tail of its transcript — 24 MB, back from the
+end. Most transcripts are smaller than that and are read whole; the pathological
+ones (tens of megabytes of tool output) used to take **265 ms** to decode in full
+before the panel could draw, and now take **62 ms** regardless of length.
+
 The canvas renders in screen space rather than applying `scaleEffect` to a scaled
 layer, so text stays crisp at any zoom, and it drops to drawing plain blocks in a
-single `Canvas` pass once cards are too small to read.
+single `Canvas` pass once cards are too small to read. Cards carry a shadow only
+when selected or hovered — a hundred rasterised shadows is a measurable cost
+during a resize — and the side panels open without an animation, so toggling one
+is a single relayout rather than one per frame.
 
 ## Layout
 
@@ -110,8 +127,8 @@ Sources/Forge/
   App/        entry point, menu commands, offscreen snapshot + test harnesses
   Core/       canvas geometry, theme, persistence
   Model/      workspaces and stacks, sessions, git, the canvas graph
-  Services/   byte scanner, indexer, transcript loader, git, stacks,
-              agent launcher, FSEvents
+  Services/   byte scanner, indexer, transcript loader, git, worktree linker,
+              agent launcher, model catalog, FSEvents
   Store/      app state, board composition, auto-layout
   UI/         canvas, cards, sidebar, inspector, transcript reader, sheets
 ```
@@ -120,8 +137,9 @@ Sources/Forge/
 
 ```sh
 Forge --snapshot out.png [--zoom 0.9] [--width W] [--height H]
-Forge --selftest <repoA> <repoB> [--keep]   # create a workspace + stack, verify, tear down
+Forge --selftest <repoA> <repoB> [--keep]   # workspace + linked worktree, verified, torn down
 Forge --launchtest                          # launch a real agent into the active workspace
+Forge --perftest                            # time transcript loading on your largest session
 ```
 
 `--snapshot` renders the real view tree against your real data and writes a PNG

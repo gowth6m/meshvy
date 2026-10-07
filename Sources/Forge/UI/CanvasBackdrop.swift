@@ -24,7 +24,6 @@ struct CanvasBackdrop: View {
             drawEdges(&context)
             if detail == .block { drawBlocks(&context) }
         }
-        .drawingGroup(opaque: true)
     }
 
     // MARK: Grid
@@ -98,7 +97,7 @@ struct CanvasBackdrop: View {
             let baseline = rect.minY - 7
             var cursorX = rect.minX + 2
 
-            // A stack spans several repositories, so it earns a marker that says
+            // A link spans several repositories, so it earns a marker that says
             // so even when the board is zoomed too far out to read the lanes.
             if style.badge != nil, viewport.scale > 0.3 {
                 let glyphSize = titleSize * 0.92
@@ -149,13 +148,13 @@ struct CanvasBackdrop: View {
 
         init(kind: GroupKind, seed: String) {
             switch kind {
-            case .stack:
+            case .link:
                 tint = Theme.repoTint(seed)
                 fillOpacity = 0.07
                 strokeOpacity = 0.45
                 lineWidth = 1.4
                 isDashed = false
-                badge = "square.stack.3d.up.fill"
+                badge = "square.link.3d.up.fill"
             case .main:
                 tint = Theme.worktree
                 fillOpacity = 0.045

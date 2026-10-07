@@ -1,57 +1,57 @@
 import Foundation
 
-/// Creates and removes the linked worktrees that make up a stack.
+/// Creates and removes the linked worktrees that make up a link.
 ///
-/// A stack is one branch name realised as a worktree in every repo of the
+/// A link is one branch name realised as a worktree in every repo of the
 /// workspace, so a change spanning several repos is one unit of work. Repos are
 /// handled independently: if one fails, the others still get their checkout and
-/// the failure is recorded against that member rather than aborting everything.
-struct StackService {
+/// the failure is recorded against that checkout rather than aborting everything.
+struct WorktreeLinker {
     private let git = GitService()
 
     struct Outcome {
-        var stack: Stack
+        var link: LinkedWorktree
         var failures: [String]
         var succeeded: Bool { failures.isEmpty }
     }
 
     // MARK: - Creating
 
-    func createStack(
+    func createLink(
         name: String,
         branch: String,
         baseRef: String?,
         intent: String?,
         in workspace: Workspace
     ) -> Outcome {
-        var members: [StackMember] = []
+        var checkouts: [LinkedCheckout] = []
         var failures: [String] = []
-        let stackFolder = workspace.worktreeRoot + "/" + Workspace.slug(name)
+        let linkFolder = workspace.worktreeRoot + "/" + Workspace.slug(name)
 
         for repo in workspace.repos {
-            let destination = stackFolder + "/" + repo.name
+            let destination = linkFolder + "/" + repo.name
             let base = baseRef ?? repo.defaultBranch ?? defaultBranch(for: repo.path) ?? "HEAD"
             let result = addWorktree(repoPath: repo.path, destination: destination, branch: branch, baseRef: base)
 
             switch result {
             case .success:
-                members.append(StackMember(repoID: repo.id, repoName: repo.name, path: destination))
+                checkouts.append(LinkedCheckout(repoID: repo.id, repoName: repo.name, path: destination))
             case .failure(let message):
                 failures.append("\(repo.name): \(message)")
-                members.append(StackMember(
+                checkouts.append(LinkedCheckout(
                     repoID: repo.id, repoName: repo.name, path: destination, failure: message
                 ))
             }
         }
 
-        let stack = Stack(
+        let link = LinkedWorktree(
             name: name,
             branch: branch,
             baseRef: baseRef,
-            members: members,
+            checkouts: checkouts,
             intent: intent?.isEmpty == true ? nil : intent
         )
-        return Outcome(stack: stack, failures: failures)
+        return Outcome(link: link, failures: failures)
     }
 
     private enum AddResult {
@@ -59,7 +59,7 @@ struct StackService {
         case failure(String)
     }
 
-    /// `git worktree add`, reusing the branch when it already exists so a stack
+    /// `git worktree add`, reusing the branch when it already exists so a link
     /// can be recreated or extended to a repo added later.
     private func addWorktree(repoPath: String, destination: String, branch: String, baseRef: String) -> AddResult {
         if FileManager.default.fileExists(atPath: destination) {
@@ -89,7 +89,7 @@ struct StackService {
         return .success
     }
 
-    /// The branch a new stack is cut from: the remote's default when known,
+    /// The branch a new link is cut from: the remote's default when known,
     /// else a conventional name, else whatever HEAD points at.
     func defaultBranch(for repoPath: String) -> String? {
         let remote = Shell.git(
@@ -109,33 +109,33 @@ struct StackService {
 
     // MARK: - Removing
 
-    /// Removes every worktree in the stack. `force` discards uncommitted work;
+    /// Removes every worktree in the link. `force` discards uncommitted work;
     /// without it git refuses on a dirty tree and that repo is reported back.
-    func removeStack(_ stack: Stack, in workspace: Workspace, force: Bool, deleteBranch: Bool) -> [String] {
+    func removeLink(_ link: LinkedWorktree, in workspace: Workspace, force: Bool, deleteBranch: Bool) -> [String] {
         var failures: [String] = []
 
-        for member in stack.members {
-            guard let repo = workspace.repos.first(where: { $0.id == member.repoID }) else { continue }
-            guard FileManager.default.fileExists(atPath: member.path) else { continue }
+        for checkout in link.checkouts {
+            guard let repo = workspace.repos.first(where: { $0.id == checkout.repoID }) else { continue }
+            guard FileManager.default.fileExists(atPath: checkout.path) else { continue }
 
-            var arguments = ["worktree", "remove", member.path]
+            var arguments = ["worktree", "remove", checkout.path]
             if force { arguments.append("--force") }
             let result = Shell.git(arguments, cwd: repo.path, timeout: 60)
             if !result.ok {
-                failures.append("\(member.repoName): \(Self.firstLine(result.stderr))")
+                failures.append("\(checkout.repoName): \(Self.firstLine(result.stderr))")
                 continue
             }
             if deleteBranch {
                 let flag = force ? "-D" : "-d"
-                let deleted = Shell.git(["branch", flag, stack.branch], cwd: repo.path, timeout: 20)
+                let deleted = Shell.git(["branch", flag, link.branch], cwd: repo.path, timeout: 20)
                 if !deleted.ok {
-                    failures.append("\(member.repoName): branch not deleted — \(Self.firstLine(deleted.stderr))")
+                    failures.append("\(checkout.repoName): branch not deleted — \(Self.firstLine(deleted.stderr))")
                 }
             }
         }
 
-        // Clean up the now-empty stack folder.
-        let folder = workspace.worktreeRoot + "/" + Workspace.slug(stack.name)
+        // Clean up the now-empty link folder.
+        let folder = workspace.worktreeRoot + "/" + Workspace.slug(link.name)
         if let contents = try? FileManager.default.contentsOfDirectory(atPath: folder), contents.isEmpty {
             try? FileManager.default.removeItem(atPath: folder)
         }

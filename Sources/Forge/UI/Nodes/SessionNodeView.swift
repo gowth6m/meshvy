@@ -40,9 +40,9 @@ struct SessionNodeView: View {
                 )
         )
         .shadow(
-            color: .black.opacity(isSelected ? 0.5 : 0.3),
-            radius: zoom.s(isSelected ? 14 : 7),
-            y: zoom.s(isSelected ? 5 : 3)
+            color: .black.opacity(isSelected || isHovered ? 0.5 : 0),
+            radius: isSelected || isHovered ? zoom.s(14) : 0,
+            y: isSelected || isHovered ? zoom.s(5) : 0
         )
         .opacity(isDimmed ? 0.22 : 1)
     }

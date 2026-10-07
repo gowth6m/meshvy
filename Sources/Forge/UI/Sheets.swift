@@ -6,14 +6,14 @@ import SwiftUI
 enum ForgeSheet: Identifiable {
     case newWorkspace
     case addRepos
-    case newStack
+    case newLink
     case launchAgent(NodeID?)
 
     var id: String {
         switch self {
         case .newWorkspace: return "newWorkspace"
         case .addRepos: return "addRepos"
-        case .newStack: return "newStack"
+        case .newLink: return "newLink"
         case .launchAgent(let node): return "launchAgent:" + (node?.storageKey ?? "-")
         }
     }
@@ -193,7 +193,7 @@ struct RepoPicker: View {
                         row(
                             icon: "arrow.down.circle",
                             tint: Theme.accent,
-                            title: StackService.repoName(from: StackService.normalizeRemote(target)),
+                            title: WorktreeLinker.repoName(from: WorktreeLinker.normalizeRemote(target)),
                             detail: "will be cloned",
                             remove: { cloneTargets.removeAll { $0 == target } }
                         )
@@ -267,7 +267,7 @@ struct NewWorkspaceSheet: View {
     var body: some View {
         SheetFrame(
             title: "New workspace",
-            subtitle: "A workspace is the set of repositories you work on together. Stacks cut the same branch across all of them at once."
+            subtitle: "A workspace is the set of repositories you work on together. From it you cut linked worktrees — the same branch checked out in every repo at once."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 FormField(label: "Name") {
@@ -318,9 +318,9 @@ struct AddReposSheet: View {
     }
 }
 
-// MARK: - New stack
+// MARK: - New link
 
-struct NewStackSheet: View {
+struct NewLinkSheet: View {
     @Bindable var store: ForgeStore
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -339,7 +339,7 @@ struct NewStackSheet: View {
 
     var body: some View {
         SheetFrame(
-            title: "New stack",
+            title: "New link",
             subtitle: "Creates the same branch as a worktree in every repository of this workspace, so one change can span all of them."
         ) {
             VStack(alignment: .leading, spacing: 16) {
@@ -356,8 +356,8 @@ struct NewStackSheet: View {
                 FormField(label: "Base", hint: "Leave empty to branch from each repository's default branch.") {
                     TextField("origin/main", text: $baseRef).boxedField()
                 }
-                FormField(label: "Intent", hint: "Included in the brief given to agents launched in this stack.") {
-                    TextField("What this stack is for", text: $intent, axis: .vertical)
+                FormField(label: "Intent", hint: "Included in the brief given to agents launched in this link.") {
+                    TextField("What this link is for", text: $intent, axis: .vertical)
                         .lineLimit(2...4)
                         .boxedField()
                 }
@@ -391,8 +391,8 @@ struct NewStackSheet: View {
         } footer: {
             Spacer()
             SecondaryButton(title: "Cancel") { dismiss() }
-            PrimaryButton(title: "Create stack", isEnabled: canCreate) {
-                store.createStack(
+            PrimaryButton(title: "Create link", isEnabled: canCreate) {
+                store.createLink(
                     name: name,
                     branch: resolvedBranch,
                     baseRef: baseRef.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : baseRef,
@@ -405,7 +405,7 @@ struct NewStackSheet: View {
 
     private func destination(for repo: WorkspaceRepo) -> String {
         guard let workspace = store.activeWorkspace else { return "" }
-        let folder = Workspace.slug(name.isEmpty ? "stack" : name)
+        let folder = Workspace.slug(name.isEmpty ? "link" : name)
         return (workspace.worktreeRoot + "/" + folder + "/" + repo.name)
             .replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
@@ -419,21 +419,53 @@ struct LaunchAgentSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var request = AgentLaunch()
     @State private var loaded = false
+    @State private var showingKeyField = false
+    @State private var apiKey = ""
 
-    private var stack: Stack? { node.flatMap { store.stack(containing: $0) } }
+    private var workspace: Workspace? { store.activeWorkspace }
+
+    private var scopes: [AgentScope] {
+        var options: [AgentScope] = [.workspace]
+        if let node, let link = store.linkedWorktree(containing: node) {
+            options.append(.link(link.id))
+        }
+        if let path = node?.worktreePath {
+            options.append(.checkout(path))
+        }
+        return options
+    }
+
+    private var subtitle: String {
+        switch request.scope {
+        case .workspace:
+            let repos = workspace?.repos.count ?? 0
+            let links = workspace?.linkedWorktrees.count ?? 0
+            return "Across all \(repos) \(repos == 1 ? "repository" : "repositories")"
+                + (links > 0 ? " and \(links) linked \(links == 1 ? "worktree" : "worktrees")." : ".")
+        case .link(let id):
+            guard let link = store.linkedWorktree(for: id) else { return "" }
+            return "In “\(link.name)” — branch \(link.branch) across \(link.checkouts.filter(\.isReady).count) repos."
+        case .checkout(let path):
+            return "In \(URL(fileURLWithPath: path).lastPathComponent)."
+        }
+    }
 
     var body: some View {
-        SheetFrame(
-            title: "Launch agent",
-            subtitle: stack.map { "In stack “\($0.name)” on branch \($0.branch)." }
-                ?? "Starts a Claude Code session in this checkout."
-        ) {
+        SheetFrame(title: "Launch agent", subtitle: subtitle) {
             VStack(alignment: .leading, spacing: 16) {
+                if scopes.count > 1 {
+                    FormField(label: "Scope") {
+                        HStack(spacing: 6) {
+                            ForEach(scopes, id: \.self) { scope in
+                                scopeChip(scope)
+                            }
+                        }
+                    }
+                }
+
                 FormField(label: "Role") {
                     HStack(spacing: 8) {
-                        ForEach(AgentRole.allCases) { role in
-                            roleCard(role)
-                        }
+                        ForEach(AgentRole.allCases) { role in roleCard(role) }
                     }
                 }
 
@@ -444,14 +476,25 @@ struct LaunchAgentSheet: View {
                 }
 
                 HStack(alignment: .top, spacing: 12) {
-                    FormField(label: "Model") {
-                        Picker("", selection: $request.model) {
-                            ForEach(AgentLaunch.models, id: \.label) { model in
-                                Text(model.label).tag(model.id)
+                    FormField(label: "Model", hint: store.models.source.label) {
+                        HStack(spacing: 6) {
+                            Picker("", selection: $request.model) {
+                                ForEach(store.models.models, id: \.key) { model in
+                                    Text(model.displayName).tag(model.id)
+                                }
                             }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            Button {
+                                showingKeyField.toggle()
+                            } label: {
+                                Image(systemName: store.models.hasCredential ? "key.fill" : "key")
+                                    .font(Theme.ui(10))
+                                    .foregroundStyle(store.models.hasCredential ? Theme.accent : Theme.textTertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Use an Anthropic API key to list models live")
                         }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
                     }
                     FormField(label: "Permissions") {
                         Picker("", selection: $request.permissionMode) {
@@ -461,6 +504,22 @@ struct LaunchAgentSheet: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
+                    }
+                }
+
+                if showingKeyField {
+                    FormField(
+                        label: "Anthropic API key",
+                        hint: "Stored in your keychain and used only to list models. Launching an agent uses the CLI's own sign-in."
+                    ) {
+                        HStack(spacing: 6) {
+                            SecureField("sk-ant-…", text: $apiKey).boxedField()
+                            SecondaryButton(title: store.models.isRefreshing ? "…" : "Save") {
+                                store.models.saveKey(apiKey)
+                                apiKey = ""
+                                showingKeyField = false
+                            }
+                        }
                     }
                 }
 
@@ -502,6 +561,37 @@ struct LaunchAgentSheet: View {
             loaded = true
             request = store.launchTemplate(for: node)
         }
+    }
+
+    private func scopeChip(_ scope: AgentScope) -> some View {
+        let selected = request.scope == scope
+        return Button {
+            let prompt = request.prompt
+            let role = request.role
+            let background = request.runsInBackground
+            request = store.template(scope: scope)
+            request.prompt = prompt
+            request.role = role
+            request.runsInBackground = background
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: scope.icon).font(Theme.ui(9.5, .semibold))
+                Text(scope.label).font(Theme.ui(11, .medium))
+            }
+            .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(selected ? Theme.accent.opacity(0.13) : Theme.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(selected ? Theme.accent.opacity(0.45) : Theme.hairline, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func roleCard(_ role: AgentRole) -> some View {

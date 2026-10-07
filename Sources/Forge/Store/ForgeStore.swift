@@ -39,7 +39,7 @@ final class ForgeStore {
     var searchQuery = "" { didSet { recomputeMatches() } }
     private(set) var matchingNodes: Set<String> = []
 
-    var grouping: BoardComposer.Grouping = .stack { didSet { rebuild(); persistLayout() } }
+    var grouping: BoardComposer.Grouping = .link { didSet { rebuild(); persistLayout() } }
     var showEndedSessions = true { didSet { rebuild(); persistLayout() } }
     var invertScroll = false { didSet { persistLayout() } }
     var inspectorVisible = true
@@ -67,9 +67,12 @@ final class ForgeStore {
     private let indexer = SessionIndexer()
     private let liveMonitor = LiveSessionMonitor()
     private let git = GitService()
-    private let stacks = StackService()
+    private let linkedWorktrees = WorktreeLinker()
     private let launcher = AgentLauncher()
     private let composer = BoardComposer()
+    /// Models offered in the launch sheet; refreshes from the Models API when a
+    /// key is configured.
+    let models = ModelCatalog()
     private let workspaceStore = WorkspaceStore()
     private let layoutStore = FileStore<SavedLayout>(filename: "layout.json")
     private let transcriptLoader = TranscriptLoader()
@@ -97,6 +100,7 @@ final class ForgeStore {
         refreshLive(rebuildGraph: false)
         startWatching()
         startTimers()
+        models.refresh()
 
         guard hasWorkspace else {
             statusLine = "No workspace — add one to get started"
@@ -109,7 +113,7 @@ final class ForgeStore {
         guard let stored = layoutStore.load() else { return }
         saved = stored
         pinned = stored.pinned.mapValues { CGPoint(x: $0.x, y: $0.y) }
-        grouping = BoardComposer.Grouping(rawValue: stored.grouping) ?? .stack
+        grouping = BoardComposer.Grouping(rawValue: stored.grouping) ?? .link
         showEndedSessions = stored.showEndedSessions
         invertScroll = stored.invertScroll
         viewport.center = CGPoint(x: stored.cameraX, y: stored.cameraY)
@@ -185,7 +189,7 @@ final class ForgeStore {
         var rejected: [String] = []
         var seen = Set<String>()
         for path in paths {
-            guard let repo = stacks.inspectRepo(at: path) else {
+            guard let repo = linkedWorktrees.inspectRepo(at: path) else {
                 rejected.append(URL(fileURLWithPath: path).lastPathComponent)
                 continue
             }
@@ -216,8 +220,8 @@ final class ForgeStore {
     func removeRepo(_ repoID: String) {
         guard var workspace = activeWorkspace else { return }
         workspace.repos.removeAll { $0.id == repoID }
-        for position in workspace.stacks.indices {
-            workspace.stacks[position].members.removeAll { $0.repoID == repoID }
+        for position in workspace.linkedWorktrees.indices {
+            workspace.linkedWorktrees[position].checkouts.removeAll { $0.repoID == repoID }
         }
         worktreesByRepo[repoID] = nil
         update(workspace)
@@ -227,18 +231,17 @@ final class ForgeStore {
     func cloneRepos(_ references: [String]) {
         guard let workspace = activeWorkspace else { return }
         let directory = workspace.worktreeRoot + "/repos"
-        let service = stacks
+        let service = linkedWorktrees
         isWorking = true
         show(.init(kind: .info, title: "Cloning \(references.count)…", detail: nil))
 
         Task.detached(priority: .userInitiated) {
-            var cloned: [WorkspaceRepo] = []
-            var failures: [String] = []
-            for reference in references {
-                switch service.clone(reference, into: directory) {
-                case .cloned(let repo): cloned.append(repo)
-                case .failed(let message): failures.append("\(reference): \(message)")
-                }
+            let outcomes = references.map { ($0, service.clone($0, into: directory)) }
+            let cloned: [WorkspaceRepo] = outcomes.compactMap {
+                if case .cloned(let repo) = $0.1 { return repo } else { return nil }
+            }
+            let failures: [String] = outcomes.compactMap {
+                if case .failed(let message) = $0.1 { return "\($0.0): \(message)" } else { return nil }
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -266,36 +269,36 @@ final class ForgeStore {
         workspaceStore.save(.init(workspaces: workspaces, activeWorkspaceID: activeWorkspaceID))
     }
 
-    // MARK: - Stacks
+    // MARK: - Linked worktrees
 
     /// Creates the same branch as a worktree in every repo of the workspace.
-    func createStack(name: String, branch: String, baseRef: String?, intent: String?) {
+    func createLink(name: String, branch: String, baseRef: String?, intent: String?) {
         guard let workspace = activeWorkspace else { return }
-        let service = stacks
+        let service = linkedWorktrees
         isWorking = true
         show(.init(kind: .info, title: "Creating worktrees in \(workspace.repos.count) repos…", detail: nil))
 
         Task.detached(priority: .userInitiated) {
-            let outcome = service.createStack(
+            let outcome = service.createLink(
                 name: name, branch: branch, baseRef: baseRef, intent: intent, in: workspace
             )
             await MainActor.run { [weak self] in
                 guard let self, var current = self.activeWorkspace else { return }
                 self.isWorking = false
-                current.stacks.append(outcome.stack)
+                current.linkedWorktrees.append(outcome.link)
                 self.update(current)
 
-                let ready = outcome.stack.members.filter(\.isReady).count
+                let ready = outcome.link.checkouts.filter(\.isReady).count
                 if outcome.succeeded {
                     self.show(.init(
                         kind: .success,
-                        title: "Stack “\(name)” ready in \(ready) \(ready == 1 ? "repo" : "repos")",
-                        detail: outcome.stack.members.first?.path
+                        title: "LinkedWorktree “\(name)” ready in \(ready) \(ready == 1 ? "repo" : "repos")",
+                        detail: outcome.link.checkouts.first?.path
                     ))
                 } else {
                     self.show(.init(
                         kind: .failure,
-                        title: "Stack “\(name)” created in \(ready) of \(outcome.stack.members.count) repos",
+                        title: "LinkedWorktree “\(name)” created in \(ready) of \(outcome.link.checkouts.count) repos",
                         detail: outcome.failures.joined(separator: "\n")
                     ))
                 }
@@ -306,21 +309,21 @@ final class ForgeStore {
         }
     }
 
-    func removeStack(_ stackID: UUID, force: Bool, deleteBranch: Bool) {
+    func removeLink(_ linkID: UUID, force: Bool, deleteBranch: Bool) {
         guard let workspace = activeWorkspace,
-              let stack = workspace.stacks.first(where: { $0.id == stackID }) else { return }
-        let service = stacks
+              let link = workspace.linkedWorktrees.first(where: { $0.id == linkID }) else { return }
+        let service = linkedWorktrees
         isWorking = true
 
         Task.detached(priority: .userInitiated) {
-            let failures = service.removeStack(stack, in: workspace, force: force, deleteBranch: deleteBranch)
+            let failures = service.removeLink(link, in: workspace, force: force, deleteBranch: deleteBranch)
             await MainActor.run { [weak self] in
                 guard let self, var current = self.activeWorkspace else { return }
                 self.isWorking = false
                 if failures.isEmpty {
-                    current.stacks.removeAll { $0.id == stackID }
+                    current.linkedWorktrees.removeAll { $0.id == linkID }
                     self.update(current)
-                    self.show(.init(kind: .success, title: "Removed stack “\(stack.name)”", detail: nil))
+                    self.show(.init(kind: .success, title: "Removed link “\(link.name)”", detail: nil))
                 } else {
                     self.show(.init(
                         kind: .failure,
@@ -333,14 +336,9 @@ final class ForgeStore {
         }
     }
 
-    func stack(for id: UUID?) -> Stack? {
+    func linkedWorktree(for id: UUID?) -> LinkedWorktree? {
         guard let id, let workspace = activeWorkspace else { return nil }
-        return workspace.stacks.first { $0.id == id }
-    }
-
-    /// The stack a node belongs to, for the launch sheet and context menus.
-    func stack(containing node: NodeID) -> Stack? {
-        stack(for: graph.node(node)?.stackID)
+        return workspace.linkedWorktrees.first { $0.id == id }
     }
 
     // MARK: - Agents
@@ -373,33 +371,63 @@ final class ForgeStore {
         }
     }
 
-    /// Prefilled launch request for a node, carrying the stack's sibling repos
-    /// so one agent can work across all of them.
+    /// Prefilled launch request for a node. Scope follows what was clicked: a
+    /// card inside a linked worktree targets that link, a lone checkout targets
+    /// itself, and nothing selected targets the whole workspace.
     func launchTemplate(for node: NodeID?) -> AgentLaunch {
+        if let node, let link = linkedWorktree(containing: node) {
+            return template(scope: .link(link.id))
+        }
+        if let path = node?.worktreePath {
+            return template(scope: .checkout(path))
+        }
+        return template(scope: .workspace)
+    }
+
+    /// An agent that owns every repository in the workspace and every linked
+    /// worktree cut across them.
+    func workspaceLaunchTemplate() -> AgentLaunch { template(scope: .workspace) }
+
+    func template(scope: AgentScope) -> AgentLaunch {
         var request = AgentLaunch()
+        request.scope = scope
         guard let workspace = activeWorkspace else { return request }
 
-        if let node, let stack = stack(containing: node) {
-            let ready = stack.members.filter(\.isReady)
-            request.cwd = (node.worktreePath.flatMap { path in
-                ready.first { $0.path == path }?.path
-            }) ?? ready.first?.path ?? workspace.repos.first?.path ?? ""
-            request.additionalDirs = ready.map(\.path)
-            request.stackSummary = AgentLauncher.stackSummary(stack: stack, workspace: workspace)
-            request.name = ""
-        } else if let path = node?.worktreePath {
-            request.cwd = path
-            request.additionalDirs = [path]
-        } else if let newest = workspace.stacks.max(by: { $0.createdAt < $1.createdAt }) {
-            let ready = newest.members.filter(\.isReady)
+        switch scope {
+        case .workspace:
+            // Start in a checkout rather than a parent folder so the agent has a
+            // real git context; everything else comes in through --add-dir.
+            let linkPaths = workspace.linkedWorktrees
+                .flatMap { $0.checkouts.filter(\.isReady).map(\.path) }
+                .filter { FileManager.default.fileExists(atPath: $0) }
+            let repoPaths = workspace.repos.map(\.path)
+            request.cwd = linkPaths.first ?? repoPaths.first ?? ""
+            request.additionalDirs = repoPaths + linkPaths
+            request.brief = AgentLauncher.workspaceSummary(
+                workspace: workspace,
+                linkedWorktrees: workspace.linkedWorktrees
+            )
+
+        case .link(let id):
+            guard let link = workspace.linkedWorktrees.first(where: { $0.id == id }) else { break }
+            let ready = link.checkouts.filter(\.isReady)
             request.cwd = ready.first?.path ?? ""
             request.additionalDirs = ready.map(\.path)
-            request.stackSummary = AgentLauncher.stackSummary(stack: newest, workspace: workspace)
-        } else {
-            request.cwd = workspace.repos.first?.path ?? ""
-            request.additionalDirs = workspace.repos.map(\.path)
+            request.brief = AgentLauncher.linkSummary(link: link, workspace: workspace)
+
+        case .checkout(let path):
+            request.cwd = path
+            request.additionalDirs = [path]
+            if let link = workspace.linkedWorktrees.first(where: { $0.paths.contains(path) }) {
+                request.brief = AgentLauncher.linkSummary(link: link, workspace: workspace)
+            }
         }
         return request
+    }
+
+    /// The linked worktree a node belongs to.
+    func linkedWorktree(containing node: NodeID) -> LinkedWorktree? {
+        linkedWorktree(for: graph.node(node)?.linkID)
     }
 
     // MARK: - Indexing
@@ -609,7 +637,7 @@ final class ForgeStore {
         let busy = live.values.filter { $0.status == .busy }.count
         var parts = [
             "\(workspace.repos.count) \(workspace.repos.count == 1 ? "repo" : "repos")",
-            "\(workspace.stacks.count) \(workspace.stacks.count == 1 ? "stack" : "stacks")",
+            "\(workspace.linkedWorktrees.count) \(workspace.linkedWorktrees.count == 1 ? "link" : "linkedWorktrees")",
             "\(worktrees) worktrees",
             "\(sessionCount) sessions"
         ]
@@ -798,7 +826,7 @@ final class ForgeStore {
 
 /// Tests whether a path belongs to a workspace.
 ///
-/// Matches live worktrees first, then falls back to the repo and stack paths on
+/// Matches live worktrees first, then falls back to the repo and link paths on
 /// record — so a session whose checkout has since been deleted still lands in
 /// the workspace it was run from.
 private struct WorkspaceScope {
@@ -807,7 +835,7 @@ private struct WorkspaceScope {
     init(workspace: Workspace, worktreesByRepo: [String: [Worktree]]) {
         var paths = worktreesByRepo.values.flatMap { $0.map(\.path) }
         paths.append(contentsOf: workspace.repos.map(\.path))
-        paths.append(contentsOf: workspace.stacks.flatMap(\.paths))
+        paths.append(contentsOf: workspace.linkedWorktrees.flatMap(\.paths))
         paths.append(workspace.worktreeRoot)
         index = PathIndex(paths: paths)
     }

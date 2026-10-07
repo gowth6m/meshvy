@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-/// Starts `claude` processes against a stack.
+/// Starts `claude` processes against a link.
 ///
 /// Forge does not host the agent — it starts the real CLI with the right working
 /// directory, the sibling repos granted via `--add-dir`, and a pre-assigned
@@ -93,7 +93,7 @@ struct AgentLauncher {
         return arguments
     }
 
-    /// Prepends what the agent needs to know about the stack it is working in:
+    /// Prepends what the agent needs to know about the link it is working in:
     /// which repos are checked out where, and — for an orchestrator — that it is
     /// expected to split the work across teammates rather than do it all itself.
     static func composePrompt(_ request: AgentLaunch) -> String {
@@ -101,34 +101,34 @@ struct AgentLauncher {
         // that, every launched agent's card would be titled with our boilerplate
         // instead of the task the user typed.
         var brief: [String] = []
-        if let summary = request.stackSummary, !summary.isEmpty {
+        if let summary = request.brief, !summary.isEmpty {
             brief.append(summary)
         }
         if request.role == .orchestrator {
             brief.append("""
-            You are the orchestrator for this stack. Plan the work across the \
-            repositories above, then dispatch teammates with the Agent tool to \
-            carry out the independent parts in parallel, giving each one a scoped \
-            task and the exact paths it owns. Run agents whose work does not \
-            overlap concurrently. Review what comes back, integrate it, and keep \
-            the repositories consistent with each other. Do the coordination \
-            yourself; hand off the implementation.
+            You are the orchestrator here. Plan the work across the repositories \
+            above, then dispatch teammates with the Agent tool to carry out the \
+            independent parts in parallel, giving each one a scoped task and the \
+            exact paths it owns. Launch agents whose work does not overlap \
+            concurrently rather than one after another. Review what comes back, \
+            integrate it, and keep the repositories consistent with each other. \
+            Do the coordination yourself; hand off the implementation.
             """)
         }
         guard !brief.isEmpty else { return request.prompt }
         return "<forge-brief>\n" + brief.joined(separator: "\n\n") + "\n</forge-brief>\n\n" + request.prompt
     }
 
-    /// Human-readable context block describing the stack's checkouts.
-    static func stackSummary(stack: Stack, workspace: Workspace) -> String {
-        var lines = ["You are working in the Forge stack `\(stack.name)` on branch `\(stack.branch)`."]
-        if let intent = stack.intent, !intent.isEmpty {
-            lines.append("Stack intent: \(intent)")
+    /// Human-readable context block describing the link's checkouts.
+    static func linkSummary(link: LinkedWorktree, workspace: Workspace) -> String {
+        var lines = ["You are working in the Forge link `\(link.name)` on branch `\(link.branch)`."]
+        if let intent = link.intent, !intent.isEmpty {
+            lines.append("LinkedWorktree intent: \(intent)")
         }
         lines.append("")
-        lines.append("It spans \(stack.members.filter(\.isReady).count) repositories, each checked out on that branch:")
-        for member in stack.members where member.isReady {
-            lines.append("- \(member.repoName): \(member.path)")
+        lines.append("It spans \(link.checkouts.filter(\.isReady).count) repositories, each checked out on that branch:")
+        for checkout in link.checkouts where checkout.isReady {
+            lines.append("- \(checkout.repoName): \(checkout.path)")
         }
         lines.append("")
         lines.append("""
@@ -139,10 +139,51 @@ struct AgentLauncher {
         return lines.joined(separator: "\n")
     }
 
+    /// Context block for an agent that owns the entire workspace: every repo,
+    /// its main checkout, and every linked worktree currently cut across them.
+    static func workspaceSummary(workspace: Workspace, linkedWorktrees: [LinkedWorktree]) -> String {
+        var lines = ["You are working across the Forge workspace `\(workspace.name)`."]
+        lines.append("")
+        lines.append("It contains \(workspace.repos.count) repositories:")
+        for repo in workspace.repos {
+            lines.append("- \(repo.name): \(repo.path)")
+        }
+
+        let live = linkedWorktrees.filter { !$0.checkouts.filter(\.isReady).isEmpty }
+        if !live.isEmpty {
+            lines.append("")
+            lines.append("""
+            Each of the following is a linked worktree: one branch name checked \
+            out simultaneously in several of those repositories, so a change \
+            spanning them is one unit of work.
+            """)
+            for link in live {
+                lines.append("")
+                lines.append("• `\(link.name)` on branch `\(link.branch)`"
+                             + (link.intent.map { " — \($0)" } ?? ""))
+                for checkout in link.checkouts where checkout.isReady {
+                    lines.append("    - \(checkout.repoName): \(checkout.path)")
+                }
+            }
+        }
+
+        lines.append("")
+        lines.append("""
+        Every path listed above is writable. When a change spans repositories, \
+        make it on the same branch name in each of them and commit together so \
+        the repositories stay consistent.
+        """)
+        return lines.joined(separator: "\n")
+    }
+
     static func derivedName(for request: AgentLaunch) -> String {
-        let folder = URL(fileURLWithPath: request.cwd).lastPathComponent
+        let base: String
+        switch request.scope {
+        case .workspace: base = "workspace"
+        default: base = URL(fileURLWithPath: request.cwd).lastPathComponent
+        }
         let suffix = String(UUID().uuidString.prefix(4)).lowercased()
-        return "\(folder)-\(request.role == .orchestrator ? "orc" : "agt")-\(suffix)"
+        return "\(base)-\(request.role == .orchestrator ? "orc" : "agt")-\(suffix)"
     }
 
     // MARK: - Process management

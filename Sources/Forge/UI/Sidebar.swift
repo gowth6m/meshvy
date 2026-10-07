@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Left rail: what is running right now, the stacks in this workspace, and the
+/// Left rail: what is running right now, the linkedWorktrees in this workspace, and the
 /// repositories behind them. Selecting a row pans the canvas to that card rather
 /// than replacing the view, so the board stays the primary surface.
 struct Sidebar: View {
@@ -38,16 +38,16 @@ struct Sidebar: View {
                     }
 
                     SectionHeader(
-                        title: "Stacks",
-                        count: store.activeWorkspace?.stacks.count ?? 0,
+                        title: "Linked worktrees",
+                        count: store.activeWorkspace?.linkedWorktrees.count ?? 0,
                         tint: Theme.accent,
-                        action: ("plus", "New stack", { sheet = .newStack })
+                        action: ("plus", "New link", { sheet = .newLink })
                     )
-                    ForEach(store.activeWorkspace?.stacks.sorted { $0.createdAt > $1.createdAt } ?? []) { stack in
-                        stackSection(stack)
+                    ForEach(store.activeWorkspace?.linkedWorktrees.sorted { $0.createdAt > $1.createdAt } ?? []) { link in
+                        linkSection(link)
                     }
-                    if store.activeWorkspace?.stacks.isEmpty == true {
-                        hint("No stacks yet. A stack cuts one branch across every repo at once.")
+                    if store.activeWorkspace?.linkedWorktrees.isEmpty == true {
+                        hint("No linkedWorktrees yet. A link cuts one branch across every repo at once.")
                     }
 
                     Spacer().frame(height: 14)
@@ -134,8 +134,8 @@ struct Sidebar: View {
         }
     }
 
-    private func stackSection(_ stack: Stack) -> some View {
-        let key = "stack:" + stack.id.uuidString
+    private func linkSection(_ link: LinkedWorktree) -> some View {
+        let key = "link:" + link.id.uuidString
         let isCollapsed = collapsed.contains(key)
         return VStack(alignment: .leading, spacing: 2) {
             Button {
@@ -146,15 +146,15 @@ struct Sidebar: View {
                         .font(Theme.ui(8.5, .bold))
                         .foregroundStyle(Theme.textTertiary)
                         .frame(width: 10)
-                    Image(systemName: "square.stack.3d.up.fill")
+                    Image(systemName: "square.link.3d.up.fill")
                         .font(Theme.ui(9.5))
-                        .foregroundStyle(Theme.repoTint(stack.branch))
-                    Text(stack.name)
+                        .foregroundStyle(Theme.repoTint(link.branch))
+                    Text(link.name)
                         .font(Theme.ui(12, .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    Text("\(stack.members.filter(\.isReady).count)")
+                    Text("\(link.checkouts.filter(\.isReady).count)")
                         .font(Theme.mono(9.5, .medium))
                         .foregroundStyle(Theme.textTertiary)
                 }
@@ -164,40 +164,40 @@ struct Sidebar: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                Button("Launch agent here…") { sheet = .launchAgent(firstNode(of: stack)) }
+                Button("Launch agent here…") { sheet = .launchAgent(firstNode(of: link)) }
                 Divider()
-                Button("Remove stack") { store.removeStack(stack.id, force: false, deleteBranch: false) }
-                Button("Remove stack and discard changes") {
-                    store.removeStack(stack.id, force: true, deleteBranch: true)
+                Button("Remove link") { store.removeLink(link.id, force: false, deleteBranch: false) }
+                Button("Remove link and discard changes") {
+                    store.removeLink(link.id, force: true, deleteBranch: true)
                 }
             }
 
             if !isCollapsed {
-                ForEach(stack.members) { member in
-                    memberRow(member, branch: stack.branch)
+                ForEach(link.checkouts) { checkout in
+                    memberRow(checkout, branch: link.branch)
                 }
             }
         }
     }
 
-    private func memberRow(_ member: StackMember, branch: String) -> some View {
+    private func memberRow(_ checkout: LinkedCheckout, branch: String) -> some View {
         SidebarRow(
-            isSelected: store.selection == .worktree(member.path),
-            action: { store.reveal(.worktree(member.path)) }
+            isSelected: store.selection == .worktree(checkout.path),
+            action: { store.reveal(.worktree(checkout.path)) }
         ) {
             HStack(spacing: 6) {
-                Image(systemName: member.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
+                Image(systemName: checkout.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
                     .font(Theme.ui(9))
-                    .foregroundStyle(member.isReady ? Theme.worktree : Theme.dirty)
+                    .foregroundStyle(checkout.isReady ? Theme.worktree : Theme.dirty)
                     .frame(width: 12)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(member.repoName)
+                    Text(checkout.repoName)
                         .font(Theme.ui(11.5))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
-                    Text(member.failure ?? branch)
+                    Text(checkout.failure ?? branch)
                         .font(Theme.mono(9.5))
-                        .foregroundStyle(member.isReady ? Theme.branch.opacity(0.85) : Theme.dirty)
+                        .foregroundStyle(checkout.isReady ? Theme.branch.opacity(0.85) : Theme.dirty)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -284,8 +284,8 @@ struct Sidebar: View {
         }
     }
 
-    private func firstNode(of stack: Stack) -> NodeID? {
-        stack.members.first(where: \.isReady).map { NodeID.worktree($0.path) }
+    private func firstNode(of link: LinkedWorktree) -> NodeID? {
+        link.checkouts.first(where: \.isReady).map { NodeID.worktree($0.path) }
     }
 
     private func toggle(_ key: String) {

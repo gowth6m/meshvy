@@ -3,19 +3,26 @@ import Foundation
 /// Decides what goes on the board and how it is grouped.
 ///
 /// The layout engine only positions sections and lanes; everything about what a
-/// section *means* — a stack, a repo's main checkout, history whose directory is
+/// section *means* — a link, a repo's main checkout, history whose directory is
 /// gone — is decided here.
 struct BoardComposer {
-    enum Grouping: String, Codable, CaseIterable {
-        /// Group by stack: one section per linked branch spanning repos.
-        case stack
+    enum Grouping: String, Codable, CaseIterable, Hashable {
+        /// Group by link: one section per linked branch spanning repos.
+        case link
         /// Group by repository, with its worktrees as lanes.
         case repo
 
         var label: String {
             switch self {
-            case .stack: return "By stack"
-            case .repo: return "By repo"
+            case .link: return "Linked worktrees"
+            case .repo: return "Repositories"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .link: return "link"
+            case .repo: return "shippingbox"
             }
         }
     }
@@ -43,8 +50,8 @@ struct BoardComposer {
             }
         }
 
-        var sections = input.grouping == .stack
-            ? stackSections(input, worktrees: allWorktrees, sessions: byPath)
+        var sections = input.grouping == .link
+            ? linkSections(input, worktrees: allWorktrees, sessions: byPath)
             : repoSections(input, sessions: byPath)
 
         if !orphans.isEmpty {
@@ -60,47 +67,47 @@ struct BoardComposer {
         return sections
     }
 
-    // MARK: - Grouped by stack
+    // MARK: - Grouped by link
 
-    private func stackSections(
+    private func linkSections(
         _ input: Input, worktrees: [Worktree], sessions: [String: [SessionSummary]]
     ) -> [BoardSection] {
         var claimed = Set<String>()
         var sections: [BoardSection] = []
 
-        for stack in input.workspace.stacks.sorted(by: { $0.createdAt > $1.createdAt }) {
+        for link in input.workspace.linkedWorktrees.sorted(by: { $0.createdAt > $1.createdAt }) {
             var lanes: [BoardLane] = []
-            for member in stack.members {
-                claimed.insert(member.path)
-                let existing = worktrees.first { $0.path == member.path }
+            for checkout in link.checkouts {
+                claimed.insert(checkout.path)
+                let existing = worktrees.first { $0.path == checkout.path }
                 let worktree = existing ?? Worktree(
-                    path: member.path,
-                    branch: stack.branch,
+                    path: checkout.path,
+                    branch: link.branch,
                     head: nil,
                     isMain: false,
                     isDetached: false,
                     isLocked: false,
-                    // A member whose `git worktree add` failed, or that has since
+                    // A checkout whose `git worktree add` failed, or that has since
                     // been removed on disk, still earns a card saying so.
-                    isPrunable: member.failure != nil,
-                    isArchived: !FileManager.default.fileExists(atPath: member.path),
-                    displayName: member.repoName
+                    isPrunable: checkout.failure != nil,
+                    isArchived: !FileManager.default.fileExists(atPath: checkout.path),
+                    displayName: checkout.repoName
                 )
-                lanes.append(BoardLane(worktree: worktree, sessions: sessions[member.path] ?? []))
+                lanes.append(BoardLane(worktree: worktree, sessions: sessions[checkout.path] ?? []))
             }
             sections.append(BoardSection(
-                id: "stack." + stack.id.uuidString,
-                kind: .stack,
-                title: stack.name,
-                subtitle: stack.intent ?? stack.branch,
-                seed: stack.branch,
+                id: "link." + link.id.uuidString,
+                kind: .link,
+                title: link.name,
+                subtitle: link.intent ?? link.branch,
+                seed: link.branch,
                 lanes: lanes,
-                stackID: stack.id,
-                branch: stack.branch
+                linkID: link.id,
+                branch: link.branch
             ))
         }
 
-        // The repos themselves, so the workspace is visible before any stack exists.
+        // The repos themselves, so the workspace is visible before any link exists.
         var mainLanes: [BoardLane] = []
         var otherLanes: [BoardLane] = []
         for repo in input.workspace.repos {
@@ -126,7 +133,7 @@ struct BoardComposer {
                 id: "forge.other",
                 kind: .other,
                 title: "Other worktrees",
-                subtitle: "Not part of a stack",
+                subtitle: "Not part of a link",
                 seed: "other",
                 lanes: otherLanes.sorted { ($0.worktree?.name ?? "") < ($1.worktree?.name ?? "") }
             ))
@@ -162,7 +169,7 @@ struct BoardSection: Identifiable {
     var subtitle: String
     var seed: String
     var lanes: [BoardLane]
-    var stackID: UUID?
+    var linkID: UUID?
     var branch: String?
 
     var sessionCount: Int { lanes.reduce(0) { $0 + $1.sessions.count } }
@@ -175,7 +182,7 @@ struct BoardLane {
 }
 
 enum GroupKind {
-    case stack
+    case link
     case main
     case other
     case repo

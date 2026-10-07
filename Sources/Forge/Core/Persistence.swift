@@ -39,7 +39,7 @@ struct SavedLayout: Codable {
     var cameraX: Double = 0
     var cameraY: Double = 0
     var scale: Double = 1
-    var grouping: String = "stack"
+    var grouping: String = "link"
     var showEndedSessions: Bool = true
     var invertScroll: Bool = false
 }

@@ -35,7 +35,7 @@ struct SnapshotRequest {
 
 /// Headless end-to-end exercise of the workspace flow, for development:
 /// `Forge --selftest <repoA> <repoB> …`. Creates a throwaway workspace, cuts a
-/// stack across every repo, reports what git actually did, then removes it.
+/// link across every repo, reports what git actually did, then removes it.
 @MainActor
 enum SelfTest {
     static var keep = false
@@ -58,7 +58,7 @@ enum SelfTest {
         let workspace = store.createWorkspace(name: "Forge Selftest", repos: found.repos)
         print("workspace: \(workspace.name) root=\(workspace.worktreeRoot)")
 
-        store.createStack(
+        store.createLink(
             name: "selftest-feature", branch: "selftest-feature", baseRef: nil,
             intent: "Prove that one branch can span every repo in the workspace"
         )
@@ -67,15 +67,15 @@ enum SelfTest {
 
     private static func poll(store: ForgeStore, workspaceID: UUID, attempts: Int) {
         guard let current = store.workspaces.first(where: { $0.id == workspaceID }) else { exit(1) }
-        if let stack = current.stacks.first {
-            print("stack: \(stack.name) branch=\(stack.branch) members=\(stack.members.count)")
+        if let link = current.linkedWorktrees.first {
+            print("link: \(link.name) branch=\(link.branch) checkouts=\(link.checkouts.count)")
             var allGood = true
-            for member in stack.members {
-                let exists = FileManager.default.fileExists(atPath: member.path)
-                let branch = Shell.git(["rev-parse", "--abbrev-ref", "HEAD"], cwd: member.path, timeout: 5)
+            for checkout in link.checkouts {
+                let exists = FileManager.default.fileExists(atPath: checkout.path)
+                let branch = Shell.git(["rev-parse", "--abbrev-ref", "HEAD"], cwd: checkout.path, timeout: 5)
                 let head = branch.ok ? (branch.lines.first ?? "?") : "n/a"
-                print("  - \(member.repoName): onDisk=\(exists) branch=\(head) failure=\(member.failure ?? "none")")
-                if !exists || head != stack.branch { allGood = false }
+                print("  - \(checkout.repoName): onDisk=\(exists) branch=\(head) failure=\(checkout.failure ?? "none")")
+                if !exists || head != link.branch { allGood = false }
             }
             print("sections: \(store.sections.map { "\($0.title)(\($0.lanes.count) lanes)" }.joined(separator: ", "))")
             print("nodes: \(store.graph.nodes.count) groups: \(store.graph.groups.count)")
@@ -84,12 +84,12 @@ enum SelfTest {
                 print("SELFTEST KEPT — workspace left in place for snapshotting")
                 exit(allGood ? 0 : 1)
             }
-            store.removeStack(stack.id, force: true, deleteBranch: true)
+            store.removeLink(link.id, force: true, deleteBranch: true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                 MainActor.assumeIsolated {
                     let after = store.workspaces.first(where: { $0.id == workspaceID })
-                    let removed = after?.stacks.isEmpty ?? false
-                    let gone = stack.members.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }
+                    let removed = after?.linkedWorktrees.isEmpty ?? false
+                    let gone = link.checkouts.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }
                     print("teardown: recordRemoved=\(removed) dirsRemoved=\(gone)")
                     store.deleteWorkspace(workspaceID)
                     print(allGood && removed && gone ? "SELFTEST OK" : "SELFTEST FAILED")
@@ -106,7 +106,7 @@ enum SelfTest {
 }
 
 /// Proves the launch path: starts a real agent in the active workspace's newest
-/// stack and waits for it to register as live. `Forge --launchtest`.
+/// link and waits for it to register as live. `Forge --launchtest`.
 @MainActor
 enum LaunchTest {
     static func run() {
@@ -114,14 +114,16 @@ enum LaunchTest {
         store.bootstrap()
         guard store.hasWorkspace else { print("no workspace"); exit(1) }
 
-        var request = store.launchTemplate(for: nil)
+        var request = store.workspaceLaunchTemplate()
         request.role = .orchestrator
         request.prompt = "Reply with exactly: FORGE-LAUNCH-OK. Do not use any tools."
         request.model = "claude-haiku-4-5-20251001"
         request.runsInBackground = true
         print("cwd: \(request.cwd)")
         print("addDirs: \(request.additionalDirs)")
-        print("promptPreview: \(AgentLauncher.composePrompt(request).prefix(160))…")
+        print("--- brief ---")
+        print(AgentLauncher.composePrompt(request))
+        print("--- end brief ---")
 
         store.launchAgent(request)
         poll(store: store, cwd: request.cwd, attempts: 60)
@@ -141,6 +143,63 @@ enum LaunchTest {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             MainActor.assumeIsolated { poll(store: store, cwd: cwd, attempts: attempts - 1) }
         }
+    }
+}
+
+/// Measures the work the inspector used to repeat on every render.
+/// `Forge --perftest` — picks the largest transcript on disk.
+@MainActor
+enum PerfTest {
+    static func run() {
+        let indexer = SessionIndexer()
+        let files = indexer.transcriptFiles()
+        guard let biggest = files.max(by: { size($0) < size($1) }) else {
+            print("no transcripts"); exit(1)
+        }
+        let summary = indexer.quickSummaries(files: [biggest])[0]
+
+        var clock = Date()
+        let transcript = TranscriptLoader().load(summary)
+        let loadMs = Date().timeIntervalSince(clock) * 1000
+        print("transcript: \(transcript.events.count) events from \(size(biggest) / 1_000_000) MB")
+        print("load: \(String(format: "%.0f", loadMs)) ms (once, off the main thread)")
+
+        // What the filter bar + list used to do on every single render.
+        clock = Date()
+        for _ in 0..<10 {
+            let shown = transcript.events.filter { event in
+                switch event.kind {
+                case .toolUse, .toolResult: return false
+                default: return true
+                }
+            }
+            let tools = transcript.events.filter {
+                if case .toolUse = $0.kind { return true }
+                if case .toolResult = $0.kind { return true }
+                return false
+            }.count
+            let thinking = transcript.events.filter { $0.kind == .thinking }.count
+            let system = transcript.events.filter {
+                if case .system = $0.kind { return true }
+                if case .attachment = $0.kind { return true }
+                return false
+            }.count
+            _ = (shown.count, tools, thinking, system, shown.isEmpty)
+        }
+        let beforeMs = Date().timeIntervalSince(clock) * 100
+        print("per render BEFORE (recounted every time): \(String(format: "%.2f", beforeMs)) ms")
+
+        clock = Date()
+        for _ in 0..<10 {
+            _ = (transcript.toolEventCount, transcript.thinkingEventCount, transcript.systemEventCount)
+        }
+        let afterMs = Date().timeIntervalSince(clock) * 100
+        print("per render AFTER  (precomputed):          \(String(format: "%.3f", afterMs)) ms")
+        exit(0)
+    }
+
+    private static func size(_ url: URL) -> Int {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
     }
 }
 

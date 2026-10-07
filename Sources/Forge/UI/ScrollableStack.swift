@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A scrolling column that degrades to a plain stack when rendering offscreen.
+/// A scrolling column that degrades to a plain link when rendering offscreen.
 ///
 /// `ImageRenderer` never materialises `ScrollView` content, so every panel built
 /// on one comes out blank in a `--snapshot`. Swapping the container keeps those
@@ -12,7 +12,7 @@ struct ScrollableStack<Content: View>: View {
 
     var body: some View {
         if isSnapshot {
-            // GeometryReader absorbs the proposal instead of letting the stack's
+            // GeometryReader absorbs the proposal instead of letting the link's
             // ideal height push the surrounding layout around.
             GeometryReader { proxy in
                 VStack(alignment: alignment, spacing: 0) {

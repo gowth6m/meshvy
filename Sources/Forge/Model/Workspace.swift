@@ -8,8 +8,8 @@ struct Workspace: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var name: String
     var repos: [WorkspaceRepo] = []
-    var stacks: [Stack] = []
-    /// Where `git worktree add` puts new checkouts. Each stack gets a folder
+    var linkedWorktrees: [LinkedWorktree] = []
+    /// Where `git worktree add` puts new checkouts. Each link gets a folder
     /// under here with one subfolder per repo.
     var worktreeRoot: String
     var createdAt: Date = Date()
@@ -30,8 +30,8 @@ struct Workspace: Identifiable, Codable, Hashable {
         return collapsed.isEmpty ? "workspace" : collapsed
     }
 
-    func stack(named branch: String) -> Stack? {
-        stacks.first { $0.branch == branch }
+    func link(named branch: String) -> LinkedWorktree? {
+        linkedWorktrees.first { $0.branch == branch }
     }
 
     /// Every checkout path this workspace knows about, for scoping the board.
@@ -46,33 +46,33 @@ struct WorkspaceRepo: Identifiable, Codable, Hashable {
     /// Main working tree.
     var path: String
     var name: String
-    /// Branch new stacks are cut from when nothing else is specified.
+    /// Branch new linkedWorktrees are cut from when nothing else is specified.
     var defaultBranch: String?
 }
 
 /// A branch created across every repo in the workspace at once, with one
 /// worktree per repo. This is the unit of parallel work: one task, one branch
 /// name, N checkouts that move together.
-struct Stack: Identifiable, Codable, Hashable {
+struct LinkedWorktree: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     /// Display name. Usually the same as the branch.
     var name: String
     var branch: String
     var baseRef: String?
     var createdAt: Date = Date()
-    var members: [StackMember] = []
-    /// Free-form note — what this stack is for.
+    var checkouts: [LinkedCheckout] = []
+    /// Free-form note — what this link is for.
     var intent: String?
 
-    func member(repoID: String) -> StackMember? {
-        members.first { $0.repoID == repoID }
+    func checkout(repoID: String) -> LinkedCheckout? {
+        checkouts.first { $0.repoID == repoID }
     }
 
-    var paths: [String] { members.map(\.path) }
+    var paths: [String] { checkouts.map(\.path) }
 }
 
-/// One repo's checkout within a stack.
-struct StackMember: Codable, Hashable, Identifiable {
+/// One repo's checkout within a link.
+struct LinkedCheckout: Codable, Hashable, Identifiable {
     var repoID: String
     var repoName: String
     var path: String
@@ -101,7 +101,7 @@ enum AgentRole: String, Codable, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .orchestrator:
-            return "Plans the work across every repo in the stack and dispatches teammates to do it."
+            return "Plans the work across every repo in the link and dispatches teammates to do it."
         case .worker:
             return "Carries out one scoped task."
         }
@@ -115,28 +115,48 @@ enum AgentRole: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// What an agent is pointed at.
+enum AgentScope: Hashable {
+    /// Every repository in the workspace and every linked worktree in it.
+    case workspace
+    /// One linked worktree — the same branch across every repo.
+    case link(UUID)
+    /// A single checkout.
+    case checkout(String)
+
+    var label: String {
+        switch self {
+        case .workspace: return "Whole workspace"
+        case .link: return "This linked worktree"
+        case .checkout: return "This checkout"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .workspace: return "rectangle.3.group"
+        case .link: return "link"
+        case .checkout: return "square.on.square"
+        }
+    }
+}
+
 /// Everything needed to start a `claude` process.
 struct AgentLaunch {
+    var scope: AgentScope = .workspace
     var role: AgentRole = .orchestrator
     var name: String = ""
     var prompt: String = ""
-    /// Working directory — the stack member the agent starts in.
+    /// Working directory — the link checkout the agent starts in.
     var cwd: String = ""
     /// Sibling repos granted tool access via `--add-dir`.
     var additionalDirs: [String] = []
-    var model: String?
+    var model: String? = ModelDefaults.modelID
     var permissionMode: String = "acceptEdits"
     /// Run headless in the background rather than opening a Terminal window.
     var runsInBackground: Bool = true
-    /// Context about the stack, prepended to the prompt.
-    var stackSummary: String?
+    /// Context Forge prepends to the prompt describing what the agent owns.
+    var brief: String?
 
     static let permissionModes = ["default", "acceptEdits", "plan", "bypassPermissions"]
-
-    static let models: [(id: String?, label: String)] = [
-        (nil, "Default"),
-        ("claude-opus-5", "Opus 5"),
-        ("claude-sonnet-5", "Sonnet 5"),
-        ("claude-haiku-4-5-20251001", "Haiku 4.5")
-    ]
 }

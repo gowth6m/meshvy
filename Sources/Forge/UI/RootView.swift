@@ -38,20 +38,16 @@ struct RootView: View {
             switch which {
             case .newWorkspace: NewWorkspaceSheet(store: store)
             case .addRepos: AddReposSheet(store: store)
-            case .newStack: NewStackSheet(store: store)
+            case .newLink: NewLinkSheet(store: store)
             case .launchAgent(let node): LaunchAgentSheet(store: store, node: node)
             }
         }
         .onAppear { store.bootstrap() }
-        .onReceive(of: .forgeToggleSidebar) {
-            withAnimation(.easeOut(duration: 0.18)) { sidebarVisible.toggle() }
-        }
-        .onReceive(of: .forgeToggleInspector) {
-            withAnimation(.easeOut(duration: 0.18)) { store.inspectorVisible.toggle() }
-        }
+        .onReceive(of: .forgeToggleSidebar) { sidebarVisible.toggle() }
+        .onReceive(of: .forgeToggleInspector) { store.inspectorVisible.toggle() }
         .onReceive(of: .forgeFocusSearch) { sidebarVisible = true }
         .onReceive(of: .forgeNewWorkspace) { sheet = .newWorkspace }
-        .onReceive(of: .forgeNewStack) { if store.hasWorkspace { sheet = .newStack } }
+        .onReceive(of: .forgeNewLink) { if store.hasWorkspace { sheet = .newLink } }
         .onReceive(of: .forgeAddRepos) { if store.hasWorkspace { sheet = .addRepos } }
         .onReceive(of: .forgeLaunchAgent) { if store.hasWorkspace { sheet = .launchAgent(store.selection) } }
     }
@@ -67,7 +63,7 @@ struct EmptyStateView: View {
         ZStack {
             Theme.canvas
             VStack(spacing: 18) {
-                Image(systemName: "square.stack.3d.up")
+                Image(systemName: "square.link.3d.up")
                     .font(.system(size: 38, weight: .thin))
                     .foregroundStyle(Theme.accent.opacity(0.75))
 
@@ -77,7 +73,7 @@ struct EmptyStateView: View {
                         .foregroundStyle(Theme.textPrimary)
                     Text("""
                     A workspace is the set of repositories you work on together. \
-                    Add them once, then cut a stack — the same branch as a worktree \
+                    Add them once, then cut a link — the same branch as a worktree \
                     in every repo — and put agents to work across all of it.
                     """)
                         .font(Theme.ui(12))
@@ -121,74 +117,92 @@ private struct TopBar: View {
     @Binding var sheet: ForgeSheet?
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             // Room for the traffic lights, since the title bar is hidden.
             Spacer().frame(width: 68)
 
             if store.hasWorkspace {
                 ChromeButton(icon: "sidebar.leading", isActive: sidebarVisible) {
-                    withAnimation(.easeOut(duration: 0.18)) { sidebarVisible.toggle() }
+                    sidebarVisible.toggle()
                 }
             }
 
-            HStack(spacing: 6) {
-                Image(systemName: "flame.fill")
-                    .font(Theme.ui(12, .bold))
-                    .foregroundStyle(Theme.accent)
-                Text("Forge")
-                    .font(Theme.ui(13.5, .bold))
-                    .foregroundStyle(Theme.textPrimary)
-            }
+            Image(systemName: "flame.fill")
+                .font(Theme.ui(12.5, .bold))
+                .foregroundStyle(Theme.accent)
 
             workspaceMenu
 
             if store.hasWorkspace {
-                Divider().frame(height: 18).overlay(Theme.hairline)
+                Divider().frame(height: 16).overlay(Theme.hairline).padding(.horizontal, 2)
 
-                ChromeButton(icon: "plus.rectangle.on.rectangle", label: "New stack") { sheet = .newStack }
-                ChromeButton(icon: "sparkles", label: "Launch agent") {
+                ChromeButton(icon: "link.badge.plus", label: "Link worktree") { sheet = .newLink }
+                AccentButton(icon: "sparkles", label: "Launch agent") {
                     sheet = .launchAgent(store.selection)
                 }
 
-                Divider().frame(height: 18).overlay(Theme.hairline)
+                Spacer(minLength: 16)
+
+                SegmentedControl(
+                    options: BoardComposer.Grouping.allCases,
+                    selection: $store.grouping,
+                    label: \.label,
+                    icon: \.icon
+                )
 
                 ChromeButton(
-                    icon: "square.stack.3d.up",
-                    label: store.grouping.label,
-                    isActive: store.grouping == .stack
+                    icon: "clock.badge.checkmark",
+                    label: "Ended",
+                    isActive: store.showEndedSessions
                 ) {
-                    store.grouping = store.grouping == .stack ? .repo : .stack
-                }
-                ChromeButton(icon: "clock.badge.checkmark", label: "Ended", isActive: store.showEndedSessions) {
                     store.showEndedSessions.toggle()
                 }
+                .help("Show sessions that have ended")
 
-                Spacer(minLength: 12)
-
-                ChromeButton(icon: "minus.magnifyingglass") { store.zoom(by: 1 / 1.25) }
-                Text("\(Int((store.viewport.scale * 100).rounded()))%")
-                    .font(Theme.mono(10.5, .medium))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 42)
-                ChromeButton(icon: "plus.magnifyingglass") { store.zoom(by: 1.25) }
-                ChromeButton(icon: "arrow.up.left.and.arrow.down.right", label: "Fit") { store.fit() }
-                if store.isSearching {
-                    ChromeButton(icon: "scope", label: "Focus matches", isActive: true) { store.focusMatches() }
-                }
-
-                Divider().frame(height: 18).overlay(Theme.hairline)
+                zoomCluster
 
                 ChromeButton(icon: "arrow.clockwise") { store.refreshAll() }
+                    .help("Refresh everything (⌘R)")
                 ChromeButton(icon: "sidebar.trailing", isActive: store.inspectorVisible) {
-                    withAnimation(.easeOut(duration: 0.18)) { store.inspectorVisible.toggle() }
+                    store.inspectorVisible.toggle()
                 }
             } else {
                 Spacer(minLength: 12)
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 46)
+        .frame(height: 48)
         .background(Theme.chrome)
+    }
+
+    private var zoomCluster: some View {
+        HStack(spacing: 1) {
+            Button { store.zoom(by: 1 / 1.25) } label: {
+                Image(systemName: "minus").font(Theme.ui(10, .bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.textSecondary)
+            .frame(width: 22, height: 22)
+
+            Button { store.fit() } label: {
+                Text("\(Int((store.viewport.scale * 100).rounded()))%")
+                    .font(Theme.mono(10, .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 42)
+            }
+            .buttonStyle(.plain)
+            .help("Fit to content (⌘0)")
+
+            Button { store.zoom(by: 1.25) } label: {
+                Image(systemName: "plus").font(Theme.ui(10, .bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.textSecondary)
+            .frame(width: 22, height: 22)
+        }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.05)))
     }
 
     private var workspaceMenu: some View {
@@ -199,7 +213,7 @@ private struct TopBar: View {
                 } label: {
                     Label(
                         workspace.name,
-                        systemImage: workspace.id == store.activeWorkspace?.id ? "checkmark" : "square.stack.3d.up"
+                        systemImage: workspace.id == store.activeWorkspace?.id ? "checkmark" : "rectangle.3.group"
                     )
                 }
             }
@@ -212,19 +226,96 @@ private struct TopBar: View {
                 Button("Close “\(active.name)”", role: .destructive) { store.deleteWorkspace(active.id) }
             }
         } label: {
-            HStack(spacing: 5) {
-                Text(store.activeWorkspace?.name ?? "No workspace")
-                    .font(Theme.ui(12, .semibold))
-                    .foregroundStyle(store.hasWorkspace ? Theme.textPrimary : Theme.textTertiary)
-                Image(systemName: "chevron.down").font(Theme.ui(8, .bold)).foregroundStyle(Theme.textTertiary)
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(store.activeWorkspace?.name ?? "No workspace")
+                        .font(Theme.ui(12.5, .semibold))
+                        .foregroundStyle(store.hasWorkspace ? Theme.textPrimary : Theme.textTertiary)
+                        .lineLimit(1)
+                    if let active = store.activeWorkspace {
+                        Text(counts(active))
+                            .font(Theme.ui(9.5))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                }
+                Image(systemName: "chevron.down").font(Theme.ui(7.5, .bold)).foregroundStyle(Theme.textTertiary)
             }
             .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.06)))
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.06)))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    private func counts(_ workspace: Workspace) -> String {
+        let repos = workspace.repos.count
+        let links = workspace.linkedWorktrees.count
+        return "\(repos) \(repos == 1 ? "repo" : "repos") · \(links) linked"
+    }
+}
+
+/// Accent-filled action for the one thing the toolbar most wants you to do.
+struct AccentButton: View {
+    var icon: String
+    var label: String
+    var action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(Theme.ui(11, .semibold))
+                Text(label).font(Theme.ui(11.5, .semibold))
+            }
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Theme.accent.opacity(hovering ? 0.22 : 0.14))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Theme.accent.opacity(0.4), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// Compact segmented picker used for board grouping.
+struct SegmentedControl<Option: Hashable>: View {
+    var options: [Option]
+    @Binding var selection: Option
+    var label: (Option) -> String
+    var icon: (Option) -> String
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { option in
+                let selected = option == selection
+                Button { selection = option } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: icon(option)).font(Theme.ui(9.5, .semibold))
+                        Text(label(option)).font(Theme.ui(10.5, .medium))
+                    }
+                    .foregroundStyle(selected ? Theme.textPrimary : Theme.textTertiary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(selected ? Color.white.opacity(0.1) : .clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.05)))
     }
 }
 
@@ -326,7 +417,7 @@ extension Notification.Name {
     static let forgeToggleInspector = Notification.Name("forge.toggleInspector")
     static let forgeFocusSearch = Notification.Name("forge.focusSearch")
     static let forgeNewWorkspace = Notification.Name("forge.newWorkspace")
-    static let forgeNewStack = Notification.Name("forge.newStack")
+    static let forgeNewLink = Notification.Name("forge.newLink")
     static let forgeAddRepos = Notification.Name("forge.addRepos")
     static let forgeLaunchAgent = Notification.Name("forge.launchAgent")
 }

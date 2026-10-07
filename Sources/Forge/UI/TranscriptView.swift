@@ -2,19 +2,34 @@ import SwiftUI
 
 /// Reader for one transcript. Tool calls, results and thinking blocks start
 /// collapsed so the conversation stays legible; expand what you need.
+///
+/// The visible slice is cached rather than recomputed in `body`: a long session
+/// runs to thousands of events, and re-filtering them on every render is what
+/// made the panel feel slow to open.
 struct TranscriptView: View {
     var transcript: Transcript
     @Environment(\.forgeSnapshotMode) private var isSnapshot
     @State private var expanded: Set<String> = []
-    @State private var hiddenKinds: Set<String> = ["tool"]
+    @State private var hidden: Set<EventFilter> = [.tools]
+    @State private var visible: [TranscriptEvent] = []
 
-    private var filtered: [TranscriptEvent] {
-        transcript.events.filter { event in
-            switch event.kind {
-            case .toolUse, .toolResult: return !hiddenKinds.contains("tool")
-            case .thinking: return !hiddenKinds.contains("thinking")
-            case .system, .attachment: return !hiddenKinds.contains("system")
-            default: return true
+    enum EventFilter: String, CaseIterable, Hashable {
+        case tools, thinking, system
+
+        var label: String {
+            switch self {
+            case .tools: return "Tools"
+            case .thinking: return "Thinking"
+            case .system: return "System"
+            }
+        }
+
+        func matches(_ kind: TranscriptEvent.Kind) -> Bool {
+            switch (self, kind) {
+            case (.tools, .toolUse), (.tools, .toolResult): return true
+            case (.thinking, .thinking): return true
+            case (.system, .system), (.system, .attachment): return true
+            default: return false
             }
         }
     }
@@ -26,12 +41,12 @@ struct TranscriptView: View {
             ScrollableStack(alignment: .leading) {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if transcript.truncated {
-                        Text("Showing the most recent \(TranscriptLoader.maxEvents.formatted()) events.")
+                        Text("Showing the most recent events in this session.")
                             .font(Theme.ui(10.5))
                             .foregroundStyle(Theme.textTertiary)
                             .padding(.bottom, 4)
                     }
-                    ForEach(isSnapshot ? Array(filtered.prefix(12)) : filtered) { event in
+                    ForEach(isSnapshot ? Array(visible.prefix(12)) : visible) { event in
                         EventRow(
                             event: event,
                             isExpanded: expanded.contains(event.id) || !event.startsCollapsed,
@@ -41,7 +56,7 @@ struct TranscriptView: View {
                             }
                         )
                     }
-                    if filtered.isEmpty {
+                    if visible.isEmpty {
                         Text("Nothing to show with the current filters.")
                             .font(Theme.ui(11))
                             .foregroundStyle(Theme.textTertiary)
@@ -50,19 +65,29 @@ struct TranscriptView: View {
                 .padding(12)
             }
         }
+        .onAppear(perform: recompute)
+        .onChange(of: transcript.sessionId) { _, _ in
+            expanded.removeAll()
+            recompute()
+        }
+        .onChange(of: hidden) { _, _ in recompute() }
+    }
+
+    private func recompute() {
+        visible = hidden.isEmpty
+            ? transcript.events
+            : transcript.events.filter { event in
+                !hidden.contains { $0.matches(event.kind) }
+            }
     }
 
     private var filterBar: some View {
-        HStack(spacing: 6) {
-            toggle("Tools", key: "tool", count: transcript.toolUseCounts.values.reduce(0, +))
-            toggle("Thinking", key: "thinking", count: transcript.events.filter { $0.kind == .thinking }.count)
-            toggle("System", key: "system", count: transcript.events.filter {
-                if case .system = $0.kind { return true }
-                if case .attachment = $0.kind { return true }
-                return false
-            }.count)
+        HStack(spacing: 8) {
+            ForEach(EventFilter.allCases, id: \.self) { filter in
+                toggle(filter)
+            }
             Spacer(minLength: 0)
-            Text("\(filtered.count) events")
+            Text("\(visible.count) events")
                 .font(Theme.mono(9.5))
                 .foregroundStyle(Theme.textTertiary)
         }
@@ -70,23 +95,32 @@ struct TranscriptView: View {
         .frame(height: 34)
     }
 
-    private func toggle(_ label: String, key: String, count: Int) -> some View {
-        let isOn = !hiddenKinds.contains(key)
+    private func count(_ filter: EventFilter) -> Int {
+        switch filter {
+        case .tools: return transcript.toolEventCount
+        case .thinking: return transcript.thinkingEventCount
+        case .system: return transcript.systemEventCount
+        }
+    }
+
+    private func toggle(_ filter: EventFilter) -> some View {
+        let isOn = !hidden.contains(filter)
+        let total = count(filter)
         return Button {
-            if isOn { hiddenKinds.insert(key) } else { hiddenKinds.remove(key) }
+            if isOn { hidden.insert(filter) } else { hidden.remove(filter) }
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: isOn ? "checkmark.square.fill" : "square")
                     .font(Theme.ui(9))
-                Text(label).font(Theme.ui(10.5, .medium))
-                if count > 0 {
-                    Text("\(count)").font(Theme.mono(9)).foregroundStyle(Theme.textTertiary)
+                Text(filter.label).font(Theme.ui(10.5, .medium))
+                if total > 0 {
+                    Text("\(total)").font(Theme.mono(9)).foregroundStyle(Theme.textTertiary)
                 }
             }
             .foregroundStyle(isOn ? Theme.textSecondary : Theme.textTertiary)
         }
         .buttonStyle(.plain)
-        .disabled(count == 0)
+        .disabled(total == 0)
     }
 }
 
@@ -102,8 +136,7 @@ private struct EventRow: View {
         case .thinking: return Theme.sidechain
         case .toolUse: return Theme.worktree
         case .toolResult(let ok): return ok ? Theme.clean : Theme.dirty
-        case .system: return Theme.textTertiary
-        case .attachment: return Theme.textTertiary
+        case .system, .attachment: return Theme.textTertiary
         }
     }
 
@@ -138,9 +171,7 @@ private struct EventRow: View {
                         .font(Theme.ui(10.5, .semibold))
                         .foregroundStyle(tint)
                     if let model = Format.model(event.model), case .assistantMessage = event.kind {
-                        Text(model)
-                            .font(Theme.ui(9.5))
-                            .foregroundStyle(Theme.textTertiary)
+                        Text(model).font(Theme.ui(9.5)).foregroundStyle(Theme.textTertiary)
                     }
                     Spacer(minLength: 0)
                     if let timestamp = event.timestamp {
@@ -167,17 +198,14 @@ private struct EventRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Text(event.text.prefix(140).replacingOccurrences(of: "\n", with: " "))
+                Text(event.preview)
                     .font(Theme.mono(10))
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
             }
         }
         .padding(9)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(backgroundTint)
-        )
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(backgroundTint))
         .overlay(alignment: .leading) {
             if case .userMessage = event.kind {
                 Rectangle().fill(Theme.accent).frame(width: 2)

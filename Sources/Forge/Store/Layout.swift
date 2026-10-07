@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Sections are containers; each lane inside one is a worktree with its sessions
 /// flowing to the right. Sections are sized to their content and shelf-packed, so
-/// a stack with one session stays small instead of reserving a full-width slot.
+/// a link with one session stays small instead of reserving a full-width slot.
 /// Cards the user has dragged keep their saved position, so a hand-arranged board
 /// survives a refresh.
 struct BoardLayout {
@@ -61,7 +61,7 @@ struct BoardLayout {
                 subtitle: block.subtitle,
                 rect: CGRect(origin: origin, size: block.size),
                 seed: block.seed,
-                stackID: block.stackID
+                linkID: block.linkID
             ))
             for node in block.nodes {
                 var moved = node
@@ -83,7 +83,7 @@ struct BoardLayout {
         var title: String
         var subtitle: String
         var seed: String
-        var stackID: UUID?
+        var linkID: UUID?
         var size: CGSize
         var nodes: [CanvasNode]
         var edges: [CanvasEdge]
@@ -123,7 +123,7 @@ struct BoardLayout {
                     position: CGPoint(x: laneX, y: y),
                     size: worktreeSize,
                     sectionID: section.id,
-                    stackID: section.stackID
+                    linkID: section.linkID
                 ))
                 laneHeight = worktreeSize.height
             }
@@ -143,7 +143,7 @@ struct BoardLayout {
                     ),
                     size: sessionSize,
                     sectionID: section.id,
-                    stackID: section.stackID
+                    linkID: section.linkID
                 ))
                 if let worktreeID {
                     edges.append(CanvasEdge(from: nodeID, to: worktreeID, isLive: status.isLive))
@@ -160,7 +160,7 @@ struct BoardLayout {
         )
         return SectionBlock(
             id: section.id, kind: section.kind, title: section.title, subtitle: section.subtitle,
-            seed: section.seed, stackID: section.stackID, size: size, nodes: nodes, edges: edges
+            seed: section.seed, linkID: section.linkID, size: size, nodes: nodes, edges: edges
         )
     }
 

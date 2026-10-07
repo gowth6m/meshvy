@@ -26,8 +26,8 @@ struct ForgeCommands: Commands {
                 NotificationCenter.default.post(name: .forgeNewWorkspace, object: nil)
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
-            Button("New Stack…") {
-                NotificationCenter.default.post(name: .forgeNewStack, object: nil)
+            Button("New LinkedWorktree…") {
+                NotificationCenter.default.post(name: .forgeNewLink, object: nil)
             }
             .keyboardShortcut("n", modifiers: .command)
             Button("Add Repositories…") {
@@ -51,8 +51,8 @@ struct ForgeCommands: Commands {
             Button("Actual Size") { store.zoomToActualSize() }
                 .keyboardShortcut("1", modifiers: .command)
             Divider()
-            Button("Group by Stack or Repository") {
-                store.grouping = store.grouping == .stack ? .repo : .stack
+            Button("Group by LinkedWorktree or Repository") {
+                store.grouping = store.grouping == .link ? .repo : .link
             }
             .keyboardShortcut("g", modifiers: [.command, .shift])
             Button("Invert Scroll Direction") { store.invertScroll.toggle() }
@@ -95,7 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
-        if CommandLine.arguments.contains("--launchtest") {
+        if CommandLine.arguments.contains("--perftest") {
+            PerfTest.run()
+        } else if CommandLine.arguments.contains("--launchtest") {
             LaunchTest.run()
         } else if let repos = SelfTest.request(arguments: CommandLine.arguments) {
             SelfTest.run(repoPaths: repos, keep: CommandLine.arguments.contains("--keep"))

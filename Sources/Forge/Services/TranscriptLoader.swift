@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Full parse of a single transcript, for the reader pane. Unlike the indexer
@@ -5,6 +6,13 @@ import Foundation
 struct TranscriptLoader {
     /// Hard cap on rendered events; the tail is what matters when reading back.
     static let maxEvents = 4000
+    /// Only this much of the file is decoded, measured back from the end.
+    ///
+    /// The reader shows the most recent events, but a long session's transcript
+    /// runs to tens of megabytes — decoding all of it took a quarter of a second
+    /// before the panel could draw anything. Bounding the parse keeps opening a
+    /// session constant-time no matter how long it ran.
+    static let maxParsedBytes = 24 * 1024 * 1024
     /// Long tool payloads are elided — the reader shows a prefix and a count.
     static let maxBodyCharacters = 6000
 
@@ -22,7 +30,23 @@ struct TranscriptLoader {
             )
         }
 
-        JSONLScanner.scan(data, from: 0) { line in
+        // Resume on a record boundary when starting part-way into the file.
+        var start = 0
+        var startedMidFile = false
+        if data.count > Self.maxParsedBytes {
+            startedMidFile = true
+            let approximate = data.count - Self.maxParsedBytes
+            start = data.withUnsafeBytes { raw -> Int in
+                guard let base = raw.baseAddress else { return 0 }
+                let remaining = raw.count - approximate
+                guard remaining > 0,
+                      let newline = memchr(base + approximate, 0x0A, remaining)
+                else { return approximate }
+                return (UnsafeRawPointer(newline) - base) + 1
+            }
+        }
+
+        JSONLScanner.scan(data, from: start) { line in
             guard let object = try? JSONSerialization.jsonObject(with: line.data) as? [String: Any],
                   let type = object["type"] as? String else { return }
 
@@ -68,10 +92,10 @@ struct TranscriptLoader {
             }
         }
 
-        let truncated = events.count > Self.maxEvents
-        if truncated { events = Array(events.suffix(Self.maxEvents)) }
+        let truncated = startedMidFile || events.count > Self.maxEvents
+        if events.count > Self.maxEvents { events = Array(events.suffix(Self.maxEvents)) }
 
-        return Transcript(
+        var transcript = Transcript(
             sessionId: summary.id,
             events: events,
             totalInputTokens: totalInput,
@@ -80,6 +104,11 @@ struct TranscriptLoader {
             toolUseCounts: toolCounts,
             truncated: truncated
         )
+        transcript.tallyEventKinds()
+        for index in transcript.events.indices {
+            transcript.events[index].preview = TranscriptEvent.makePreview(transcript.events[index].text)
+        }
+        return transcript
     }
 
     // MARK: - Block decoding

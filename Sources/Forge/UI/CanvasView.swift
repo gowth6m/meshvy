@@ -181,13 +181,13 @@ struct CanvasView: View {
             Button("Copy path") { store.copyToClipboard(summary.resolvedPath) }
         case .worktree(let worktree):
             Button("Launch agent here…") { sheet = .launchAgent(node.id) }
-            if let stack = store.stack(containing: node.id) {
+            if let link = store.linkedWorktree(containing: node.id) {
                 Divider()
-                Button("Remove stack “\(stack.name)”") {
-                    store.removeStack(stack.id, force: false, deleteBranch: false)
+                Button("Remove link “\(link.name)”") {
+                    store.removeLink(link.id, force: false, deleteBranch: false)
                 }
-                Button("Remove stack and discard changes") {
-                    store.removeStack(stack.id, force: true, deleteBranch: true)
+                Button("Remove link and discard changes") {
+                    store.removeLink(link.id, force: true, deleteBranch: true)
                 }
             }
             Divider()

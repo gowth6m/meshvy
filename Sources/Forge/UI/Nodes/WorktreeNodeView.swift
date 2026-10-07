@@ -37,7 +37,11 @@ struct WorktreeNodeView: View {
                     lineWidth: isSelected ? max(1, zoom.s(1.6)) : max(0.5, zoom.s(0.8))
                 )
         )
-        .shadow(color: .black.opacity(0.28), radius: zoom.s(6), y: zoom.s(2))
+        .shadow(
+            color: .black.opacity(isSelected || isHovered ? 0.45 : 0),
+            radius: isSelected || isHovered ? zoom.s(12) : 0,
+            y: isSelected || isHovered ? zoom.s(4) : 0
+        )
         .opacity(isDimmed ? 0.22 : (worktree.isArchived ? 0.72 : 1))
     }
 
@@ -139,7 +143,7 @@ struct WorktreeNodeView: View {
             }
             if attachedSessions > 0 {
                 MetaStat(
-                    icon: "square.stack.3d.up",
+                    icon: "square.link.3d.up",
                     value: liveSessions > 0 ? "\(attachedSessions) · \(liveSessions) live" : "\(attachedSessions)",
                     tint: liveSessions > 0 ? Theme.busy : Theme.textTertiary,
                     zoom: zoom

@@ -136,6 +136,13 @@ struct InspectorView: View {
 
     private func tokenRow(_ transcript: Transcript) -> some View {
         HStack(spacing: 14) {
+            if transcript.truncated {
+                Text("recent")
+                    .font(Theme.ui(8.5, .heavy))
+                    .tracking(0.5)
+                    .foregroundStyle(Theme.textTertiary)
+                    .help("Totals cover the most recent part of a long transcript")
+            }
             StatBlock(label: "Input", value: Format.compactCount(transcript.totalInputTokens))
             StatBlock(label: "Output", value: Format.compactCount(transcript.totalOutputTokens))
             StatBlock(label: "Cache read", value: Format.compactCount(transcript.cacheReadTokens))
