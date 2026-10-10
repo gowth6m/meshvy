@@ -42,4 +42,6 @@ struct SavedLayout: Codable {
     var grouping: String = "link"
     var showEndedSessions: Bool = true
     var invertScroll: Bool = false
+    var sidebarWidth: Double = 262
+    var inspectorWidth: Double = 430
 }

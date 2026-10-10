@@ -79,12 +79,6 @@ struct SessionNodeView: View {
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            if summary.isSidechain {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(zoom.font(9))
-                    .foregroundStyle(Theme.sidechain)
-                    .help("Contains sub-agent activity")
-            }
         }
     }
 

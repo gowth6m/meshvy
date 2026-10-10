@@ -198,6 +198,41 @@ enum LaunchTest {
 
 private extension LaunchTest {}
 
+/// Checks the diff pipeline against a real worktree. `Forge --difftest <path>`.
+@MainActor
+enum DiffTest {
+    static func path(arguments: [String]) -> String? {
+        guard let flag = arguments.firstIndex(of: "--difftest"), flag + 1 < arguments.count else { return nil }
+        return arguments[flag + 1]
+    }
+
+    static func run(path: String) {
+        let git = GitService()
+        let changes = git.changes(at: path)
+        print("changed files: \(changes.count)")
+        for change in changes {
+            print("  \(change.kind.letter) \(change.path)  +\(change.additions) -\(change.deletions) staged=\(change.isStaged)")
+        }
+        guard let first = changes.first(where: { $0.kind != .deleted }) else {
+            print("DIFFTEST: nothing to diff"); exit(1)
+        }
+        let diff = git.diff(at: path, file: first)
+        print("\ndiff for \(diff.path): \(diff.lines.count) lines, +\(diff.additions) -\(diff.deletions) binary=\(diff.isBinary)")
+        for line in diff.lines.prefix(10) {
+            let old = line.oldNumber.map { String($0) } ?? " "
+            let new = line.newNumber.map { String($0) } ?? " "
+            print(String(format: "  %3@ %3@ | %@ %@", old as NSString, new as NSString, "\(line.kind)", line.text.prefix(50) as NSString))
+        }
+        let untracked = changes.first { $0.kind == .untracked }
+        if let untracked {
+            let d = git.diff(at: path, file: untracked)
+            print("\nuntracked \(d.path): \(d.lines.count) lines, all-added=\(d.additions)")
+        }
+        print("DIFFTEST OK")
+        exit(0)
+    }
+}
+
 /// Measures transcript loading on the largest session on disk.
 /// `Forge --perftest`.
 @MainActor
@@ -276,10 +311,16 @@ enum Snapshot {
         }
 
         if store.selection == nil {
-            let newest = store.graph.nodes
-                .filter { if case .session = $0.kind { return true } else { return false } }
-                .max { $0.sortDate < $1.sortDate }
-            if let newest { store.select(newest.id) }
+            // Prefer a checkout with changes — that is what the panel is for.
+            let dirty = store.workspaceChanges.first
+            if let dirty {
+                store.select(.worktree(dirty.repo.worktreePath))
+                store.openDiff(repoPath: dirty.repo.worktreePath, change: dirty.files[0])
+            } else if let newest = store.graph.nodes
+                .filter({ if case .session = $0.kind { return true } else { return false } })
+                .max(by: { $0.sortDate < $1.sortDate }) {
+                store.select(newest.id)
+            }
         }
         if let zoom = request.zoom {
             store.viewport.scale = CGFloat(zoom)

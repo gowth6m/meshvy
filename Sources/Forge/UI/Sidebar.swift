@@ -39,7 +39,7 @@ struct Sidebar: View {
                 .padding(.horizontal, 8)
             }
         }
-        .frame(width: 262)
+        .frame(width: store.sidebarWidth)
         .background(Theme.chrome)
     }
 

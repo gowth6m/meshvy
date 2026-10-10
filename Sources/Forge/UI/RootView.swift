@@ -3,24 +3,33 @@ import SwiftUI
 
 struct RootView: View {
     @Bindable var store: ForgeStore
-    @State private var sidebarVisible = true
     @State private var sheet: ForgeSheet?
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar(store: store, sidebarVisible: $sidebarVisible, sheet: $sheet)
+            TopBar(store: store, sheet: $sheet)
             Divider().overlay(Theme.hairline)
 
             if store.hasWorkspace {
                 HStack(spacing: 0) {
-                    if sidebarVisible {
+                    if store.sidebarVisible {
                         Sidebar(store: store, sheet: $sheet)
-                        Divider().overlay(Theme.hairline)
+                        ResizeHandle(
+                            edge: .leading,
+                            width: $store.sidebarWidth,
+                            range: 200...520,
+                            onCommit: store.persistLayout
+                        )
                     }
                     CanvasView(store: store, sheet: $sheet)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if store.inspectorVisible {
-                        Divider().overlay(Theme.hairline)
+                        ResizeHandle(
+                            edge: .trailing,
+                            width: $store.inspectorWidth,
+                            range: 320...900,
+                            onCommit: store.persistLayout
+                        )
                         InspectorView(store: store, sheet: $sheet)
                     }
                 }
@@ -41,9 +50,9 @@ struct RootView: View {
             }
         }
         .onAppear { store.bootstrap() }
-        .onReceive(of: .forgeToggleSidebar) { sidebarVisible.toggle() }
+        .onReceive(of: .forgeToggleSidebar) { store.sidebarVisible.toggle() }
         .onReceive(of: .forgeToggleInspector) { store.inspectorVisible.toggle() }
-        .onReceive(of: .forgeFocusSearch) { sidebarVisible = true }
+        .onReceive(of: .forgeFocusSearch) { store.sidebarVisible = true }
         .onReceive(of: .forgeNewWorkspace) { sheet = .newWorkspace }
         .onReceive(of: .forgeAddRepos) { if store.hasWorkspace { sheet = .addRepos } }
         .onReceive(of: .forgeOpenOrchestrator) { if store.hasWorkspace { store.startOrchestrator() } }
@@ -112,7 +121,6 @@ struct EmptyStateView: View {
 
 private struct TopBar: View {
     @Bindable var store: ForgeStore
-    @Binding var sidebarVisible: Bool
     @Binding var sheet: ForgeSheet?
 
     var body: some View {
@@ -121,8 +129,8 @@ private struct TopBar: View {
             Spacer().frame(width: 68)
 
             if store.hasWorkspace {
-                ChromeButton(icon: "sidebar.leading", isActive: sidebarVisible) {
-                    sidebarVisible.toggle()
+                ChromeButton(icon: "sidebar.leading", isActive: store.sidebarVisible) {
+                    store.sidebarVisible.toggle()
                 }
             }
 
@@ -146,21 +154,8 @@ private struct TopBar: View {
                     }
                 }
                 .help("Claude Code runs on the workspace node, with every repo beneath it")
-                ChromeButton(icon: "terminal", label: "Shell") {
-                    store.openTerminal(role: .shell)
-                }
-
                 Spacer(minLength: 16)
 
-
-                ChromeButton(
-                    icon: "clock.badge.checkmark",
-                    label: "Ended",
-                    isActive: store.showEndedSessions
-                ) {
-                    store.showEndedSessions.toggle()
-                }
-                .help("Show sessions that have ended")
 
                 zoomCluster
 
@@ -343,10 +338,10 @@ private struct StatusBar: View {
                 .font(Theme.ui(10.5))
                 .foregroundStyle(Theme.textTertiary)
             Spacer(minLength: 0)
-            if store.hasWorkspace {
-                Text("drag to pan  ·  scroll to pan  ·  ⌘scroll or pinch to zoom  ·  double-click a card to open")
-                    .font(Theme.ui(10))
-                    .foregroundStyle(Theme.textTertiary.opacity(0.75))
+            if store.hasWorkspace, store.totalChangedFiles > 0 {
+                Text("\(store.totalChangedFiles) changed")
+                    .font(Theme.ui(10.5, .medium))
+                    .foregroundStyle(Theme.accent)
             }
         }
         .padding(.horizontal, 14)

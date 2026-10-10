@@ -28,6 +28,12 @@ final class ForgeStore {
     private(set) var live: [String: LiveSession] = [:]
     /// Sub-agents the orchestrator has dispatched, read from its transcript.
     private(set) var subAgents: [SubAgent] = []
+    /// Changed files per checkout, keyed by worktree path.
+    private(set) var changes: [String: [FileChange]] = [:]
+    /// The file currently open in the diff viewer.
+    private(set) var openFile: (repoPath: String, change: FileChange)?
+    private(set) var openDiff: FileDiff?
+    private(set) var isLoadingDiff = false
     private(set) var graph = CanvasGraph()
 
     // MARK: View state
@@ -39,6 +45,9 @@ final class ForgeStore {
     var showEndedSessions = true { didSet { rebuild(); persistLayout() } }
     var invertScroll = false { didSet { persistLayout() } }
     var inspectorVisible = true
+    var sidebarVisible = true
+    var sidebarWidth: Double = 262
+    var inspectorWidth: Double = 430
 
     private(set) var isIndexing = false
     private(set) var isLoadingGit = false
@@ -118,6 +127,8 @@ final class ForgeStore {
         pinned = stored.pinned.mapValues { CGPoint(x: $0.x, y: $0.y) }
         showEndedSessions = stored.showEndedSessions
         invertScroll = stored.invertScroll
+        sidebarWidth = min(max(stored.sidebarWidth, 200), 520)
+        inspectorWidth = min(max(stored.inspectorWidth, 320), 900)
         viewport.center = CGPoint(x: stored.cameraX, y: stored.cameraY)
         viewport.scale = max(Viewport.minScale, min(Viewport.maxScale, stored.scale))
         hasFitInitially = stored.scale > 0
@@ -558,23 +569,24 @@ final class ForgeStore {
             let wave = Array(paths[index..<min(index + waveSize, paths.count)])
             index += waveSize
 
-            await withTaskGroup(of: (String, Worktree?).self) { group in
+            await withTaskGroup(of: (String, Worktree?, [FileChange]).self) { group in
                 for path in wave {
                     group.addTask {
-                        guard FileManager.default.fileExists(atPath: path) else { return (path, nil) }
+                        guard FileManager.default.fileExists(atPath: path) else { return (path, nil, []) }
                         let listed = git.listWorktrees(cwd: path)
                         let match = listed.first { $0.path == path }
                             ?? Worktree(
                                 path: path, branch: nil, head: nil, isMain: false,
                                 isDetached: false, isLocked: false, isPrunable: false
                             )
-                        return (path, git.status(for: match))
+                        return (path, git.status(for: match), git.changes(at: path))
                     }
                 }
-                for await (path, worktree) in group {
+                for await (path, worktree, fileChanges) in group {
                     await MainActor.run { [weak self] in
                         guard let self else { return }
                         if let worktree { self.worktrees[path] = worktree }
+                        self.changes[path] = fileChanges
                         self.rebuild()
                     }
                 }
@@ -587,6 +599,44 @@ final class ForgeStore {
             self.fitIfNeeded()
             self.statusLine = self.summaryLine()
         }
+    }
+
+    // MARK: - Diffs
+
+    /// Opens a file in the diff viewer. The diff is read on demand rather than
+    /// with the status sweep — most files are never looked at.
+    func openDiff(repoPath: String, change: FileChange) {
+        openFile = (repoPath, change)
+        openDiff = nil
+        isLoadingDiff = true
+        let git = self.git
+
+        Task.detached(priority: .userInitiated) {
+            let diff = git.diff(at: repoPath, file: change)
+            await MainActor.run { [weak self] in
+                guard let self, self.openFile?.change.path == change.path else { return }
+                self.openDiff = diff
+                self.isLoadingDiff = false
+            }
+        }
+    }
+
+    func closeDiff() {
+        openFile = nil
+        openDiff = nil
+    }
+
+    /// Changed files across every repository in the workspace.
+    var workspaceChanges: [(repo: WorkspaceRepo, files: [FileChange])] {
+        guard let workspace = activeWorkspace else { return [] }
+        return workspace.repos.compactMap { repo in
+            let files = changes[repo.worktreePath] ?? []
+            return files.isEmpty ? nil : (repo, files)
+        }
+    }
+
+    var totalChangedFiles: Int {
+        workspaceChanges.reduce(0) { $0 + $1.files.count }
     }
 
     // MARK: - Live sessions
@@ -735,6 +785,8 @@ final class ForgeStore {
         saved.scale = viewport.scale
         saved.showEndedSessions = showEndedSessions
         saved.invertScroll = invertScroll
+        saved.sidebarWidth = sidebarWidth
+        saved.inspectorWidth = inspectorWidth
         layoutStore.save(saved)
     }
 

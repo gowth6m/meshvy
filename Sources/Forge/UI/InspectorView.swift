@@ -25,7 +25,7 @@ struct InspectorView: View {
                 emptyState
             }
         }
-        .frame(width: 430)
+        .frame(width: store.inspectorWidth)
         .background(Theme.chrome)
     }
 
@@ -196,31 +196,72 @@ struct InspectorView: View {
                     ChromeButton(icon: "folder") { store.revealInFinder(workspace.root) }
                 }
 
-                Text("REPOSITORIES")
-                    .font(Theme.ui(9.5, .heavy))
-                    .tracking(0.7)
-                    .foregroundStyle(Theme.textTertiary)
-                    .padding(.top, 4)
-                VStack(spacing: 4) {
-                    ForEach(workspace.repos) { repo in
-                        Button { store.reveal(.worktree(repo.worktreePath)) } label: {
-                            HStack(spacing: 7) {
-                                Image(systemName: repo.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
-                                    .font(Theme.ui(9))
-                                    .foregroundStyle(repo.isReady ? Theme.worktree : Theme.dirty)
-                                Text(repo.name).font(Theme.ui(11.5)).foregroundStyle(Theme.textPrimary)
-                                Spacer(minLength: 0)
-                                Text(repo.failure ?? "./\(repo.name)")
-                                    .font(Theme.mono(9.5))
-                                    .foregroundStyle(repo.isReady ? Theme.textTertiary : Theme.dirty)
-                                    .lineLimit(1)
+                let grouped = store.workspaceChanges
+                if grouped.isEmpty {
+                    Text("REPOSITORIES")
+                        .font(Theme.ui(9.5, .heavy)).tracking(0.7)
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.top, 4)
+                    VStack(spacing: 4) {
+                        ForEach(workspace.repos) { repo in
+                            Button { store.reveal(.worktree(repo.worktreePath)) } label: {
+                                HStack(spacing: 7) {
+                                    Image(systemName: repo.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
+                                        .font(Theme.ui(9))
+                                        .foregroundStyle(repo.isReady ? Theme.worktree : Theme.dirty)
+                                    Text(repo.name).font(Theme.ui(11.5)).foregroundStyle(Theme.textPrimary)
+                                    Spacer(minLength: 0)
+                                    Text(repo.failure ?? "clean")
+                                        .font(Theme.mono(9.5))
+                                        .foregroundStyle(repo.isReady ? Theme.textTertiary : Theme.dirty)
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.surface))
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.surface))
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        Text("CHANGES")
+                            .font(Theme.ui(9.5, .heavy)).tracking(0.7)
+                            .foregroundStyle(Theme.textTertiary)
+                        Text("\(store.totalChangedFiles) files across \(grouped.count) repos")
+                            .font(Theme.ui(9.5))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    .padding(.top, 4)
+
+                    ForEach(grouped, id: \.repo.id) { entry in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Button { store.reveal(.worktree(entry.repo.worktreePath)) } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "square.on.square")
+                                        .font(Theme.ui(8.5)).foregroundStyle(Theme.worktree)
+                                    Text(entry.repo.name)
+                                        .font(Theme.ui(11, .semibold))
+                                        .foregroundStyle(Theme.textSecondary)
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            ChangesList(
+                                changes: entry.files,
+                                selected: store.openFile?.repoPath == entry.repo.worktreePath
+                                    ? store.openFile?.change : nil,
+                                onSelect: { store.openDiff(repoPath: entry.repo.worktreePath, change: $0) }
+                            )
+                        }
+                    }
+
+                    if store.openFile != nil {
+                        Divider().overlay(Theme.hairline).padding(.vertical, 4)
+                        diffPane.frame(minHeight: 260)
                     }
                 }
 
@@ -334,25 +375,20 @@ struct InspectorView: View {
     }
 
     private func worktreeInspector(_ worktree: Worktree, repoID: String?) -> some View {
-        let sessions = attachedSessions(worktree.path)
-        return ScrollableStack(alignment: .leading) {
-            VStack(alignment: .leading, spacing: 12) {
+        let files = store.changes[worktree.path] ?? []
+        return VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 7) {
-                    Image(systemName: worktree.isMain ? "shippingbox.fill" : "square.on.square")
+                    Image(systemName: "square.on.square")
                         .foregroundStyle(worktree.isDirty ? Theme.dirty : Theme.worktree)
                     Text(worktree.name)
                         .font(Theme.ui(15, .bold))
                         .foregroundStyle(Theme.textPrimary)
-                    if worktree.isMain {
-                        Text("MAIN WORKTREE")
-                            .font(Theme.ui(8.5, .heavy))
-                            .tracking(0.6)
-                            .foregroundStyle(Theme.textTertiary)
-                    }
                     Spacer(minLength: 0)
+                    Text(worktree.branchLabel)
+                        .font(Theme.mono(10))
+                        .foregroundStyle(Theme.branch)
                 }
-
-                FieldGrid(rows: worktreeFields(worktree))
 
                 HStack(spacing: 6) {
                     ChromeButton(icon: "hammer.fill", label: "Agent") {
@@ -361,7 +397,7 @@ struct InspectorView: View {
                     ChromeButton(icon: "terminal", label: "Shell") {
                         store.openTerminal(role: .shell, repoID: repoID)
                     }
-                    ChromeButton(icon: "chevron.left.forwardslash.chevron.right", label: "Editor") {
+                    ChromeButton(icon: "chevron.left.forwardslash.chevron.right") {
                         store.openInEditor(worktree.path)
                     }
                     ChromeButton(icon: "folder") { store.revealInFinder(worktree.path) }
@@ -369,79 +405,120 @@ struct InspectorView: View {
                     ChromeButton(icon: "arrow.clockwise") { store.refreshGitStatus() }
                 }
 
-                if !sessions.isEmpty {
-                    Text("SESSIONS IN THIS WORKTREE")
-                        .font(Theme.ui(9.5, .heavy))
-                        .tracking(0.7)
-                        .foregroundStyle(Theme.textTertiary)
-                        .padding(.top, 4)
-                    VStack(spacing: 4) {
-                        ForEach(sessions, id: \.0.id) { summary, status in
-                            Button {
-                                store.reveal(.session(summary.id))
-                            } label: {
-                                HStack(spacing: 7) {
-                                    StatusDot(status: status, zoom: Zoom(scale: 0.9))
-                                    Text(summary.displayTitle)
-                                        .font(Theme.ui(11.5))
-                                        .foregroundStyle(Theme.textPrimary)
-                                        .lineLimit(1)
-                                    Spacer(minLength: 0)
-                                    Text(Format.relative(summary.lastActivityAt))
-                                        .font(Theme.ui(9.5))
-                                        .foregroundStyle(Theme.textTertiary)
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(Theme.surface)
-                                )
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
+                summary(worktree, files: files)
             }
             .padding(14)
+
+            Divider().overlay(Theme.hairline)
+            changesSection(repoPath: worktree.path, files: files)
         }
     }
 
-    private func worktreeFields(_ worktree: Worktree) -> [FieldGrid.Row] {
-        var rows: [FieldGrid.Row] = [
-            .init(label: "Path", value: abbreviate(worktree.path), mono: true, copyable: worktree.path),
-            .init(label: "Branch", value: worktree.branchLabel, mono: true, tint: Theme.branch, copyable: worktree.branch)
-        ]
-        if let head = worktree.head {
-            rows.append(.init(label: "HEAD", value: String(head.prefix(10)), mono: true, copyable: head))
+    /// One line that says what state the checkout is in, instead of a field grid.
+    @ViewBuilder
+    private func summary(_ worktree: Worktree, files: [FileChange]) -> some View {
+        HStack(spacing: 12) {
+            if files.isEmpty {
+                Label("clean", systemImage: "checkmark.seal")
+                    .font(Theme.ui(11))
+                    .foregroundStyle(Theme.clean)
+            } else {
+                Text("\(files.count) changed")
+                    .font(Theme.ui(11, .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                Text("+\(files.reduce(0) { $0 + $1.additions })")
+                    .font(Theme.mono(10.5, .medium))
+                    .foregroundStyle(Theme.clean)
+                Text("−\(files.reduce(0) { $0 + $1.deletions })")
+                    .font(Theme.mono(10.5, .medium))
+                    .foregroundStyle(Theme.dirty)
+            }
+            if let ahead = worktree.ahead, let behind = worktree.behind, ahead + behind > 0 {
+                Text("\(ahead)↑ \(behind)↓")
+                    .font(Theme.mono(10.5, .medium))
+                    .foregroundStyle(Theme.accent)
+            }
+            Spacer(minLength: 0)
+            if let subject = worktree.lastCommitSubject {
+                Text(subject)
+                    .font(Theme.ui(10.5))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+            }
         }
-        if worktree.hasStatus {
-            let dirty = worktree.dirtyFiles ?? 0
-            let untracked = worktree.untrackedFiles ?? 0
-            rows.append(.init(
-                label: "Working tree",
-                value: dirty + untracked == 0 ? "clean" : "\(dirty) modified, \(untracked) untracked",
-                tint: dirty + untracked == 0 ? Theme.clean : Theme.dirty
-            ))
+    }
+
+    /// The file list, and the diff for whichever file is open.
+    @ViewBuilder
+    private func changesSection(repoPath: String, files: [FileChange]) -> some View {
+        if files.isEmpty {
+            VStack(spacing: 6) {
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: 20, weight: .light))
+                    .foregroundStyle(Theme.textTertiary)
+                Text("No changes yet")
+                    .font(Theme.ui(11.5))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            rows.append(.init(label: "Working tree", value: "checking…", tint: Theme.textTertiary))
+            VSplit(
+                top: {
+                    ScrollableStack(alignment: .leading) {
+                        ChangesList(
+                            changes: files,
+                            selected: store.openFile?.repoPath == repoPath ? store.openFile?.change : nil,
+                            onSelect: { store.openDiff(repoPath: repoPath, change: $0) }
+                        )
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
+                    }
+                },
+                bottom: {
+                    diffPane
+                }
+            )
         }
-        if let upstream = worktree.upstream {
-            let ahead = worktree.ahead ?? 0
-            let behind = worktree.behind ?? 0
-            rows.append(.init(label: "Upstream", value: "\(upstream)  ·  \(ahead) ahead, \(behind) behind", mono: true))
+    }
+
+    @ViewBuilder
+    private var diffPane: some View {
+        if let open = store.openFile {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Text(open.change.path)
+                        .font(Theme.mono(10.5, .medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    Spacer(minLength: 0)
+                    Button { store.closeDiff() } label: {
+                        Image(systemName: "xmark").font(Theme.ui(9, .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.textTertiary)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(Theme.surfaceSunken)
+
+                Divider().overlay(Theme.hairline)
+
+                if store.isLoadingDiff {
+                    ProgressView().controlSize(.small)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let diff = store.openDiff {
+                    ScrollableStack(alignment: .leading) {
+                        DiffBody(diff: diff).padding(.vertical, 6)
+                    }
+                }
+            }
+        } else {
+            Text("Select a file to see its diff")
+                .font(Theme.ui(10.5))
+                .foregroundStyle(Theme.textTertiary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        if let subject = worktree.lastCommitSubject {
-            rows.append(.init(label: "Last commit", value: subject))
-        }
-        if let author = worktree.lastCommitAuthor, let date = worktree.lastCommitDate {
-            rows.append(.init(label: "Committed", value: "\(author)  ·  \(Format.relative(date))"))
-        }
-        if worktree.isPrunable {
-            rows.append(.init(label: "State", value: "prunable — the directory is gone", tint: Theme.dirty))
-        }
-        return rows
     }
 
     private func attachedSessions(_ path: String) -> [(SessionSummary, SessionStatus)] {

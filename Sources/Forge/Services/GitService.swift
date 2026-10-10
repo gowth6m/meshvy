@@ -120,4 +120,84 @@ struct GitService {
 
         return result
     }
+
+    // MARK: - Changes
+
+    /// Files changed in a worktree relative to HEAD, including untracked ones.
+    ///
+    /// `-uall` matters: without it git collapses an untracked directory into a
+    /// single `?? dir/` entry and you cannot list what is actually inside.
+    func changes(at path: String) -> [FileChange] {
+        guard FileManager.default.fileExists(atPath: path) else { return [] }
+
+        var counts: [String: (added: Int, removed: Int)] = [:]
+        let numstat = Shell.git(
+            ["-c", "core.quotepath=false", "diff", "--numstat", "HEAD"], cwd: path, timeout: 15
+        )
+        if numstat.ok {
+            for line in numstat.lines {
+                let parts = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+                guard parts.count == 3 else { continue }
+                counts[String(parts[2])] = (Int(parts[0]) ?? 0, Int(parts[1]) ?? 0)
+            }
+        }
+
+        let status = Shell.git(
+            ["-c", "core.quotepath=false", "status", "--porcelain=v1", "-uall"], cwd: path, timeout: 15
+        )
+        guard status.ok else { return [] }
+
+        var changes: [FileChange] = []
+        var seen = Set<String>()
+        for line in status.lines {
+            guard line.count > 3 else { continue }
+            let codes = String(line.prefix(2))
+            var file = String(line.dropFirst(3))
+            // Renames read as "old -> new"; the new path is what we diff.
+            if let arrow = file.range(of: " -> ") {
+                file = String(file[arrow.upperBound...])
+            }
+            guard seen.insert(file).inserted else { continue }
+
+            let kind: FileChange.Kind
+            if codes.hasPrefix("??") { kind = .untracked }
+            else if codes.contains("R") { kind = .renamed }
+            else if codes.contains("A") { kind = .added }
+            else if codes.contains("D") { kind = .deleted }
+            else { kind = .modified }
+
+            let count = counts[file]
+            changes.append(FileChange(
+                path: file,
+                kind: kind,
+                additions: count?.added ?? 0,
+                deletions: count?.removed ?? 0,
+                isStaged: codes.first != " " && codes.first != "?"
+            ))
+        }
+        return changes.sorted { $0.path < $1.path }
+    }
+
+    /// The unified diff for one file, or a synthesised all-added diff when the
+    /// file is untracked and git has nothing to compare it against.
+    func diff(at path: String, file: FileChange) -> FileDiff {
+        if file.kind == .untracked {
+            let url = URL(fileURLWithPath: path).appendingPathComponent(file.path)
+            guard let data = try? Data(contentsOf: url),
+                  data.count < 2_000_000,
+                  let text = String(data: data, encoding: .utf8)
+            else {
+                var diff = FileDiff(path: file.path)
+                diff.isBinary = true
+                return diff
+            }
+            return DiffParser.forUntracked(contents: text, path: file.path)
+        }
+
+        let result = Shell.git(
+            ["-c", "core.quotepath=false", "diff", "HEAD", "--", file.path], cwd: path, timeout: 20
+        )
+        guard result.ok else { return FileDiff(path: file.path) }
+        return DiffParser.parse(result.stdout, path: file.path)
+    }
 }

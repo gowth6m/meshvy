@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0] - 2026-10-11
+
+A place to read code changes, resizable panels, and less chrome.
+
+- **Diff viewer.** Selecting a repository lists every file it has touched
+  against HEAD — modified, added, deleted, renamed and untracked — with per-file
+  +/− counts and a unified diff showing both old and new line numbers.
+  Untracked files are rendered as all-added. Selecting the workspace node shows
+  the same list across every repository at once.
+- **Resizable panels.** Both side panels drag from their inner edge, and the
+  file list and diff have their own divider. Widths persist between launches.
+- **Less chrome.** Dropped the Shell and Ended buttons from the toolbar (both
+  still available from context menus and the View menu), replaced the canvas
+  hint text in the status bar with a changed-file count, and cut the field grid
+  from the repository panel down to a single state line.
+
 ## [0.5.0] - 2026-10-11
 
 The workspace is now a node you can open, and sub-agents show up on the board.

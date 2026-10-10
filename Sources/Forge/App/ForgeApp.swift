@@ -50,6 +50,7 @@ struct ForgeCommands: Commands {
             Button("Actual Size") { store.zoomToActualSize() }
                 .keyboardShortcut("1", modifiers: .command)
             Divider()
+            Button("Show Ended Sessions") { store.showEndedSessions.toggle() }
             Button("Invert Scroll Direction") { store.invertScroll.toggle() }
             Button("Show Ended Sessions") { store.showEndedSessions.toggle() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
@@ -91,7 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         let arguments = CommandLine.arguments
-        if arguments.contains("--perftest") {
+        if let path = DiffTest.path(arguments: arguments) {
+            DiffTest.run(path: path)
+        } else if arguments.contains("--perftest") {
             PerfTest.run()
         } else if arguments.contains("--launchtest") {
             LaunchTest.run()

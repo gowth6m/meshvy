@@ -42,6 +42,11 @@ Forge reads them live out of its transcript.
 **Repo terminals** — right-click a repository card for its own `claude` or a
 plain shell, in that checkout alone.
 
+**Changes** — select a repository to see every file it has touched against
+HEAD, with a unified diff showing both line numbers. Untracked files render as
+all-added. Select the workspace node instead and you get the same list across
+every repository at once, which is what you want after an orchestrator run.
+
 Forge does not host the agent. It starts the real CLI inside the PTY with a
 pre-assigned session id, so the agent registers itself in `~/.claude/sessions`
 and the board can match its transcript to the terminal it runs in.
@@ -60,6 +65,9 @@ and the board can match its transcript to the terminal it runs in.
 | Fit to content | ⌘0 · Actual size ⌘1 |
 | Find | ⌘F — matches dim everything else; ⇧⌘F frames the hits |
 | Refresh | ⌘R |
+
+Side panels drag to resize from their inner edge, and the file list and diff
+have their own divider. Widths persist.
 
 Drag any node by its title bar; drag the corner grip to resize the workspace
 node or a terminal. Click a sub-agent to read its full task and result. Terminals are not restored
@@ -117,12 +125,13 @@ cards are too small to read.
 Sources/Forge/
   App/        entry point, menus, snapshot + test harnesses
   Core/       canvas geometry, theme, persistence
-  Model/      workspaces, terminals, sub-agents, sessions, git, the canvas graph
+  Model/      workspaces, terminals, sub-agents, sessions, git, diffs,
+              the canvas graph
   Services/   byte scanner, indexer, transcript loader, sub-agent tracker,
               git, workspace builder, terminal registry, model catalog, FSEvents
   Store/      app state, board composition
   UI/         canvas, workspace node, cards, terminals, sub-agents,
-              sidebar, inspector, transcript reader
+              sidebar, inspector, diff viewer, transcript reader
 ```
 
 ### Development harnesses
@@ -132,6 +141,7 @@ Forge --snapshot out.png [--zoom 0.8] [--width W] [--height H]
 Forge --selftest <repoA> <repoB> <repoC> [--keep]   # build a workspace, verify, tear down
 Forge --launchtest                                  # open an orchestrator and wait for it to register
 Forge --perftest                                    # time transcript loading on your largest session
+Forge --difftest <worktree>                         # dump the change list and a parsed diff
 ```
 
 `--snapshot` renders the real view tree against your real data with no window.
