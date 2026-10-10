@@ -146,34 +146,3 @@ struct TerminalNodeView: View {
             )
     }
 }
-
-/// Hosts the registry-owned terminal view.
-private struct TerminalSurface: NSViewRepresentable {
-    var session: TerminalSession
-
-    func makeNSView(context: Context) -> NSView {
-        let container = FlippedContainer()
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(srgbRed: 0.035, green: 0.039, blue: 0.051, alpha: 1).cgColor
-        container.addSubview(session.surface)
-        return container
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        // Re-parent if this surface was rebuilt into a different container.
-        if session.surface.superview !== nsView {
-            session.surface.removeFromSuperview()
-            nsView.addSubview(session.surface)
-        }
-        session.surface.frame = nsView.bounds
-    }
-
-    /// Lays the terminal out from the top-left, matching the card.
-    final class FlippedContainer: NSView {
-        override var isFlipped: Bool { true }
-        override func layout() {
-            super.layout()
-            subviews.first?.frame = bounds
-        }
-    }
-}

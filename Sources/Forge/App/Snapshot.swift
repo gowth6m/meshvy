@@ -48,7 +48,7 @@ enum SelfTest {
             print("  - \(repo.name): onDisk=\(exists) branch=\(branch) failure=\(repo.failure ?? "none")")
             if !exists || branch != workspace.branch { healthy = false }
         }
-        print("nodes: \(store.graph.nodes.count) groups: \(store.graph.groups.count)")
+        print("nodes: \(store.graph.nodes.count) edges: \(store.graph.edges.count)")
         print("orchestrator cwd would be: \(workspace.root)")
 
         if keep {
@@ -83,10 +83,11 @@ enum LaunchTest {
         print(AgentCommand.orchestratorBrief(workspace: workspace))
         print("--- end brief ---")
 
-        guard let node = store.openTerminal(role: .orchestrator) else {
-            print("LAUNCHTEST FAILED: terminal did not open"); exit(1)
+        store.startOrchestrator()
+        guard let node = store.activeWorkspace?.orchestrator else {
+            print("LAUNCHTEST FAILED: orchestrator did not start"); exit(1)
         }
-        print("terminal: \(node.title) cwd=\(node.cwd)")
+        print("orchestrator: \(node.title) cwd=\(node.cwd)")
         // Claude Code asks the user to trust a folder it has not seen before.
         // Answer it the way a person would, then wait for the agent to register.
         answerStartupPrompts(store: store, node: node, attempts: 60, answered: 0)
@@ -131,12 +132,53 @@ enum LaunchTest {
         }
     }
 
+    /// Types a task that forces a fan-out, then watches for sub-agent nodes.
+    private static func dispatchTask(store: ForgeStore) {
+        guard let terminal = store.activeWorkspace?.orchestrator,
+              let session = store.terminals.session(for: terminal.id) else {
+            print("LAUNCHTEST FAILED: no orchestrator session"); exit(1)
+        }
+        let task = "Use the Agent tool to launch one sub-agent per repository "
+            + "(api, web, worker). Each one must only reply with the repo name. Run them concurrently."
+        print("sending task…")
+        session.send(task)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            MainActor.assumeIsolated {
+                session.send("\r")
+                watchSubAgents(store: store, attempts: 240)
+            }
+        }
+    }
+
+    private static func watchSubAgents(store: ForgeStore, attempts: Int) {
+        let agents = store.subAgents
+        if !agents.isEmpty {
+            print("sub-agent nodes: \(agents.count)")
+            for agent in agents {
+                let state = agent.state.isRunning ? "running" : "finished"
+                print("  - \(agent.title) [\(agent.kind)] \(state) result=\(agent.result?.prefix(40) ?? "-")")
+            }
+            if agents.allSatisfy({ !$0.state.isRunning }) {
+                print("nodes on board: \(store.graph.nodes.count) edges: \(store.graph.edges.count)")
+                print("LAUNCHTEST OK")
+                exit(0)
+            }
+        }
+        guard attempts > 0 else {
+            print(agents.isEmpty ? "LAUNCHTEST TIMEOUT: no sub-agents seen" : "LAUNCHTEST OK (still running)")
+            exit(agents.isEmpty ? 1 : 0)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            MainActor.assumeIsolated { watchSubAgents(store: store, attempts: attempts - 1) }
+        }
+    }
+
     private static func poll(store: ForgeStore, sessionID: String?, attempts: Int) {
         store.refreshLive()
         if let sessionID, let session = store.live[sessionID] {
             print("LIVE: name=\(session.name ?? "-") status=\(session.status.rawValue) pid=\(session.pid)")
-            print("LAUNCHTEST OK")
-            exit(0)
+            dispatchTask(store: store)
+            return
         }
         guard attempts > 0 else {
             print("LAUNCHTEST TIMEOUT")
@@ -153,6 +195,8 @@ enum LaunchTest {
         }
     }
 }
+
+private extension LaunchTest {}
 
 /// Measures transcript loading on the largest session on disk.
 /// `Forge --perftest`.

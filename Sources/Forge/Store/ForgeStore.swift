@@ -26,6 +26,8 @@ final class ForgeStore {
     /// Live git state for the active workspace's checkouts, keyed by path.
     private(set) var worktrees: [String: Worktree] = [:]
     private(set) var live: [String: LiveSession] = [:]
+    /// Sub-agents the orchestrator has dispatched, read from its transcript.
+    private(set) var subAgents: [SubAgent] = []
     private(set) var graph = CanvasGraph()
 
     // MARK: View state
@@ -65,6 +67,7 @@ final class ForgeStore {
     private let git = GitService()
     private let builder = WorkspaceBuilder()
     private let composer = BoardComposer()
+    private let subAgentTracker = SubAgentTracker()
     private let workspaceStore = WorkspaceStore()
     private let layoutStore = FileStore<SavedLayout>(filename: "layout.json")
     private let transcriptLoader = TranscriptLoader()
@@ -91,6 +94,7 @@ final class ForgeStore {
         workspaces = document.workspaces.map { workspace in
             var copy = workspace
             copy.terminals = []
+            copy.orchestrator = nil
             return copy
         }
         activeWorkspaceID = document.activeWorkspaceID ?? document.workspaces.first?.id
@@ -252,7 +256,7 @@ final class ForgeStore {
     /// Forgets the workspace. `removeWorktrees` also tears the checkouts off disk.
     func deleteWorkspace(_ id: UUID, removeWorktrees: Bool, force: Bool) {
         guard let workspace = workspaces.first(where: { $0.id == id }) else { return }
-        for terminal in workspace.terminals { terminals.discard(terminal.id) }
+        for terminal in workspace.allTerminals { terminals.discard(terminal.id) }
 
         guard removeWorktrees else {
             forget(id)
@@ -313,18 +317,63 @@ final class ForgeStore {
 
     // MARK: - Terminals
 
-    /// Opens a terminal on the board. An orchestrator sits at the workspace root
-    /// with every repository beneath it; a repo terminal sits in one checkout.
+    /// Starts Claude Code on the workspace node itself. Its working directory
+    /// is the workspace root, so every repository is a subdirectory it can see.
+    func startOrchestrator() {
+        guard var workspace = activeWorkspace else { return }
+        if let existing = workspace.orchestrator, terminals.isRunning(existing.id) {
+            reveal(.workspace(workspace.id))
+            return
+        }
+        guard FileManager.default.fileExists(atPath: workspace.root) else {
+            show(.init(kind: .failure, title: "Workspace folder is missing", detail: workspace.root))
+            return
+        }
+
+        let sessionID = UUID().uuidString.lowercased()
+        let name = AgentCommand.derivedName(role: .orchestrator, context: workspace.name)
+        var node = TerminalNode(
+            role: .orchestrator,
+            title: name,
+            cwd: workspace.root,
+            sessionID: sessionID
+        )
+        node.size = CGSize(width: workspace.boardWidth, height: workspace.boardHeight)
+
+        let options = AgentCommand.Options(model: models.selectedModelID, permissionMode: "acceptEdits")
+        terminals.start(
+            node: node,
+            command: AgentCommand.orchestrator(
+                workspace: workspace, sessionID: sessionID, name: name, options: options
+            )
+        )
+        workspace.orchestrator = node
+        update(workspace)
+        selection = .workspace(workspace.id)
+        refreshSubAgents()
+    }
+
+    func stopOrchestrator() {
+        guard var workspace = activeWorkspace, let node = workspace.orchestrator else { return }
+        terminals.discard(node.id)
+        workspace.orchestrator = nil
+        subAgents = []
+        update(workspace)
+    }
+
+    var isOrchestratorRunning: Bool {
+        guard let node = activeWorkspace?.orchestrator else { return false }
+        return terminals.isRunning(node.id)
+    }
+
+    /// Opens a terminal for one repository, or a plain shell.
     @discardableResult
     func openTerminal(role: TerminalNode.Role, repoID: String? = nil) -> TerminalNode? {
         guard var workspace = activeWorkspace else { return nil }
+        guard role != .orchestrator else { startOrchestrator(); return workspace.orchestrator }
 
         let repo = repoID.flatMap { id in workspace.repos.first { $0.id == id } }
-        let cwd: String
-        switch role {
-        case .orchestrator: cwd = workspace.root
-        case .repo, .shell: cwd = repo?.worktreePath ?? workspace.root
-        }
+        let cwd = repo?.worktreePath ?? workspace.root
         guard FileManager.default.fileExists(atPath: cwd) else {
             show(.init(kind: .failure, title: "That folder does not exist yet", detail: cwd))
             return nil
@@ -339,24 +388,17 @@ final class ForgeStore {
             repoID: repo?.id,
             sessionID: sessionID
         )
-        node.size = role == .orchestrator
-            ? CGSize(width: 700, height: 420)
-            : CGSize(width: 580, height: 340)
+        node.size = CGSize(width: 580, height: 340)
 
-        let options = AgentCommand.Options(model: models.selectedModelID, permissionMode: "acceptEdits")
         let command: [String]
-        switch role {
-        case .orchestrator:
-            command = AgentCommand.orchestrator(
-                workspace: workspace, sessionID: sessionID!, name: name, options: options
-            )
-        case .repo:
+        if role == .shell {
+            command = []
+        } else {
             guard let repo else { return nil }
             command = AgentCommand.repoAgent(
-                workspace: workspace, repo: repo, sessionID: sessionID!, name: name, options: options
+                workspace: workspace, repo: repo, sessionID: sessionID!, name: name,
+                options: AgentCommand.Options(model: models.selectedModelID, permissionMode: "acceptEdits")
             )
-        case .shell:
-            command = []
         }
 
         terminals.start(node: node, command: command)
@@ -365,6 +407,33 @@ final class ForgeStore {
         selection = .terminal(node.id)
         reveal(.terminal(node.id))
         return node
+    }
+
+    // MARK: - Sub-agents
+
+    /// Re-reads the orchestrator's transcript for Agent-tool dispatches. Cheap
+    /// enough to run on every transcript write while it is working.
+    private func refreshSubAgents() {
+        guard let sessionID = activeWorkspace?.orchestrator?.sessionID,
+              let url = transcriptURL(for: sessionID) else {
+            if !subAgents.isEmpty { subAgents = []; rebuild() }
+            return
+        }
+        let tracker = subAgentTracker
+        Task.detached(priority: .utility) {
+            let found = tracker.subAgents(inTranscriptAt: url)
+            await MainActor.run { [weak self] in
+                guard let self, self.subAgents != found else { return }
+                self.subAgents = found
+                self.rebuild()
+            }
+        }
+    }
+
+    /// Transcripts are named after the session id, so a filename match finds it
+    /// without having to re-derive the project folder encoding.
+    private func transcriptURL(for sessionID: String) -> URL? {
+        indexer.transcriptFiles().first { $0.deletingPathExtension().lastPathComponent == sessionID }
     }
 
     func closeTerminal(_ id: UUID) {
@@ -376,14 +445,31 @@ final class ForgeStore {
     }
 
     func restartTerminal(_ id: UUID) {
-        guard let workspace = activeWorkspace,
-              let node = workspace.terminals.first(where: { $0.id == id }) else { return }
-        terminals.discard(id)
+        guard let workspace = activeWorkspace else { return }
+        if workspace.orchestrator?.id == id {
+            stopOrchestrator()
+            startOrchestrator()
+            return
+        }
+        guard let node = workspace.terminals.first(where: { $0.id == id }) else { return }
         closeTerminal(id)
         openTerminal(role: node.role, repoID: node.repoID)
     }
 
     /// Persists a terminal's placement after a drag or resize.
+    /// Resizes the workspace node itself.
+    func resizeWorkspaceNode(to size: CGSize) {
+        guard var workspace = activeWorkspace else { return }
+        workspace.boardWidth = size.width
+        workspace.boardHeight = size.height
+        guard let position = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
+        workspaces[position] = workspace
+        if let node = graph.nodes.firstIndex(where: { $0.id == .workspace(workspace.id) }) {
+            graph.nodes[node].size = size
+            graph.nodes[node].kind = .workspace(workspace)
+        }
+    }
+
     func moveTerminal(_ id: UUID, to position: CGPoint, size: CGSize? = nil) {
         guard var workspace = activeWorkspace,
               let index = workspace.terminals.firstIndex(where: { $0.id == id }) else { return }
@@ -527,7 +613,12 @@ final class ForgeStore {
                 Task { @MainActor in self?.refreshLive() }
             },
             DirectoryWatcher(paths: [home + "/.claude/projects"], debounce: 1.5) { [weak self] in
-                Task { @MainActor in self?.reindexChangedTranscripts() }
+                Task { @MainActor in
+                    self?.reindexChangedTranscripts()
+                    // The orchestrator's dispatches land in the same transcript,
+                    // so a write there may mean a new sub-agent.
+                    self?.refreshSubAgents()
+                }
             }
         ]
     }
@@ -557,9 +648,11 @@ final class ForgeStore {
             sessions: allSessions,
             statuses: statuses,
             live: live,
+            subAgents: subAgents,
             pinned: pinned,
             claimedSessions: terminals.claimedSessionIDs,
-            showEnded: showEndedSessions
+            showEnded: showEndedSessions,
+            orchestratorRunning: isOrchestratorRunning
         ))
         recomputeMatches()
         if let selection, graph.node(selection) == nil { self.selection = nil }
@@ -583,7 +676,7 @@ final class ForgeStore {
     private func summaryLine() -> String {
         guard let workspace = activeWorkspace else { return "No workspace — create one to get started" }
         let sessions = graph.nodes.filter { if case .session = $0.kind { return true } else { return false } }.count
-        let running = workspace.terminals.filter { terminals.isRunning($0.id) }.count
+        let running = workspace.allTerminals.filter { terminals.isRunning($0.id) }.count
         var parts = [
             "\(workspace.readyRepos.count) \(workspace.readyRepos.count == 1 ? "repo" : "repos") on \(workspace.branch)",
             "\(sessions) \(sessions == 1 ? "session" : "sessions")"

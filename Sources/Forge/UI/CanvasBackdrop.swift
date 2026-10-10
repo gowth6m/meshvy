@@ -20,7 +20,6 @@ struct CanvasBackdrop: View {
         Canvas(opaque: true, rendersAsynchronously: false) { context, size in
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Theme.canvas))
             drawGrid(&context, size: size)
-            drawGroups(&context)
             drawEdges(&context)
             if detail == .block { drawBlocks(&context) }
         }
@@ -70,123 +69,6 @@ struct CanvasBackdrop: View {
         context.fill(major, with: .color(Theme.gridMajor.opacity(fade)))
     }
 
-    // MARK: Groups
-
-    private func drawGroups(_ context: inout GraphicsContext) {
-        let visible = viewport.visibleWorldRect()
-        for group in graph.groups where group.rect.intersects(visible) {
-            let rect = viewport.project(group.rect)
-            let style = GroupStyle(kind: group.kind, seed: group.seed)
-            let corner = Theme.groupCorner * viewport.scale
-            let path = Path(roundedRect: rect, cornerRadius: corner, style: .continuous)
-
-            context.fill(path, with: .color(Theme.canvasDeep.opacity(0.55)))
-            context.fill(path, with: .color(style.tint.opacity(style.fillOpacity)))
-            context.stroke(
-                path,
-                with: .color(style.tint.opacity(style.strokeOpacity)),
-                style: StrokeStyle(
-                    lineWidth: max(0.6, style.lineWidth * viewport.scale),
-                    dash: style.isDashed ? [6 * viewport.scale, 5 * viewport.scale] : []
-                )
-            )
-
-            guard viewport.scale > 0.1 else { continue }
-            let titleSize = max(11, 15 * viewport.scale)
-            let titleFont = Theme.ui(titleSize, .bold)
-            let baseline = rect.minY - 7
-            var cursorX = rect.minX + 2
-
-            // A link spans several repositories, so it earns a marker that says
-            // so even when the board is zoomed too far out to read the lanes.
-            if style.badge != nil, viewport.scale > 0.3 {
-                let glyphSize = titleSize * 0.92
-                context.draw(
-                    Text(Image(systemName: style.badge!))
-                        .font(Theme.ui(glyphSize, .semibold))
-                        .foregroundStyle(style.tint),
-                    at: CGPoint(x: cursorX, y: baseline),
-                    anchor: .bottomLeading
-                )
-                cursorX += glyphSize * 1.5
-            }
-
-            let available = rect.width - (cursorX - rect.minX)
-            guard let (title, titleWidth) = fitted(
-                group.title, font: titleFont, maxWidth: available, context: context
-            ) else { continue }
-
-            context.draw(
-                title.foregroundStyle(style.tint.opacity(0.95)),
-                at: CGPoint(x: cursorX, y: baseline),
-                anchor: .bottomLeading
-            )
-
-            let remaining = available - titleWidth - 12
-            guard viewport.scale > 0.35, remaining > 60 else { continue }
-            let subtitleFont = Theme.mono(max(9, 10.5 * viewport.scale))
-            if let (subtitle, _) = fitted(
-                abbreviate(group.subtitle), font: subtitleFont, maxWidth: remaining, context: context
-            ) {
-                context.draw(
-                    subtitle.foregroundStyle(Theme.textTertiary),
-                    at: CGPoint(x: cursorX + titleWidth + 12, y: baseline),
-                    anchor: .bottomLeading
-                )
-            }
-        }
-    }
-
-    /// How the workspace container is drawn.
-    private struct GroupStyle {
-        var tint: SwiftUI.Color
-        var fillOpacity: Double
-        var strokeOpacity: Double
-        var lineWidth: CGFloat
-        var isDashed: Bool
-        var badge: String?
-
-        init(kind: GroupKind, seed: String) {
-            tint = Theme.repoTint(seed)
-            fillOpacity = 0.06
-            strokeOpacity = 0.4
-            lineWidth = 1.4
-            isDashed = false
-            badge = "rectangle.3.group.fill"
-        }
-    }
-
-    private func abbreviate(_ path: String) -> String {
-        path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-    }
-
-    /// Truncates `string` with an ellipsis until it fits `maxWidth`, returning the
-    /// drawable text and its measured width. Nil when even one character will not
-    /// fit, in which case the label is skipped rather than overlapping a
-    /// neighbouring group.
-    private func fitted(
-        _ string: String, font: Font, maxWidth: CGFloat, context: GraphicsContext
-    ) -> (Text, CGFloat)? {
-        guard maxWidth > 8 else { return nil }
-        let bounds = CGSize(width: 10_000, height: 200)
-        func measure(_ candidate: String) -> CGFloat {
-            context.resolve(Text(candidate).font(font)).measure(in: bounds).width
-        }
-
-        let full = measure(string)
-        if full <= maxWidth { return (Text(string).font(font), full) }
-
-        // Estimate the fitting length from the ratio, then walk down.
-        var count = max(1, Int(Double(string.count) * Double(maxWidth / full)))
-        while count >= 1 {
-            let candidate = String(string.prefix(count)) + "…"
-            let width = measure(candidate)
-            if width <= maxWidth { return (Text(candidate).font(font), width) }
-            count -= 1
-        }
-        return nil
-    }
-
     // MARK: Edges
 
     private func drawEdges(_ context: inout GraphicsContext) {
@@ -215,7 +97,9 @@ struct CanvasBackdrop: View {
             )
             // A terminal's ownership of a checkout is drawn in the accent so
             // the parent/child shape of the workspace is readable at a glance.
-            if edge.kind == .owns || edge.isLive { active.addPath(path) } else { idle.addPath(path) }
+            // Ownership and dispatch edges carry the shape of the workspace,
+            // so they stay visible even when the far end is idle.
+            if edge.kind != .ranIn || edge.isLive { active.addPath(path) } else { idle.addPath(path) }
         }
 
         context.stroke(
@@ -235,6 +119,9 @@ struct CanvasBackdrop: View {
     private func drawBlocks(_ context: inout GraphicsContext) {
         let visible = viewport.visibleWorldRect()
         for node in graph.nodes where node.frame.intersects(visible) {
+            // Workspace and terminal nodes always draw themselves.
+            if case .workspace = node.kind { continue }
+            if case .terminal = node.kind { continue }
             let rect = viewport.project(node.frame)
             let corner = max(2, Theme.nodeCorner * viewport.scale)
             let path = Path(roundedRect: rect, cornerRadius: corner, style: .continuous)
@@ -250,10 +137,12 @@ struct CanvasBackdrop: View {
                     }
                 case .worktree(let worktree):
                     return (Theme.surfaceSunken, worktree.isDirty ? Theme.dirty : Theme.worktree)
-                case .terminal:
-                    // Terminals keep their own live view at every zoom; the
-                    // block layer never needs to stand in for one.
+                case .terminal, .workspace:
+                    // These keep their own live view at every zoom; the block
+                    // layer never needs to stand in for one.
                     return (Theme.canvasDeep, Theme.accent)
+                case .subAgent(let agent):
+                    return (Theme.surface, agent.state.isRunning ? Theme.busy : Theme.clean)
                 }
             }()
 

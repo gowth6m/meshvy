@@ -1,37 +1,54 @@
 import CoreGraphics
 import Foundation
 
-/// Decides what goes on the board for one workspace.
+/// Lays out one workspace as a tree.
 ///
-/// A workspace is the parent: its repositories are lanes beneath it, and
-/// terminal nodes float freely where the user drops them. An orchestrator
-/// terminal draws an edge to every repository so the parent/child shape the
-/// workspace actually has is visible.
+/// The workspace itself is the parent node — it hosts the orchestrator's Claude
+/// Code session and names the repositories that belong to it. Its repositories
+/// sit in a row beneath it, and every sub-agent the orchestrator dispatches
+/// appears as its own node to the side, linked back to the parent.
 struct BoardComposer {
     struct Input {
         var workspace: Workspace
-        /// Live git state keyed by the worktree path.
+        /// Live git state keyed by worktree path.
         var worktrees: [String: Worktree]
         var sessions: [SessionSummary]
         var statuses: [String: SessionStatus]
         var live: [String: LiveSession]
+        var subAgents: [SubAgent]
         var pinned: [String: CGPoint]
-        /// Sessions already represented by a terminal node, so we do not draw
-        /// a duplicate card for them.
+        /// Sessions already shown by a terminal node, so no duplicate card.
         var claimedSessions: Set<String>
         var showEnded: Bool
+        var orchestratorRunning: Bool
     }
 
-    private var gap: CGFloat { 20 }
-    private var padding: CGFloat { 26 }
-    private var headerHeight: CGFloat { 10 }
-    private var sessionsPerLane: Int { 4 }
+    private let gap: CGFloat = 26
+    private let rowGap: CGFloat = 70
+    private let subAgentSize = CGSize(width: 256, height: 108)
 
     func compose(_ input: Input) -> CanvasGraph {
         var graph = CanvasGraph()
         let workspace = input.workspace
 
-        // Attach sessions to the checkout they ran in.
+        // 1. The parent.
+        let parentSize = CGSize(
+            width: workspace.boardWidth,
+            height: input.orchestratorRunning ? workspace.boardHeight : Workspace.idleHeight
+        )
+        graph.nodes.append(CanvasNode(
+            id: .workspace(workspace.id),
+            kind: .workspace(workspace),
+            position: .zero,
+            size: parentSize
+        ))
+
+        // 2. Repositories in a row beneath it, each linked to the parent.
+        let repoRowY = parentSize.height + rowGap
+        let repoWidth = Theme.worktreeNodeSize.width
+        let totalRepoWidth = CGFloat(workspace.repos.count) * (repoWidth + gap) - gap
+        var repoX = max(0, (parentSize.width - totalRepoWidth) / 2)
+
         let index = PathIndex(paths: workspace.repos.map(\.worktreePath))
         var byRepo: [String: [SessionSummary]] = [:]
         for session in input.sessions {
@@ -42,124 +59,97 @@ struct BoardComposer {
             byRepo[path, default: []].append(session)
         }
 
-        // One lane per repository.
-        var nodes: [CanvasNode] = []
-        var edges: [CanvasEdge] = []
-        var y = headerHeight + padding
-        var widestLane: CGFloat = Theme.worktreeNodeSize.width
-
         for repo in workspace.repos {
-            let worktree = input.worktrees[repo.worktreePath] ?? Worktree(
-                path: repo.worktreePath,
-                branch: workspace.branch,
-                head: nil,
-                isMain: false,
-                isDetached: false,
-                isLocked: false,
-                isPrunable: repo.failure != nil,
-                isArchived: !FileManager.default.fileExists(atPath: repo.worktreePath),
-                displayName: repo.name,
-                failureReason: repo.failure
-            )
+            let worktree = input.worktrees[repo.worktreePath] ?? placeholder(for: repo, workspace: workspace)
             let nodeID = NodeID.worktree(repo.worktreePath)
-            nodes.append(CanvasNode(
+            graph.nodes.append(CanvasNode(
                 id: nodeID,
                 kind: .worktree(worktree),
-                position: CGPoint(x: padding, y: y),
+                position: CGPoint(x: repoX, y: repoRowY),
                 size: Theme.worktreeNodeSize,
-                sectionID: "workspace",
                 repoID: repo.id
             ))
+            graph.edges.append(CanvasEdge(
+                from: .workspace(workspace.id), to: nodeID,
+                isLive: input.orchestratorRunning, kind: .owns
+            ))
 
+            // Past sessions for this repo stack under its card.
             let sessions = (byRepo[repo.worktreePath] ?? []).sorted { $0.lastActivityAt > $1.lastActivityAt }
-            var laneHeight = Theme.worktreeNodeSize.height
-            let originX = padding + Theme.worktreeNodeSize.width + gap
-
-            for (position, session) in sessions.enumerated() {
-                let row = position / sessionsPerLane
-                let column = position % sessionsPerLane
+            var y = repoRowY + Theme.worktreeNodeSize.height + gap
+            for session in sessions.prefix(6) {
                 let status = input.statuses[session.id] ?? .ended
-                nodes.append(CanvasNode(
+                graph.nodes.append(CanvasNode(
                     id: .session(session.id),
                     kind: .session(session, status: status, live: input.live[session.id]),
-                    position: CGPoint(
-                        x: originX + CGFloat(column) * (Theme.sessionNodeSize.width + gap),
-                        y: y + CGFloat(row) * (Theme.sessionNodeSize.height + gap)
-                    ),
+                    position: CGPoint(x: repoX, y: y),
                     size: Theme.sessionNodeSize,
-                    sectionID: "workspace",
                     repoID: repo.id
                 ))
-                edges.append(CanvasEdge(from: .session(session.id), to: nodeID, isLive: status.isLive))
-                laneHeight = max(laneHeight, CGFloat(row + 1) * (Theme.sessionNodeSize.height + gap) - gap)
-                widestLane = max(
-                    widestLane,
-                    Theme.worktreeNodeSize.width + gap
-                        + CGFloat(min(sessions.count, sessionsPerLane)) * (Theme.sessionNodeSize.width + gap) - gap
-                )
+                graph.edges.append(CanvasEdge(from: .session(session.id), to: nodeID, isLive: status.isLive))
+                y += Theme.sessionNodeSize.height + gap
             }
-            y += laneHeight + gap
+            repoX += repoWidth + gap
         }
 
-        let sectionSize = CGSize(
-            width: widestLane + padding * 2,
-            height: max(y - gap + padding, Theme.worktreeNodeSize.height + padding * 2 + headerHeight)
-        )
-        graph.groups.append(CanvasGroup(
-            id: "workspace",
-            kind: .workspace,
-            title: workspace.name,
-            subtitle: workspace.branch + "  ·  " + workspace.root.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
-            rect: CGRect(origin: .zero, size: sectionSize),
-            seed: workspace.branch
-        ))
-        graph.nodes = nodes
-        graph.edges = edges
+        // 3. Sub-agents the orchestrator dispatched, to the right of the parent.
+        var agentY: CGFloat = 0
+        let agentX = parentSize.width + rowGap
+        for agent in input.subAgents {
+            graph.nodes.append(CanvasNode(
+                id: .subAgent(agent.id),
+                kind: .subAgent(agent),
+                position: CGPoint(x: agentX, y: agentY),
+                size: subAgentSize
+            ))
+            graph.edges.append(CanvasEdge(
+                from: .workspace(workspace.id), to: .subAgent(agent.id),
+                isLive: agent.state.isRunning, kind: .dispatched
+            ))
+            agentY += subAgentSize.height + gap
+        }
 
-        // Terminals float where they were dropped; a fresh one is parked to the
-        // right of the workspace so it never lands on top of the repositories.
-        var terminalOrigin = CGPoint(x: sectionSize.width + 70, y: 0)
+        // 4. Free-floating terminals the user opened per repo.
+        var terminalOrigin = CGPoint(x: agentX, y: max(agentY + rowGap, parentSize.height + rowGap))
         for terminal in workspace.terminals {
             var position = terminal.position
             if position == .zero {
                 position = terminalOrigin
-                terminalOrigin.y += terminal.size.height + 28
+                terminalOrigin.y += terminal.size.height + gap
             }
             graph.nodes.append(CanvasNode(
                 id: .terminal(terminal.id),
                 kind: .terminal(terminal),
                 position: position,
                 size: terminal.size,
-                sectionID: nil,
                 repoID: terminal.repoID
             ))
-
-            // An orchestrator owns every repository; a repo terminal owns one.
-            switch terminal.role {
-            case .orchestrator:
-                for repo in workspace.readyRepos {
-                    graph.edges.append(CanvasEdge(
-                        from: .terminal(terminal.id),
-                        to: .worktree(repo.worktreePath),
-                        isLive: true,
-                        kind: .owns
-                    ))
-                }
-            case .repo, .shell:
-                if let repoID = terminal.repoID,
-                   let repo = workspace.repos.first(where: { $0.id == repoID }) {
-                    graph.edges.append(CanvasEdge(
-                        from: .terminal(terminal.id),
-                        to: .worktree(repo.worktreePath),
-                        isLive: true,
-                        kind: .owns
-                    ))
-                }
+            if let repoID = terminal.repoID,
+               let repo = workspace.repos.first(where: { $0.id == repoID }) {
+                graph.edges.append(CanvasEdge(
+                    from: .terminal(terminal.id), to: .worktree(repo.worktreePath),
+                    isLive: true, kind: .owns
+                ))
             }
         }
 
         applyPinned(&graph, pinned: input.pinned)
         return graph
+    }
+
+    private func placeholder(for repo: WorkspaceRepo, workspace: Workspace) -> Worktree {
+        Worktree(
+            path: repo.worktreePath,
+            branch: workspace.branch,
+            head: nil,
+            isMain: false,
+            isDetached: false,
+            isLocked: false,
+            isPrunable: repo.failure != nil,
+            isArchived: !FileManager.default.fileExists(atPath: repo.worktreePath),
+            displayName: repo.name,
+            failureReason: repo.failure
+        )
     }
 
     private func applyPinned(_ graph: inout CanvasGraph, pinned: [String: CGPoint]) {
@@ -172,10 +162,6 @@ struct BoardComposer {
             graph.nodes[offset].isPinned = true
         }
     }
-}
-
-enum GroupKind {
-    case workspace
 }
 
 /// Longest-prefix path ownership, with symlinks resolved.

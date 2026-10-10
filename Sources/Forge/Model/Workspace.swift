@@ -17,12 +17,22 @@ struct Workspace: Identifiable, Codable, Hashable {
     /// `~/.forge/<slug>` — contains one subdirectory per repository.
     var root: String
     var repos: [WorkspaceRepo] = []
-    /// Terminal nodes placed on this workspace's board.
+    /// The Claude Code session that sits on top of the whole workspace. It is
+    /// hosted by the workspace node itself rather than floating separately.
+    var orchestrator: TerminalNode?
+    /// Per-repo agents and plain shells, placed freely on the board.
     var terminals: [TerminalNode] = []
+    /// Size of the workspace node on the board.
+    var boardWidth: Double = 780
+    var boardHeight: Double = 520
     var createdAt: Date = Date()
     var notes: String?
 
     var readyRepos: [WorkspaceRepo] { repos.filter(\.isReady) }
+    /// Every terminal on the board, orchestrator included.
+    var allTerminals: [TerminalNode] { (orchestrator.map { [$0] } ?? []) + terminals }
+    /// Height the node collapses to when no orchestrator is running.
+    static let idleHeight: Double = 186
     var worktreePaths: [String] { readyRepos.map(\.worktreePath) }
 
     static func root(for name: String) -> String {

@@ -46,7 +46,7 @@ struct RootView: View {
         .onReceive(of: .forgeFocusSearch) { sidebarVisible = true }
         .onReceive(of: .forgeNewWorkspace) { sheet = .newWorkspace }
         .onReceive(of: .forgeAddRepos) { if store.hasWorkspace { sheet = .addRepos } }
-        .onReceive(of: .forgeOpenOrchestrator) { if store.hasWorkspace { store.openTerminal(role: .orchestrator) } }
+        .onReceive(of: .forgeOpenOrchestrator) { if store.hasWorkspace { store.startOrchestrator() } }
         .onReceive(of: .forgeOpenShell) { if store.hasWorkspace { store.openTerminal(role: .shell) } }
     }
 }
@@ -135,10 +135,17 @@ private struct TopBar: View {
             if store.hasWorkspace {
                 Divider().frame(height: 16).overlay(Theme.hairline).padding(.horizontal, 2)
 
-                AccentButton(icon: "point.3.connected.trianglepath.dotted", label: "Orchestrator") {
-                    store.openTerminal(role: .orchestrator)
+                AccentButton(
+                    icon: store.isOrchestratorRunning ? "point.3.connected.trianglepath.dotted" : "play.fill",
+                    label: store.isOrchestratorRunning ? "Go to orchestrator" : "Start Claude Code"
+                ) {
+                    if store.isOrchestratorRunning, let id = store.activeWorkspace?.id {
+                        store.reveal(.workspace(id))
+                    } else {
+                        store.startOrchestrator()
+                    }
                 }
-                .help("Opens a Claude terminal at the workspace root, with every repo beneath it")
+                .help("Claude Code runs on the workspace node, with every repo beneath it")
                 ChromeButton(icon: "terminal", label: "Shell") {
                     store.openTerminal(role: .shell)
                 }

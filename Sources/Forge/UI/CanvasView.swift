@@ -69,12 +69,40 @@ struct CanvasView: View {
     }
 
     private var terminalLayer: some View {
+        // Workspace and terminal nodes host live AppKit views, so they are
+        // always mounted — unmounting would tear down the PTY.
         let terminals = store.graph.nodes.filter {
-            if case .terminal = $0.kind { return true } else { return false }
+            switch $0.kind {
+            case .terminal, .workspace: return true
+            default: return false
+            }
         }
         return ForEach(terminals) { node in
-            if case .terminal(let terminal) = node.kind {
-                let rect = store.viewport.project(node.frame)
+            let rect = store.viewport.project(node.frame)
+            if case .workspace(let workspace) = node.kind {
+                WorkspaceNodeView(
+                    workspace: workspace,
+                    store: store,
+                    zoom: zoom,
+                    isSelected: store.selection == node.id,
+                    onResize: { store.resizeWorkspaceNode(to: $0) }
+                )
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+                .gesture(terminalDrag(node))
+                .onTapGesture { store.select(node.id) }
+                .contextMenu {
+                    if store.isOrchestratorRunning {
+                        Button("Restart Claude Code") { store.restartTerminal(workspace.orchestrator!.id) }
+                        Button("Stop Claude Code") { store.stopOrchestrator() }
+                    } else {
+                        Button("Start Claude Code") { store.startOrchestrator() }
+                    }
+                    Divider()
+                    Button("Add repositories…") { sheet = .addRepos }
+                    Button("Reveal folder in Finder") { store.revealInFinder(workspace.root) }
+                }
+            } else if case .terminal(let terminal) = node.kind {
                 TerminalNodeView(
                     node: terminal,
                     store: store,
@@ -160,8 +188,15 @@ struct CanvasView: View {
                 isHovered: hoveredNode == node.id,
                 isDimmed: dimmed
             )
-        case .terminal:
+        case .terminal, .workspace:
             EmptyView()
+        case .subAgent(let agent):
+            SubAgentNodeView(
+                agent: agent,
+                zoom: zoom,
+                isSelected: store.selection == node.id,
+                isDimmed: dimmed
+            )
         case .worktree(let worktree):
             let attached = attachedSessions(to: worktree.path)
             WorktreeNodeView(
@@ -240,6 +275,13 @@ struct CanvasView: View {
         case .terminal(let terminal):
             Button("Restart") { store.restartTerminal(terminal.id) }
             Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
+        case .workspace:
+            EmptyView()
+        case .subAgent(let agent):
+            Button("Copy task") { store.copyToClipboard(agent.prompt) }
+            if let result = agent.result {
+                Button("Copy result") { store.copyToClipboard(result) }
+            }
         case .worktree(let worktree):
             Button("Open agent terminal here") {
                 store.openTerminal(role: .repo, repoID: node.repoID)

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0] - 2026-10-11
+
+The workspace is now a node you can open, and sub-agents show up on the board.
+
+- **The workspace node hosts Claude Code.** The workspace used to be a
+  translucent background container with the orchestrator floating separately.
+  It is now the parent node itself: it names the branch, lists the repositories
+  that belong to it, and opens a real Claude Code PTY in its body. Edges run
+  down to each repository.
+- **Sub-agent nodes.** Every agent the orchestrator dispatches with the Agent
+  tool appears as its own node linked back to the parent, with its task, agent
+  type, running state, token count and result. Agent-tool sub-agents never
+  register in `~/.claude/sessions` — they live inside the parent's transcript —
+  so Forge tails that transcript and surfaces them from there.
+- Verified end to end: an orchestrator asked to fan out across three repos
+  produced three sub-agent nodes, each with its own result.
+
 ## [0.4.0] - 2026-10-07
 
 Simplified to one concept, and terminals now live on the canvas.

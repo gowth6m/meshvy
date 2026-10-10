@@ -26,14 +26,21 @@ you picked, all under one folder:
 Creating it is one step: name it, pick the repositories, choose the base branch
 to cut from. Make another workspace for another branch.
 
-**Terminal** — a real PTY on the canvas, not a link to Terminal.app. Three kinds:
+**The workspace node** — the parent on the canvas. It names the workspace and
+its branch, lists the repositories that belong to it, and *hosts* Claude Code in
+its body: press **Start orchestrator** and a real PTY opens there, running
+`claude` at the workspace root. Its system prompt names every repository and
+tells it to dispatch a sub-agent per repo with the Agent tool rather than doing
+the work itself. Edges run down to each repository it owns.
 
-- **Orchestrator** — runs `claude` at the workspace root. Its system prompt
-  names every repository and tells it to dispatch a sub-agent per repo with the
-  Agent tool rather than doing the work itself. Draws an edge to every
-  repository it owns.
-- **Agent** — runs `claude` inside one repository's checkout.
-- **Shell** — a plain login shell.
+**Sub-agent nodes** — every agent the orchestrator dispatches appears as its own
+node, linked back to the parent, showing the task it was given, which agent type
+it is, whether it is still running, and what it reported back. These are Agent
+tool calls inside the orchestrator's session rather than separate processes, so
+Forge reads them live out of its transcript.
+
+**Repo terminals** — right-click a repository card for its own `claude` or a
+plain shell, in that checkout alone.
 
 Forge does not host the agent. It starts the real CLI inside the PTY with a
 pre-assigned session id, so the agent registers itself in `~/.claude/sessions`
@@ -46,7 +53,7 @@ and the board can match its transcript to the terminal it runs in.
 |---|---|
 | New workspace | ⇧⌘N |
 | Add repositories | ⇧⌘O |
-| Orchestrator terminal | ⇧⌘T |
+| Start / focus orchestrator | ⇧⌘T |
 | Shell | ⌘T |
 | Pan | drag empty canvas, or scroll |
 | Zoom | ⌘-scroll, pinch, or ⌘+ / ⌘− |
@@ -54,8 +61,8 @@ and the board can match its transcript to the terminal it runs in.
 | Find | ⌘F — matches dim everything else; ⇧⌘F frames the hits |
 | Refresh | ⌘R |
 
-Drag a terminal by its title bar; drag the corner grip to resize. Right-click a
-repository card to open an agent or a shell in it. Terminals are not restored
+Drag any node by its title bar; drag the corner grip to resize the workspace
+node or a terminal. Click a sub-agent to read its full task and result. Terminals are not restored
 after a quit — the process is gone, so the board starts clean.
 
 Scrolling follows the system "natural scrolling" preference;
@@ -110,11 +117,12 @@ cards are too small to read.
 Sources/Forge/
   App/        entry point, menus, snapshot + test harnesses
   Core/       canvas geometry, theme, persistence
-  Model/      workspaces, terminals, sessions, git, the canvas graph
-  Services/   byte scanner, indexer, transcript loader, git,
-              workspace builder, terminal registry, model catalog, FSEvents
+  Model/      workspaces, terminals, sub-agents, sessions, git, the canvas graph
+  Services/   byte scanner, indexer, transcript loader, sub-agent tracker,
+              git, workspace builder, terminal registry, model catalog, FSEvents
   Store/      app state, board composition
-  UI/         canvas, cards, terminals, sidebar, inspector, transcript reader
+  UI/         canvas, workspace node, cards, terminals, sub-agents,
+              sidebar, inspector, transcript reader
 ```
 
 ### Development harnesses

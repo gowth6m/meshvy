@@ -16,6 +16,10 @@ struct InspectorView: View {
                     worktreeInspector(worktree, repoID: node.repoID)
                 case .terminal(let terminal):
                     terminalInspector(terminal)
+                case .workspace(let workspace):
+                    workspaceInspector(workspace)
+                case .subAgent(let agent):
+                    subAgentInspector(agent)
                 }
             } else {
                 emptyState
@@ -154,6 +158,143 @@ struct InspectorView: View {
     }
 
     // MARK: - Worktree
+
+    /// The parent node: what the workspace is and what it owns.
+    private func workspaceInspector(_ workspace: Workspace) -> some View {
+        ScrollableStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 7) {
+                    Image(systemName: "rectangle.3.group.fill").foregroundStyle(Theme.accent)
+                    Text(workspace.name)
+                        .font(Theme.ui(15, .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 0)
+                    Text(store.isOrchestratorRunning ? "running" : "idle")
+                        .font(Theme.ui(10, .heavy))
+                        .foregroundStyle(store.isOrchestratorRunning ? Theme.clean : Theme.textTertiary)
+                }
+
+                FieldGrid(rows: [
+                    .init(label: "Branch", value: workspace.branch, mono: true, tint: Theme.branch, copyable: workspace.branch),
+                    .init(label: "Cut from", value: workspace.baseRef ?? "each repo's default", mono: true),
+                    .init(
+                        label: "Folder",
+                        value: workspace.root.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
+                        mono: true, copyable: workspace.root
+                    ),
+                    .init(label: "Created", value: Format.absolute(workspace.createdAt))
+                ])
+
+                HStack(spacing: 6) {
+                    if store.isOrchestratorRunning {
+                        ChromeButton(icon: "stop.circle", label: "Stop") { store.stopOrchestrator() }
+                    } else {
+                        ChromeButton(icon: "play.fill", label: "Start Claude Code") { store.startOrchestrator() }
+                    }
+                    ChromeButton(icon: "plus", label: "Repos") { sheet = .addRepos }
+                    Spacer(minLength: 0)
+                    ChromeButton(icon: "folder") { store.revealInFinder(workspace.root) }
+                }
+
+                Text("REPOSITORIES")
+                    .font(Theme.ui(9.5, .heavy))
+                    .tracking(0.7)
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.top, 4)
+                VStack(spacing: 4) {
+                    ForEach(workspace.repos) { repo in
+                        Button { store.reveal(.worktree(repo.worktreePath)) } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: repo.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
+                                    .font(Theme.ui(9))
+                                    .foregroundStyle(repo.isReady ? Theme.worktree : Theme.dirty)
+                                Text(repo.name).font(Theme.ui(11.5)).foregroundStyle(Theme.textPrimary)
+                                Spacer(minLength: 0)
+                                Text(repo.failure ?? "./\(repo.name)")
+                                    .font(Theme.mono(9.5))
+                                    .foregroundStyle(repo.isReady ? Theme.textTertiary : Theme.dirty)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.surface))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if !store.subAgents.isEmpty {
+                    Text("SUB-AGENTS")
+                        .font(Theme.ui(9.5, .heavy))
+                        .tracking(0.7)
+                        .foregroundStyle(Theme.textTertiary)
+                        .padding(.top, 4)
+                    VStack(spacing: 4) {
+                        ForEach(store.subAgents) { agent in
+                            Button { store.reveal(.subAgent(agent.id)) } label: {
+                                HStack(spacing: 7) {
+                                    Circle()
+                                        .fill(agent.state.isRunning ? Theme.busy : Theme.clean)
+                                        .frame(width: 5, height: 5)
+                                    Text(agent.title).font(Theme.ui(11.5)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    Text(agent.kind).font(Theme.mono(9)).foregroundStyle(Theme.textTertiary)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.surface))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding(14)
+        }
+    }
+
+    private func subAgentInspector(_ agent: SubAgent) -> some View {
+        ScrollableStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(agent.state.isRunning ? Theme.busy : Theme.clean)
+                        .frame(width: 7, height: 7)
+                    Text(agent.title)
+                        .font(Theme.ui(15, .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                FieldGrid(rows: [
+                    .init(label: "Agent type", value: agent.kind, mono: true),
+                    .init(label: "State", value: agent.state.isRunning ? "running" : "finished"),
+                    .init(label: "Tokens", value: agent.totalTokens.map(Format.compactCount) ?? "—"),
+                    .init(label: "Handle", value: agent.agentID ?? "—", mono: true, copyable: agent.agentID)
+                ])
+                Text("TASK")
+                    .font(Theme.ui(9.5, .heavy)).tracking(0.7).foregroundStyle(Theme.textTertiary)
+                Text(agent.prompt)
+                    .font(Theme.ui(11.5))
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let result = agent.result, !result.isEmpty {
+                    Text("RESULT")
+                        .font(Theme.ui(9.5, .heavy)).tracking(0.7).foregroundStyle(Theme.textTertiary)
+                        .padding(.top, 4)
+                    Text(result)
+                        .font(Theme.ui(11.5))
+                        .foregroundStyle(Theme.textPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+        }
+    }
 
     private func terminalInspector(_ terminal: TerminalNode) -> some View {
         VStack(alignment: .leading, spacing: 12) {

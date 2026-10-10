@@ -7,12 +7,16 @@ enum NodeID: Hashable, Codable {
     case session(String)
     case worktree(String)
     case terminal(UUID)
+    case workspace(UUID)
+    case subAgent(String)
 
     var storageKey: String {
         switch self {
         case .session(let id): return "s:" + id
         case .worktree(let path): return "w:" + path
         case .terminal(let id): return "t:" + id.uuidString
+        case .workspace(let id): return "k:" + id.uuidString
+        case .subAgent(let id): return "a:" + id
         }
     }
 
@@ -21,6 +25,10 @@ enum NodeID: Hashable, Codable {
         else if storageKey.hasPrefix("w:") { self = .worktree(String(storageKey.dropFirst(2))) }
         else if storageKey.hasPrefix("t:"), let id = UUID(uuidString: String(storageKey.dropFirst(2))) {
             self = .terminal(id)
+        } else if storageKey.hasPrefix("k:"), let id = UUID(uuidString: String(storageKey.dropFirst(2))) {
+            self = .workspace(id)
+        } else if storageKey.hasPrefix("a:") {
+            self = .subAgent(String(storageKey.dropFirst(2)))
         } else { return nil }
     }
 }
@@ -29,6 +37,10 @@ enum NodeKind {
     case session(SessionSummary, status: SessionStatus, live: LiveSession?)
     case worktree(Worktree)
     case terminal(TerminalNode)
+    /// The parent node: the workspace itself, hosting its orchestrator.
+    case workspace(Workspace)
+    /// A sub-agent the orchestrator dispatched with the Agent tool.
+    case subAgent(SubAgent)
 }
 
 struct CanvasNode: Identifiable {
@@ -55,6 +67,10 @@ struct CanvasNode: Identifiable {
             return [w.path, w.branch, w.lastCommitSubject].compactMap { $0 }.joined(separator: " ").lowercased()
         case .terminal(let t):
             return [t.title, t.cwd, t.role.label].joined(separator: " ").lowercased()
+        case .workspace(let w):
+            return ([w.name, w.branch] + w.repos.map(\.name)).joined(separator: " ").lowercased()
+        case .subAgent(let a):
+            return [a.title, a.kind, a.prompt].joined(separator: " ").lowercased()
         }
     }
 
@@ -63,6 +79,8 @@ struct CanvasNode: Identifiable {
         case .session(let s, _, _): return s.lastActivityAt
         case .worktree(let w): return w.lastCommitDate ?? .distantPast
         case .terminal(let t): return t.createdAt
+        case .workspace(let w): return w.createdAt
+        case .subAgent(let a): return a.startedAt ?? .distantPast
         }
     }
 }
@@ -72,8 +90,10 @@ struct CanvasEdge: Identifiable {
     enum Kind {
         /// A session ran in this checkout.
         case ranIn
-        /// A terminal has this checkout under it.
+        /// A terminal or the workspace has this checkout under it.
         case owns
+        /// The orchestrator dispatched this sub-agent.
+        case dispatched
     }
 
     var from: NodeID
@@ -83,25 +103,14 @@ struct CanvasEdge: Identifiable {
     var id: String { from.storageKey + "->" + to.storageKey }
 }
 
-/// Translucent container drawn behind the nodes of one section.
-struct CanvasGroup: Identifiable {
-    var id: String
-    var kind: GroupKind
-    var title: String
-    var subtitle: String
-    var rect: CGRect
-    var seed: String
-}
+
 
 /// What the canvas renders for the current filter + layout state.
 struct CanvasGraph {
     var nodes: [CanvasNode] = []
     var edges: [CanvasEdge] = []
-    var groups: [CanvasGroup] = []
 
     func node(_ id: NodeID) -> CanvasNode? { nodes.first { $0.id == id } }
 
-    var contentRect: CGRect? {
-        CGRect.bounding(groups.map(\.rect) + nodes.map(\.frame))
-    }
+    var contentRect: CGRect? { CGRect.bounding(nodes.map(\.frame)) }
 }
