@@ -90,11 +90,13 @@ struct SubAgentTracker {
                     guard let id = block["id"] as? String else { continue }
                     let input = block["input"] as? [String: Any] ?? [:]
                     let prompt = input["prompt"] as? String ?? ""
+                    // The orchestrator usually supplies a description; fall back
+                    // to the head of the prompt, and to a label when it gave
+                    // neither.
+                    let derived = prompt.isEmpty ? "Sub-agent" : String(prompt.prefix(60))
                     let agent = SubAgent(
                         id: id,
-                        title: (input["description"] as? String)
-                            ?? String(prompt.prefix(60))
-                            ?? "Sub-agent",
+                        title: (input["description"] as? String) ?? derived,
                         kind: input["subagent_type"] as? String ?? "agent",
                         prompt: prompt,
                         startedAt: timestamp

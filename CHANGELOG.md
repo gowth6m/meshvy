@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.1] - 2026-10-11
+
+- Fixed a sub-agent whose dispatch carried neither a description nor a prompt
+  being titled with an empty string. CI caught the dead `??` behind it — the
+  local toolchain did not warn, the runner's did.
+
 ## [0.6.0] - 2026-10-11
 
 Renamed to **Orkestr**, and set up for release.
