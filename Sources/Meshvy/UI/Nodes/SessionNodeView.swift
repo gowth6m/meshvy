@@ -49,7 +49,7 @@ struct SessionNodeView: View {
 
     @ViewBuilder
     private var content: some View {
-        VStack(alignment: .leading, spacing: zoom.s(detail == .full ? 7 : 4)) {
+        VStack(alignment: .leading, spacing: zoom.t(detail == .full ? 7 : 4)) {
             header
             if detail == .full {
                 chips
@@ -63,15 +63,15 @@ struct SessionNodeView: View {
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, zoom.s(11))
-        .padding(.vertical, zoom.s(9))
+        .padding(.horizontal, zoom.t(11))
+        .padding(.vertical, zoom.t(9))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: zoom.s(4)) {
+        HStack(alignment: .top, spacing: zoom.t(4)) {
             StatusDot(status: status, zoom: zoom)
-                .offset(y: zoom.s(-1))
+                .offset(y: zoom.t(-1))
             Text(summary.displayTitle)
                 .font(zoom.font(12.5, .semibold))
                 .foregroundStyle(Theme.textPrimary)
@@ -83,7 +83,7 @@ struct SessionNodeView: View {
     }
 
     private var chips: some View {
-        HStack(spacing: zoom.s(4)) {
+        HStack(spacing: zoom.t(4)) {
             Pill(text: summary.workspaceName, icon: "folder", tint: Theme.textSecondary, zoom: zoom)
             if let branch = summary.gitBranch, !branch.isEmpty {
                 Pill(text: branch, icon: "arrow.triangle.branch", tint: Theme.branch, zoom: zoom)
@@ -92,7 +92,7 @@ struct SessionNodeView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: zoom.s(8)) {
+        HStack(spacing: zoom.t(8)) {
             if let model = Format.model(summary.model) {
                 Text(model)
                     .font(zoom.font(9.5, .semibold))

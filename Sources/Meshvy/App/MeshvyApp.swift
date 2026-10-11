@@ -92,7 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         let arguments = CommandLine.arguments
-        if let repo = BridgeTest.repo(arguments: arguments) {
+        if arguments.contains("--zoomtest") {
+            ZoomTest.run()
+        } else if let repo = BridgeTest.repo(arguments: arguments) {
             BridgeTest.run(repo: repo)
         } else if let path = DiffTest.path(arguments: arguments) {
             DiffTest.run(path: path)

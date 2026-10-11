@@ -2,6 +2,28 @@
 
 ## [0.8.0] - 2026-10-11
 
+- **Delegated agents are real terminals.** The orchestrator used Claude's Agent
+  tool, whose sub-agents run inside the parent process with no pid and no pty —
+  nothing a terminal could attach to, so the board could only draw them as
+  cards. Delegation now goes through a `meshvy` helper on the agent's PATH
+  (`spawn`, `wait`, `send`, `list`), and every agent it starts is a real Claude
+  Code session with its own terminal node, linked back to the workspace.
+- `Bash(meshvy:*)` is pre-approved, since `acceptEdits` does not cover Bash and
+  an orchestrator that stops to ask permission for every spawn never gets going.
+- **Type and geometry zoom on different curves.** Scaled linearly, card text was
+  mush at 45% and shouted at 160%. Cards still scale with the canvas; type
+  follows `sqrt(zoom)` clamped to 0.8–1.3, with the padding around text on the
+  same curve so pills keep their proportions.
+- **Terminals magnify instead of reflowing.** Their glyphs were a fixed 11.5pt
+  at every zoom — the one thing on the board that ignored the zoom control.
+  Scaling the container's coordinate system and leaving the terminal's frame
+  alone means the text scales while the grid stays put, so a running program is
+  not redrawn on each zoom step.
+- One store per process; the scene and the headless harnesses were each making
+  their own, racing for the same agent-bridge requests.
+
+## [0.8.0] - 2026-10-11
+
 Delegated agents are real terminals now.
 
 - **The orchestrator spawns actual Claude Code sessions.** Claude's Agent tool

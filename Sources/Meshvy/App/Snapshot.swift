@@ -306,6 +306,58 @@ enum BridgeTest {
     }
 }
 
+/// Checks that zooming magnifies a terminal rather than reflowing its grid.
+/// `Meshvy --zoomtest`.
+@MainActor
+enum ZoomTest {
+    static func run() {
+        let store = MeshvyStore.shared
+        store.bootstrap()
+        guard store.activeWorkspace != nil else { print("no workspace"); exit(1) }
+
+        guard let node = store.openTerminal(role: .shell) else {
+            print("ZOOMTEST FAILED: no terminal"); exit(1)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            MainActor.assumeIsolated { measure(store: store, node: node) }
+        }
+    }
+
+    private static func measure(store: MeshvyStore, node: TerminalNode) {
+        guard let session = store.terminals.session(for: node.id) else {
+            print("ZOOMTEST FAILED: no session"); exit(1)
+        }
+        let container = TerminalSurface.FlippedContainer()
+        container.addSubview(session.surface)
+        container.contentSize = node.size
+
+        var results: [(CGFloat, Int, Int, CGFloat)] = []
+        for scale in [CGFloat(0.6), 1.0, 2.0] {
+            container.frame = CGRect(
+                origin: .zero,
+                size: CGSize(width: node.size.width * scale, height: node.size.height * scale)
+            )
+            container.layout()
+            let grid = session.grid
+            // The container's frame-to-bounds ratio is the magnification.
+            let magnification = container.frame.width / max(1, container.bounds.width)
+            results.append((scale, grid.cols, grid.rows, magnification))
+            print(String(
+                format: "zoom %.1fx -> container %.0f/%.0f = %.2fx, terminal frame %.0fpt, grid %dx%d",
+                scale, container.frame.width, container.bounds.width, magnification,
+                session.surface.frame.width, grid.cols, grid.rows
+            ))
+        }
+
+        let magnificationsTrack = results.allSatisfy { abs($0.3 - $0.0) < 0.02 }
+        let gridStable = Set(results.map { "\($0.1)x\($0.2)" }).count == 1
+        print("magnification follows zoom: \(magnificationsTrack)")
+        print("grid stays put: \(gridStable)")
+        print(magnificationsTrack && gridStable ? "ZOOMTEST OK" : "ZOOMTEST FAILED")
+        exit(magnificationsTrack && gridStable ? 0 : 1)
+    }
+}
+
 /// Measures transcript loading on the largest session on disk.
 /// `Meshvy --perftest`.
 @MainActor

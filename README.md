@@ -207,6 +207,13 @@ The canvas renders in screen space rather than scaling a rendered layer, so text
 stays crisp at any zoom, and drops to plain blocks in a single `Canvas` pass once
 cards are too small to read.
 
+Geometry and type zoom on different curves. Scaled linearly, a title is 5pt at
+45% and shouts at 160%, so cards keep scaling with the canvas while type follows
+`sqrt(zoom)` clamped to 0.8–1.3. Terminals magnify instead: the container's
+coordinate system is scaled and the terminal's own frame is left alone, so the
+grid never reflows and a running program is not forced to redraw on every zoom
+step.
+
 ## Layout
 
 ```

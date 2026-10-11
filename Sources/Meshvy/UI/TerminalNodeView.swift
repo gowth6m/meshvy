@@ -104,7 +104,7 @@ struct TerminalNodeView: View {
             // emulator does not scale — show the folder instead and keep the
             // process running untouched in the registry.
             if zoom.scale > 0.5 {
-                TerminalSurface(session: session)
+                TerminalSurface(session: session, contentSize: node.size)
             } else {
                 placeholder
             }

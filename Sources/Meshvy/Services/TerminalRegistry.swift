@@ -45,6 +45,12 @@ final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDel
         )
     }
 
+    /// Grid dimensions, for diagnostics.
+    var grid: (cols: Int, rows: Int) {
+        let terminal = view.getTerminal()
+        return (terminal.cols, terminal.rows)
+    }
+
     /// Visible screen contents, for diagnostics.
     var screenText: String {
         let terminal = view.getTerminal()

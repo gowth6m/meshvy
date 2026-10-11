@@ -21,7 +21,7 @@ struct SubAgentNodeView: View {
     var body: some View {
         HStack(spacing: 0) {
             Rectangle().fill(tint).frame(width: zoom.s(Theme.accentRail))
-            VStack(alignment: .leading, spacing: zoom.s(5)) {
+            VStack(alignment: .leading, spacing: zoom.t(5)) {
                 header
                 Text(agent.state.isRunning ? agent.prompt : (agent.result ?? agent.prompt))
                     .font(zoom.font(10))
@@ -32,8 +32,8 @@ struct SubAgentNodeView: View {
                 Spacer(minLength: 0)
                 footer
             }
-            .padding(.horizontal, zoom.s(10))
-            .padding(.vertical, zoom.s(8))
+            .padding(.horizontal, zoom.t(10))
+            .padding(.vertical, zoom.t(8))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(
@@ -49,7 +49,7 @@ struct SubAgentNodeView: View {
     }
 
     private var header: some View {
-        HStack(spacing: zoom.s(5)) {
+        HStack(spacing: zoom.t(5)) {
             if agent.state.isRunning {
                 Circle()
                     .fill(tint)
@@ -71,7 +71,7 @@ struct SubAgentNodeView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: zoom.s(7)) {
+        HStack(spacing: zoom.t(7)) {
             Text(agent.subtitle)
                 .font(zoom.font(9, .medium))
                 .foregroundStyle(tint.opacity(0.9))

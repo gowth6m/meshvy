@@ -128,7 +128,7 @@ struct WorkspaceNodeView: View {
     @ViewBuilder
     private func body(for session: TerminalSession?) -> some View {
         if let session, zoom.scale > 0.45 {
-            TerminalSurface(session: session)
+            TerminalSurface(session: session, contentSize: CGSize(width: workspace.boardWidth, height: workspace.boardHeight))
         } else if session != nil {
             zoomedOutPlaceholder
         } else {
@@ -201,31 +201,59 @@ struct WorkspaceNodeView: View {
 }
 
 /// Hosts a registry-owned terminal view.
+///
+/// The terminal is laid out at the node's *world* size and magnified to fill
+/// the projected frame. That way zooming scales the text like everything else
+/// on the board, instead of the grid reflowing and the glyphs staying 11.5pt
+/// however far you zoom in — which was the one thing on the canvas whose size
+/// never responded to the zoom control.
 struct TerminalSurface: NSViewRepresentable {
     var session: TerminalSession
+    /// Node size in world coordinates, i.e. its size at 100%.
+    var contentSize: CGSize
 
     func makeNSView(context: Context) -> NSView {
         let container = FlippedContainer()
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor(hex: Theme.Hex.canvasDeep).cgColor
         container.addSubview(session.surface)
+        container.contentSize = contentSize
         return container
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        if session.surface.superview !== nsView {
+        guard let container = nsView as? FlippedContainer else { return }
+        if session.surface.superview !== container {
             session.surface.removeFromSuperview()
-            nsView.addSubview(session.surface)
+            container.addSubview(session.surface)
         }
-        session.surface.frame = nsView.bounds
+        container.contentSize = contentSize
+        container.needsLayout = true
+        container.layoutSubtreeIfNeeded()
     }
 
     /// Lays the terminal out from the top-left, matching the card.
     final class FlippedContainer: NSView {
+        /// The coordinate space the terminal thinks it lives in.
+        var contentSize: CGSize = .zero
+
         override var isFlipped: Bool { true }
+
         override func layout() {
             super.layout()
-            subviews.first?.frame = bounds
+            guard let child = subviews.first else { return }
+            guard contentSize.width > 1, contentSize.height > 1 else {
+                child.frame = bounds
+                return
+            }
+            // Scale *this* view's coordinate system rather than the terminal's.
+            // The container's frame is the projected rect and its bounds stay
+            // the world size, so everything inside is magnified by exactly the
+            // zoom — while the terminal's own frame never changes, which is
+            // what keeps SwiftTerm from recomputing its grid and making every
+            // running program redraw on each zoom step.
+            setBoundsSize(contentSize)
+            child.frame = CGRect(origin: .zero, size: contentSize)
         }
     }
 }

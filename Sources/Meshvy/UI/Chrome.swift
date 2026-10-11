@@ -4,15 +4,39 @@ import SwiftUI
 /// screen space rather than using `.scaleEffect`, so text stays crisp at any
 /// zoom instead of being rasterised once and stretched.
 struct Zoom {
+    /// How much the canvas is magnified. Geometry follows this exactly.
     let scale: CGFloat
-    func s(_ value: CGFloat) -> CGFloat { value * scale }
-    func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        Theme.ui(max(1, size * scale), weight)
+
+    /// Type does not follow `scale`. Scaled linearly it turns to mush on the
+    /// way out and shouts on the way in — at 45% a title is 5pt, at 160% the
+    /// same title fills a card that has no more to say. The square root
+    /// compresses both ends, and the clamp stops it running away entirely.
+    ///
+    /// Equal to 1 at 100%, so the board looks unchanged at its resting zoom.
+    var typeScale: CGFloat {
+        min(max(sqrt(max(scale, 0.01)), Zoom.minTypeScale), Zoom.maxTypeScale)
     }
+
+    /// Below this the card is small enough that `DetailLevel` has already
+    /// dropped to a title and one line, which still fits.
+    static let minTypeScale: CGFloat = 0.8
+    static let maxTypeScale: CGFloat = 1.3
+
+    /// Geometry: paddings, corner radii, card chrome.
+    func s(_ value: CGFloat) -> CGFloat { value * scale }
+
+    /// Type, on the compressed curve.
+    func t(_ value: CGFloat) -> CGFloat { value * typeScale }
+
+    func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        Theme.ui(max(1, size * typeScale), weight)
+    }
+
     func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        Theme.mono(max(1, size * scale), weight)
+        Theme.mono(max(1, size * typeScale), weight)
     }
 }
+
 
 /// Small rounded label used for branches, models and paths.
 struct Pill: View {
@@ -22,7 +46,7 @@ struct Pill: View {
     var zoom: Zoom
 
     var body: some View {
-        HStack(spacing: zoom.s(3)) {
+        HStack(spacing: zoom.t(3)) {
             if let icon {
                 Image(systemName: icon)
                     .font(zoom.font(8, .semibold))
@@ -33,15 +57,15 @@ struct Pill: View {
                 .truncationMode(.middle)
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, zoom.s(5))
-        .padding(.vertical, zoom.s(2))
+        .padding(.horizontal, zoom.t(5))
+        .padding(.vertical, zoom.t(2))
         .background(
-            RoundedRectangle(cornerRadius: zoom.s(4), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.t(4), style: .continuous)
                 .fill(tint.opacity(0.11))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: zoom.s(4), style: .continuous)
-                .stroke(tint.opacity(0.18), lineWidth: max(0.5, zoom.s(0.5)))
+            RoundedRectangle(cornerRadius: zoom.t(4), style: .continuous)
+                .stroke(tint.opacity(0.18), lineWidth: max(0.5, zoom.t(0.5)))
         )
     }
 }
@@ -66,19 +90,19 @@ struct StatusDot: View {
             if status == .busy {
                 Circle()
                     .fill(color.opacity(0.28))
-                    .frame(width: zoom.s(16), height: zoom.s(16))
+                    .frame(width: zoom.t(16), height: zoom.t(16))
                     .scaleEffect(pulsing ? 1.0 : 0.45)
                     .opacity(pulsing ? 0 : 0.9)
                     .animation(.easeOut(duration: 1.4).repeatForever(autoreverses: false), value: pulsing)
             }
             Circle()
                 .fill(color)
-                .frame(width: zoom.s(7), height: zoom.s(7))
+                .frame(width: zoom.t(7), height: zoom.t(7))
                 .overlay(
-                    Circle().stroke(Theme.textPrimary.opacity(status == .ended ? 0 : 0.3), lineWidth: max(0.5, zoom.s(0.6)))
+                    Circle().stroke(Theme.textPrimary.opacity(status == .ended ? 0 : 0.3), lineWidth: max(0.5, zoom.t(0.6)))
                 )
         }
-        .frame(width: zoom.s(16), height: zoom.s(16))
+        .frame(width: zoom.t(16), height: zoom.t(16))
         .onAppear { if status == .busy { pulsing = true } }
     }
 }
@@ -91,7 +115,7 @@ struct MetaStat: View {
     var zoom: Zoom
 
     var body: some View {
-        HStack(spacing: zoom.s(2.5)) {
+        HStack(spacing: zoom.t(2.5)) {
             Image(systemName: icon).font(zoom.font(8.5, .medium))
             Text(value).font(zoom.font(9.5, .medium))
         }

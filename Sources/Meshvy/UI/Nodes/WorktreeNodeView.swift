@@ -47,10 +47,10 @@ struct WorktreeNodeView: View {
 
     @ViewBuilder
     private var content: some View {
-        VStack(alignment: .leading, spacing: zoom.s(detail == .full ? 6 : 4)) {
+        VStack(alignment: .leading, spacing: zoom.t(detail == .full ? 6 : 4)) {
             header
             if detail == .full {
-                HStack(spacing: zoom.s(4)) {
+                HStack(spacing: zoom.t(4)) {
                     Pill(text: worktree.branchLabel, icon: "arrow.triangle.branch", tint: Theme.branch, zoom: zoom)
                     if let ahead = worktree.ahead, let behind = worktree.behind, ahead + behind > 0 {
                         Pill(
@@ -71,13 +71,13 @@ struct WorktreeNodeView: View {
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, zoom.s(11))
-        .padding(.vertical, zoom.s(9))
+        .padding(.horizontal, zoom.t(11))
+        .padding(.vertical, zoom.t(9))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var header: some View {
-        HStack(spacing: zoom.s(5)) {
+        HStack(spacing: zoom.t(5)) {
             Image(systemName: glyph)
                 .font(zoom.font(10.5, .medium))
                 .foregroundStyle(accent)
@@ -123,7 +123,7 @@ struct WorktreeNodeView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: zoom.s(8)) {
+        HStack(spacing: zoom.t(8)) {
             if worktree.isArchived {
                 MetaStat(icon: "clock.arrow.circlepath", value: "no longer on disk", zoom: zoom)
             } else if worktree.hasStatus {
