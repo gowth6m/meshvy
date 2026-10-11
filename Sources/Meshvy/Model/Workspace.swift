@@ -108,6 +108,11 @@ struct TerminalNode: Identifiable, Codable, Hashable {
     /// Session id pre-assigned to the `claude` process, so the board can match
     /// the transcript to this node instead of drawing a duplicate card.
     var sessionID: String?
+    /// Set when the orchestrator spawned this agent through the bridge, so
+    /// `meshvy send` can address it.
+    var bridgeID: String?
+    /// The instruction it was started with.
+    var openingTask: String?
     var x: Double = 0
     var y: Double = 0
     var width: Double = 620

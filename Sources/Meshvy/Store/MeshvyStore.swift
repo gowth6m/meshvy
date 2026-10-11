@@ -10,6 +10,12 @@ import SwiftUI
 @MainActor
 @Observable
 final class MeshvyStore {
+    /// One store per process. The SwiftUI scene and the headless harnesses both
+    /// reach for this — two instances would mean two sets of timers, two
+    /// filesystem watchers, and two readers racing for the same agent-bridge
+    /// request files.
+    static let shared = MeshvyStore()
+
     // MARK: Workspaces
     private(set) var workspaces: [Workspace] = []
     private(set) var activeWorkspaceID: UUID?
@@ -84,6 +90,7 @@ final class MeshvyStore {
     private var saved = SavedLayout()
     private var pinned: [String: CGPoint] = [:]
     private var watchers: [DirectoryWatcher] = []
+    private var bridgeWatcher: DirectoryWatcher?
     private var liveTimer: Timer?
     private var gitTimer: Timer?
     private var hasFitInitially = false
@@ -135,6 +142,7 @@ final class MeshvyStore {
     }
 
     private func loadActiveWorkspace() {
+        guard let workspace = activeWorkspace else { return }
         let files = indexer.transcriptFiles()
         allSessions = indexer.quickSummaries(files: files).sorted { $0.lastActivityAt > $1.lastActivityAt }
         sessionIndexByID = Dictionary(
@@ -144,6 +152,7 @@ final class MeshvyStore {
         rebuild()
         startIndexing(files: files)
         refreshGitStatus()
+        startBridge(for: workspace)
     }
 
     // MARK: - Creating a workspace
@@ -328,6 +337,79 @@ final class MeshvyStore {
 
     // MARK: - Terminals
 
+    // MARK: - Agent bridge
+    //
+    // Claude's Agent tool runs sub-agents in-process, so they have no terminal
+    // to show. Instead the orchestrator is told to delegate with the `meshvy`
+    // helper, which drops a request here and gets a real agent back — its own
+    // process, its own PTY, its own node on the canvas.
+
+    private func startBridge(for workspace: Workspace) {
+        AgentBridge.install(for: workspace)
+        bridgeWatcher = DirectoryWatcher(
+            paths: [AgentBridge.requestsDirectory(for: workspace)],
+            debounce: 0.2
+        ) { [weak self] in
+            Task { @MainActor in self?.drainBridge() }
+        }
+        drainBridge()
+    }
+
+    /// Handles everything the helper has asked for since the last pass.
+    private func drainBridge() {
+        guard let workspace = activeWorkspace else { return }
+        for (url, request) in AgentBridge.pendingRequests(for: workspace) {
+            // Remove first: a request that throws must not be retried forever.
+            try? FileManager.default.removeItem(at: url)
+            switch request.kind {
+            case "spawn": handleSpawn(request, in: workspace)
+            case "send": handleSend(request)
+            default: continue
+            }
+        }
+    }
+
+    private func handleSpawn(_ request: AgentBridge.Request, in workspace: Workspace) {
+        guard let repoName = request.repo,
+              let repo = workspace.repos.first(where: { $0.name == repoName }) else {
+            show(.init(kind: .failure, title: "Agent asked for an unknown repo", detail: request.repo))
+            return
+        }
+        guard let node = openTerminal(
+            role: .repo,
+            repoID: repo.id,
+            openingTask: request.task,
+            bridgeID: request.id
+        ) else { return }
+
+        AgentBridge.record(
+            .init(
+                id: request.id,
+                sessionId: node.sessionID,
+                repo: repo.name,
+                cwd: node.cwd,
+                transcriptHint: node.sessionID,
+                startedAt: Date().timeIntervalSince1970
+            ),
+            in: workspace
+        )
+        show(.init(
+            kind: .success,
+            title: "Orchestrator started an agent in \(repo.name)",
+            detail: request.task
+        ))
+    }
+
+    /// One agent typing into another's terminal.
+    private func handleSend(_ request: AgentBridge.Request) {
+        guard let target = request.to, let message = request.message,
+              let workspace = activeWorkspace else { return }
+        let node = workspace.terminals.first { $0.bridgeID == target }
+            ?? (workspace.orchestrator?.bridgeID == target ? workspace.orchestrator : nil)
+        guard let node, let session = terminals.session(for: node.id) else { return }
+        session.send(message + "\r")
+    }
+
     /// Starts Claude Code on the workspace node itself. Its working directory
     /// is the workspace root, so every repository is a subdirectory it can see.
     func startOrchestrator() {
@@ -351,15 +433,19 @@ final class MeshvyStore {
         )
         node.size = CGSize(width: workspace.boardWidth, height: workspace.boardHeight)
 
+        AgentBridge.install(for: workspace)
         let options = AgentCommand.Options(model: models.selectedModelID, permissionMode: "acceptEdits")
         terminals.start(
             node: node,
             command: AgentCommand.orchestrator(
                 workspace: workspace, sessionID: sessionID, name: name, options: options
-            )
+            ),
+            // Puts `meshvy` on the orchestrator's PATH so it can delegate.
+            environment: ["PATH": AgentBridge.binDirectory(for: workspace) + ":" + currentPath()]
         )
         workspace.orchestrator = node
         update(workspace)
+        startBridge(for: workspace)
         selection = .workspace(workspace.id)
         refreshSubAgents()
     }
@@ -378,8 +464,17 @@ final class MeshvyStore {
     }
 
     /// Opens a terminal for one repository, or a plain shell.
+    private func currentPath() -> String {
+        ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+    }
+
     @discardableResult
-    func openTerminal(role: TerminalNode.Role, repoID: String? = nil) -> TerminalNode? {
+    func openTerminal(
+        role: TerminalNode.Role,
+        repoID: String? = nil,
+        openingTask: String? = nil,
+        bridgeID: String? = nil
+    ) -> TerminalNode? {
         guard var workspace = activeWorkspace else { return nil }
         guard role != .orchestrator else { startOrchestrator(); return workspace.orchestrator }
 
@@ -394,12 +489,15 @@ final class MeshvyStore {
         let name = AgentCommand.derivedName(role: role, context: repo?.name ?? workspace.name)
         var node = TerminalNode(
             role: role,
-            title: role == .shell ? (repo?.name ?? workspace.name) : name,
+            title: openingTask.map { String($0.prefix(48)) }
+                ?? (role == .shell ? (repo?.name ?? workspace.name) : name),
             cwd: cwd,
             repoID: repo?.id,
             sessionID: sessionID
         )
         node.size = CGSize(width: 580, height: 340)
+        node.bridgeID = bridgeID
+        node.openingTask = openingTask
 
         let command: [String]
         if role == .shell {
@@ -408,6 +506,7 @@ final class MeshvyStore {
             guard let repo else { return nil }
             command = AgentCommand.repoAgent(
                 workspace: workspace, repo: repo, sessionID: sessionID!, name: name,
+                task: openingTask,
                 options: AgentCommand.Options(model: models.selectedModelID, permissionMode: "acceptEdits")
             )
         }

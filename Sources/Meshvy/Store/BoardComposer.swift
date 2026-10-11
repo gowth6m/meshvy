@@ -131,6 +131,14 @@ struct BoardComposer {
                     isLive: true, kind: .owns
                 ))
             }
+            // An agent the orchestrator spawned is its child; draw that so the
+            // delegation tree is visible, not just which repo it sits in.
+            if terminal.bridgeID != nil {
+                graph.edges.append(CanvasEdge(
+                    from: .workspace(workspace.id), to: .terminal(terminal.id),
+                    isLive: true, kind: .dispatched
+                ))
+            }
         }
 
         applyPinned(&graph, pinned: input.pinned)

@@ -59,11 +59,28 @@ its body: press **Start orchestrator** and a real PTY opens there, running
 tells it to dispatch a sub-agent per repo with the Agent tool rather than doing
 the work itself. Edges run down to each repository it owns.
 
-**Sub-agent nodes** — every agent the orchestrator dispatches appears as its own
-node, linked back to the parent, showing the task it was given, which agent type
-it is, whether it is still running, and what it reported back. These are Agent
-tool calls inside the orchestrator's session rather than separate processes, so
-Meshvy reads them live out of its transcript.
+**Delegated agents** — when the orchestrator splits work up, each teammate is a
+**real Claude Code session with its own terminal on the canvas**, which you can
+read, interrupt and type into. Edges run from the workspace node to each one.
+
+It works through a small helper, `meshvy`, that Meshvy puts on the
+orchestrator's PATH:
+
+```sh
+meshvy spawn <repo> "<task>"   # start an agent there; prints an agent id
+meshvy wait <id>               # block until it finishes, print what it reported
+meshvy send <id> "<message>"   # type a follow-up into its terminal
+meshvy list                    # agents on the board
+```
+
+The orchestrator is told to delegate this way rather than with Claude's Agent
+tool. Agent-tool sub-agents run *inside* the parent process — no pid, no pty —
+so there is nothing for a terminal to attach to and you cannot watch or steer
+them. If one does get used anyway, it still shows up as a card read from the
+parent's transcript, so no work is invisible.
+
+The helper talks to Meshvy through files under `<workspace>/.meshvy/`, so it
+keeps working across an app restart and needs nothing but a shell.
 
 **Repo terminals** — right-click a repository card for its own `claude` or a
 plain shell, in that checkout alone.

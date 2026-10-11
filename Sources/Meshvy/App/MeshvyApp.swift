@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct MeshvyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var store = MeshvyStore()
+    private let store = MeshvyStore.shared
 
     var body: some Scene {
         WindowGroup("Meshvy") {
@@ -92,7 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         let arguments = CommandLine.arguments
-        if let path = DiffTest.path(arguments: arguments) {
+        if let repo = BridgeTest.repo(arguments: arguments) {
+            BridgeTest.run(repo: repo)
+        } else if let path = DiffTest.path(arguments: arguments) {
             DiffTest.run(path: path)
         } else if arguments.contains("--perftest") {
             PerfTest.run()

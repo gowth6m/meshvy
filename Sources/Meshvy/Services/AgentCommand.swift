@@ -45,11 +45,21 @@ enum AgentCommand {
         repo: WorkspaceRepo,
         sessionID: String,
         name: String,
+        task: String? = nil,
         options: Options = Options()
     ) -> [String] {
-        base(sessionID: sessionID, name: name, options: options)
+        var arguments = base(sessionID: sessionID, name: name, options: options)
             + ["--append-system-prompt", repoBrief(workspace: workspace, repo: repo)]
+        // An agent the orchestrator spawned starts working immediately; the
+        // task is its opening message, so the terminal shows it being answered.
+        if let task, !task.isEmpty { arguments.append(task) }
+        return arguments
     }
+
+    /// Delegation runs through the `meshvy` helper, so that one command is
+    /// pre-approved. `acceptEdits` does not cover Bash, and an orchestrator
+    /// that stops to ask permission for every spawn never gets going.
+    static let allowedDelegationTools = "Bash(meshvy:*)"
 
     private static func base(sessionID: String, name: String, options: Options) -> [String] {
         var arguments = [claudePath, "--session-id", sessionID, "--name", name]
@@ -57,6 +67,7 @@ enum AgentCommand {
             arguments.append(contentsOf: ["--model", model])
         }
         arguments.append(contentsOf: ["--permission-mode", options.permissionMode])
+        arguments.append(contentsOf: ["--allowedTools", allowedDelegationTools])
         return arguments
     }
 
@@ -77,19 +88,40 @@ enum AgentCommand {
         """)
         lines.append("")
         for repo in workspace.readyRepos {
-            lines.append("- ./\(repo.name)  (from \(repo.originPath))")
+            lines.append("- ./\(repo.name)")
         }
         lines.append("")
         lines.append("""
-        Work this way: plan the task across the repositories, then dispatch a \
-        sub-agent per repository with the Agent tool, giving each one a scoped \
-        task and the exact directory it owns. Run sub-agents whose work does not \
-        overlap concurrently rather than one after another. Review what comes \
-        back, integrate it, and keep the repositories consistent with each other.
+        ## Delegating
+
+        Do not use the Agent tool to split this work up. Agent-tool sub-agents \
+        run inside your own process, so the person watching Meshvy cannot see \
+        them, open them, or talk to them.
+
+        Instead delegate with the `meshvy` command, already on your PATH. Each \
+        agent you start this way is a real Claude Code session with its own \
+        terminal on the canvas, which the user can read and interrupt:
+
+            meshvy spawn <repo> "<task>"    start an agent in that repository;
+                                            prints an agent id
+            meshvy wait <id>                block until it finishes, then print
+                                            what it reported back
+            meshvy send <id> "<message>"    type a follow-up into its terminal
+            meshvy list                     agents currently on the board
+
+        Work this way:
+
+        1. Plan the change across the repositories.
+        2. `meshvy spawn` one agent per repository that has work to do, giving \
+           each a task scoped to its own directory. Start them all before \
+           waiting on any of them, so they run concurrently.
+        3. `meshvy wait` on each id and read what came back.
+        4. Follow up with `meshvy send` where something needs correcting, \
+           integrate the results, and keep the repositories consistent.
 
         Do the coordination yourself and hand off the implementation. A change \
-        that spans repositories stays on the `\(workspace.branch)` branch in each \
-        of them and should be committed together.
+        that spans repositories stays on the `\(workspace.branch)` branch in \
+        each of them and should be committed together.
         """)
         return lines.joined(separator: "\n")
     }

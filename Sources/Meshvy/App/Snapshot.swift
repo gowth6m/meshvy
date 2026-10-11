@@ -17,7 +17,7 @@ enum SelfTest {
 
     static func run(repoPaths: [String], keep: Bool) {
         Self.keep = keep
-        let store = MeshvyStore()
+        let store = MeshvyStore.shared
         store.bootstrap()
 
         let found = store.inspectRepos(at: repoPaths)
@@ -74,7 +74,7 @@ enum SelfTest {
 @MainActor
 enum LaunchTest {
     static func run() {
-        let store = MeshvyStore()
+        let store = MeshvyStore.shared
         store.bootstrap()
         guard let workspace = store.activeWorkspace else { print("no workspace"); exit(1) }
 
@@ -138,8 +138,9 @@ enum LaunchTest {
               let session = store.terminals.session(for: terminal.id) else {
             print("LAUNCHTEST FAILED: no orchestrator session"); exit(1)
         }
-        let task = "Use the Agent tool to launch one sub-agent per repository "
-            + "(api, web, worker). Each one must only reply with the repo name. Run them concurrently."
+        let task = "Run: meshvy spawn api \"reply with the single word API and stop\" "
+            + "and then: meshvy spawn web \"reply with the single word WEB and stop\". "
+            + "Use the Bash tool. Do not use the Agent tool. Report the two agent ids."
         print("sending task…")
         session.send(task)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -151,6 +152,21 @@ enum LaunchTest {
     }
 
     private static func watchSubAgents(store: MeshvyStore, attempts: Int) {
+        // The bridge is the path that matters now: spawned agents are real
+        // terminal nodes, not in-process Agent-tool calls.
+        let spawned = store.activeWorkspace?.terminals.filter { $0.bridgeID != nil } ?? []
+        if !spawned.isEmpty {
+            print("spawned terminal nodes: \(spawned.count)")
+            for node in spawned {
+                let running = store.terminals.isRunning(node.id)
+                print("  - \(node.title) cwd=\(URL(fileURLWithPath: node.cwd).lastPathComponent) running=\(running) session=\(node.sessionID ?? "-")")
+            }
+            if spawned.count >= 2 {
+                print("nodes on board: \(store.graph.nodes.count)")
+                print("LAUNCHTEST OK")
+                exit(0)
+            }
+        }
         let agents = store.subAgents
         if !agents.isEmpty {
             print("sub-agent nodes: \(agents.count)")
@@ -165,8 +181,14 @@ enum LaunchTest {
             }
         }
         guard attempts > 0 else {
-            print(agents.isEmpty ? "LAUNCHTEST TIMEOUT: no sub-agents seen" : "LAUNCHTEST OK (still running)")
-            exit(agents.isEmpty ? 1 : 0)
+            print("LAUNCHTEST TIMEOUT: no agents spawned")
+            if let node = store.activeWorkspace?.orchestrator,
+               let session = store.terminals.session(for: node.id) {
+                print("--- orchestrator screen ---")
+                print(session.screenText)
+                print("--- end screen ---")
+            }
+            exit(1)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             MainActor.assumeIsolated { watchSubAgents(store: store, attempts: attempts - 1) }
@@ -233,6 +255,57 @@ enum DiffTest {
     }
 }
 
+/// Exercises the agent bridge without an LLM: writes a spawn request the way
+/// the `meshvy` helper would, and checks a real terminal node appears.
+/// `Meshvy --bridgetest <repo>`.
+@MainActor
+enum BridgeTest {
+    static func repo(arguments: [String]) -> String? {
+        guard let flag = arguments.firstIndex(of: "--bridgetest"), flag + 1 < arguments.count else { return nil }
+        return arguments[flag + 1]
+    }
+
+    static func run(repo: String) {
+        let store = MeshvyStore.shared
+        store.bootstrap()
+        guard let workspace = store.activeWorkspace else { print("no workspace"); exit(1) }
+        print("workspace: \(workspace.name) root=\(workspace.root)")
+
+        let id = "test\(Int(Date().timeIntervalSince1970) % 100000)"
+        let request = AgentBridge.Request(
+            id: id, kind: "spawn", repo: repo,
+            task: "reply with the single word BRIDGE and stop"
+        )
+        let path = AgentBridge.requestsDirectory(for: workspace) + "/\(id).json"
+        guard let data = try? JSONEncoder().encode(request) else { exit(1) }
+        try? data.write(to: URL(fileURLWithPath: path))
+        print("wrote request \(id)")
+
+        poll(store: store, id: id, attempts: 60)
+    }
+
+    private static func poll(store: MeshvyStore, id: String, attempts: Int) {
+        let spawned = store.activeWorkspace?.terminals.filter { $0.bridgeID != nil } ?? []
+        if let node = spawned.first(where: { $0.bridgeID == id }) {
+            print("terminal node: title=\(node.title)")
+            print("  cwd=\(node.cwd)")
+            print("  session=\(node.sessionID ?? "-")")
+            print("  running=\(store.terminals.isRunning(node.id))")
+            let onBoard = store.graph.nodes.contains { $0.id == .terminal(node.id) }
+            print("  on canvas=\(onBoard)")
+            print(onBoard ? "BRIDGETEST OK" : "BRIDGETEST FAILED: not on canvas")
+            exit(onBoard ? 0 : 1)
+        }
+        guard attempts > 0 else {
+            print("BRIDGETEST TIMEOUT: terminals=\(store.activeWorkspace?.terminals.count ?? -1)")
+            exit(1)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            MainActor.assumeIsolated { poll(store: store, id: id, attempts: attempts - 1) }
+        }
+    }
+}
+
 /// Measures transcript loading on the largest session on disk.
 /// `Meshvy --perftest`.
 @MainActor
@@ -290,7 +363,7 @@ struct SnapshotRequest {
 @MainActor
 enum Snapshot {
     static func run(_ request: SnapshotRequest) {
-        let store = MeshvyStore()
+        let store = MeshvyStore.shared
         let chromeHeight: CGFloat = 48 + 26 + 2
         let panels: CGFloat = 262 + 430 + 2
         store.viewport.size = CGSize(
