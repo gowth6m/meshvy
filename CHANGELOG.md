@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0] - 2026-10-11
+
+Renamed to **Meshvy**, with the brand applied.
+
+- App, bundle (`dev.gowtham.meshvy`), binary, target and support directory are
+  all Meshvy. State from any former name is migrated on first launch; new
+  workspaces live under `~/.meshvy/`.
+- The supplied app icon replaces the generated one, scaled onto Apple's grid
+  so it matches other Dock icons rather than sitting oversized.
+- The mark is drawn in SwiftUI from the SVG's own geometry, so it is crisp at
+  any size and themed rather than bitmapped.
+- Brand palette: purple `#6E56F8` takes over selection, primary actions and the
+  structural edges between a workspace and its repositories; text moves to the
+  mark's cream `#F3F3EE`; surfaces shift toward the icon's navy. Status colours
+  stay independent — an agent at work is still amber, clean is still teal —
+  and repository cards move to a neutral slate so purple stays the brand's.
+
 ## [0.6.1] - 2026-10-11
 
 - Fixed a sub-agent whose dispatch carried neither a description nor a prompt
@@ -8,12 +25,12 @@
 
 ## [0.6.0] - 2026-10-11
 
-Renamed to **Orkestr**, and set up for release.
+Renamed to **Meshvy**, and set up for release.
 
-- The app, bundle (`dev.gowtham.orkestr`), binary and support directory are
-  all Orkestr now. State written under either former name is migrated on
+- The app, bundle (`dev.gowtham.meshvy`), binary and support directory are
+  all Meshvy now. State written under either former name is migrated on
   first launch rather than silently ignored. New workspaces live under
-  `~/.orkestr/`; existing ones keep the root they were created with, since
+  `~/.meshvy/`; existing ones keep the root they were created with, since
   git stores absolute paths in its worktree registrations.
 - A generated app icon, drawn by `scripts/make-icon.swift` rather than checked
   in as art.

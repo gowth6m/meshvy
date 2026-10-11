@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Orkestr</string>
+	<string>Meshvy</string>
 	<key>CFBundleDisplayName</key>
-	<string>Orkestr</string>
+	<string>Meshvy</string>
 	<key>CFBundleExecutable</key>
-	<string>Orkestr</string>
+	<string>Meshvy</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.gowtham.orkestr</string>
+	<string>dev.gowtham.meshvy</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>

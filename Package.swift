@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "Orkestr",
+    name: "Meshvy",
     platforms: [.macOS(.v14)],
     dependencies: [
         // PTY-backed terminal emulator for the canvas terminal nodes.
@@ -10,9 +10,9 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "Orkestr",
+            name: "Meshvy",
             dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
-            path: "Sources/Orkestr",
+            path: "Sources/Meshvy",
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

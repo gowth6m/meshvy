@@ -92,12 +92,12 @@ jobs:
 
       - name: Verify the bundle is universal
         run: |
-          lipo -archs dist/Orkestr.app/Contents/MacOS/Orkestr | tee /tmp/archs
+          lipo -archs dist/Meshvy.app/Contents/MacOS/Meshvy | tee /tmp/archs
           grep -q arm64 /tmp/archs && grep -q x86_64 /tmp/archs
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Orkestr-${{ steps.version.outputs.version }}
+          name: Meshvy-${{ steps.version.outputs.version }}
           path: |
             dist/*.dmg
             dist/*.zip
@@ -113,29 +113,29 @@ jobs:
           {
             echo "## Install"
             echo
-            echo "Download \`Orkestr-$VERSION.dmg\`, open it, and drag Orkestr to Applications."
+            echo "Download \`Meshvy-$VERSION.dmg\`, open it, and drag Meshvy to Applications."
             echo
             if [ "$SIGNED" != "true" ]; then
               echo "> This build is **not signed with an Apple Developer ID**, so macOS will"
               echo "> refuse to open it the first time. Either right-click the app and choose"
               echo "> **Open**, or run:"
               echo '> ```sh'
-              echo '> xattr -dr com.apple.quarantine /Applications/Orkestr.app'
+              echo '> xattr -dr com.apple.quarantine /Applications/Meshvy.app'
               echo '> ```'
               echo
             fi
             echo "Requires macOS 14 or later. Universal (Apple Silicon and Intel)."
             echo
-            echo "Orkestr drives the \`claude\` CLI, so install Claude Code first:"
+            echo "Meshvy drives the \`claude\` CLI, so install Claude Code first:"
             echo "<https://claude.com/claude-code>"
             echo
             echo "### Checksums"
             echo '```'
-            cat "dist/Orkestr-$VERSION-SHA256.txt"
+            cat "dist/Meshvy-$VERSION-SHA256.txt"
             echo '```'
           } > /tmp/notes.md
 
           gh release create "$GITHUB_REF_NAME" \
-            --title "Orkestr $VERSION" \
+            --title "Meshvy $VERSION" \
             --notes-file /tmp/notes.md \
             dist/*.dmg dist/*.zip dist/*SHA256.txt

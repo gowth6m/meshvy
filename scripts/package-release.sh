@@ -11,9 +11,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 DIST="$ROOT/dist"
-APP="$DIST/Orkestr.app"
-DMG="$DIST/Orkestr-$VERSION.dmg"
-ZIP="$DIST/Orkestr-$VERSION-macOS.zip"
+APP="$DIST/Meshvy.app"
+DMG="$DIST/Meshvy-$VERSION.dmg"
+ZIP="$DIST/Meshvy-$VERSION-macOS.zip"
 
 "$ROOT/scripts/build-app.sh"
 
@@ -30,12 +30,12 @@ notarize() {
 }
 
 echo "==> building $DMG"
-STAGE="$(mktemp -d)/Orkestr"
+STAGE="$(mktemp -d)/Meshvy"
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
-hdiutil create -volname "Orkestr $VERSION" -srcfolder "$STAGE" \
+hdiutil create -volname "Meshvy $VERSION" -srcfolder "$STAGE" \
   -ov -format UDZO -quiet "$DMG"
 
 echo "==> building $ZIP"
@@ -58,8 +58,8 @@ fi
 
 echo "==> checksums"
 cd "$DIST"
-shasum -a 256 "$(basename "$DMG")" "$(basename "$ZIP")" | tee "Orkestr-$VERSION-SHA256.txt"
+shasum -a 256 "$(basename "$DMG")" "$(basename "$ZIP")" | tee "Meshvy-$VERSION-SHA256.txt"
 
 echo
 echo "artifacts:"
-ls -lh "$DMG" "$ZIP" "$DIST/Orkestr-$VERSION-SHA256.txt"
+ls -lh "$DMG" "$ZIP" "$DIST/Meshvy-$VERSION-SHA256.txt"

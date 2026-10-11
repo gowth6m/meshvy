@@ -15,12 +15,12 @@ jobs:
         run: swift build -c release 2>&1 | tee /tmp/build.log
       - name: No warnings in our own sources
         run: |
-          # Scoped to Sources/Orkestr: a dependency's warnings are not ours to
+          # Scoped to Sources/Meshvy: a dependency's warnings are not ours to
           # fix, and failing on them would make CI red for reasons nobody here
           # can act on.
-          if grep "warning:" /tmp/build.log | grep -q "Sources/Orkestr/"; then
-            echo "::error::build produced warnings in Sources/Orkestr"
-            grep "warning:" /tmp/build.log | grep "Sources/Orkestr/" | head -20
+          if grep "warning:" /tmp/build.log | grep -q "Sources/Meshvy/"; then
+            echo "::error::build produced warnings in Sources/Meshvy"
+            grep "warning:" /tmp/build.log | grep "Sources/Meshvy/" | head -20
             exit 1
           fi
           echo "clean"
