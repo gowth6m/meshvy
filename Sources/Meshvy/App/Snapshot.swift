@@ -77,6 +77,9 @@ enum LaunchTest {
         let store = MeshvyStore.shared
         store.bootstrap()
         guard let workspace = store.activeWorkspace else { print("no workspace"); exit(1) }
+        // A harness that fans out three sessions should not do it on the
+        // most expensive model available.
+        store.models.selectedModelID = "claude-haiku-4-5-20251001"
 
         print("root: \(workspace.root)")
         print("--- brief ---")
@@ -163,8 +166,10 @@ enum LaunchTest {
             }
             if spawned.count >= 2 {
                 print("nodes on board: \(store.graph.nodes.count)")
-                print("LAUNCHTEST OK")
-                exit(0)
+                // A freshly spawned agent has not reached its first hook yet;
+                // give them a moment so the status report means something.
+                settleActivity(store: store, nodes: spawned, attempts: 40)
+                return
             }
         }
         let agents = store.subAgents
@@ -193,6 +198,42 @@ enum LaunchTest {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             MainActor.assumeIsolated { watchSubAgents(store: store, attempts: attempts - 1) }
         }
+    }
+
+    /// Waits for every spawned agent to report at least once, then reports.
+    private static func settleActivity(store: MeshvyStore, nodes: [TerminalNode], attempts: Int) {
+        let reported = nodes.allSatisfy { store.activity(for: $0) != nil }
+        guard !reported, attempts > 0 else {
+            reportActivity(store: store)
+            print(reported ? "LAUNCHTEST OK" : "LAUNCHTEST FAILED: spawned agents never reported")
+            exit(reported ? 0 : 1)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            MainActor.assumeIsolated { settleActivity(store: store, nodes: nodes, attempts: attempts - 1) }
+        }
+    }
+
+    /// What the hooks reported for each live terminal. This is the whole status
+    /// pipeline running inside the app — settings file, script, watcher, drain —
+    /// against sessions in real PTYs.
+    private static func reportActivity(store: MeshvyStore) {
+        print("--- agent status ---")
+        for node in store.activeWorkspace?.allTerminals ?? [] {
+            guard let activity = store.activity(for: node) else {
+                print("  \(node.title): no hook events")
+                if let session = store.terminals.session(for: node.id) {
+                    let screen = session.screenText
+                        .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }.suffix(4)
+                    print("      screen: \(screen.joined(separator: " / "))")
+                }
+                continue
+            }
+            print("  \(node.title): \(activity.state.rawValue) turns=\(activity.turns) "
+                + "tools=\(activity.toolCalls) line=\(activity.line ?? "-")")
+        }
+        print("waiting on you: \(store.agentsNeedingYou.count)")
+        print("--- end agent status ---")
     }
 
     private static func poll(store: MeshvyStore, sessionID: String?, attempts: Int) {
@@ -306,6 +347,112 @@ enum BridgeTest {
     }
 }
 
+/// End-to-end check of the status pipeline: install the hooks into a throwaway
+/// workspace, run a real `claude` against them, then drain and resolve what
+/// came back. `Meshvy --hooktest`.
+///
+/// This is the one feature that cannot be verified by looking at the board —
+/// it depends on the CLI actually invoking our script with the payloads we
+/// expect, which only a real session proves.
+@MainActor
+enum HookTest {
+    static func run(keep: Bool = false) {
+        let root = NSTemporaryDirectory() + "meshvy-hooktest-\(Int(Date().timeIntervalSince1970))"
+        try? FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let workspace = Workspace(name: "Hook Test", branch: "hooktest", root: root)
+
+        AgentBridge.install(for: workspace)
+        AgentHooks.install(for: workspace)
+        let settings = AgentHooks.settingsPath(for: workspace)
+        print("settings: \(settings)")
+        print("script:   \(AgentHooks.scriptPath(for: workspace))")
+        guard FileManager.default.fileExists(atPath: settings) else {
+            print("HOOKTEST FAILED: no settings file"); exit(1)
+        }
+
+        // A one-shot run that is guaranteed to use a tool, so PreToolUse fires
+        // alongside the lifecycle events.
+        let result = Shell.run(
+            AgentCommand.claudePath,
+            [
+                "-p", "--settings", settings,
+                "--model", "claude-haiku-4-5-20251001",
+                "Run the bash command `echo meshvy` and then stop."
+            ],
+            cwd: root,
+            timeout: 180
+        )
+        print("claude exit=\(result.status) output=\(result.lines.last ?? "-")")
+
+        let events = AgentHooks.drain(for: workspace)
+        print("events: \(events.count)")
+        for event in events {
+            let detail = [event.tool, event.detail, event.message].compactMap { $0 }.joined(separator: " · ")
+            print("  \(event.state.rawValue.padded(10))\(detail)")
+        }
+
+        // Replay them the way the store does and check the resolved state.
+        var activity = AgentActivity(sessionID: events.first?.sessionID ?? "-")
+        for event in events {
+            activity.state = event.state
+            if event.startsTurn { activity.turns += 1 }
+            if event.startsTool { activity.toolCalls += 1 }
+        }
+        print("resolved: state=\(activity.state.rawValue) turns=\(activity.turns) tools=\(activity.toolCalls)")
+
+        let sawTool = events.contains { $0.startsTool }
+        let sawTurn = events.contains { $0.startsTurn }
+        let ended = activity.state == .ended || activity.state == .done
+
+        // The two `Notification` shapes cannot be provoked from a harness —
+        // one needs a permission prompt on screen, the other a minute of
+        // silence at the prompt — so they are replayed as payloads instead.
+        let notifications = replayNotifications(in: workspace)
+        if keep { print("kept: \(root)") } else { try? FileManager.default.removeItem(atPath: root) }
+
+        guard !events.isEmpty, sawTurn, sawTool, ended, notifications else {
+            print("HOOKTEST FAILED: turn=\(sawTurn) tool=\(sawTool) ended=\(ended) notifications=\(notifications)")
+            exit(1)
+        }
+        print("HOOKTEST OK")
+        exit(0)
+    }
+
+    /// Writes the payloads Claude Code sends for the two `Notification` cases
+    /// and checks each resolves to the right state.
+    private static func replayNotifications(in workspace: Workspace) -> Bool {
+        func resolve(_ message: String) -> AgentHooks.Event? {
+            let payload: [String: Any] = [
+                "event": "Notification",
+                "at": Date().timeIntervalSince1970,
+                "payload": [
+                    "session_id": "replay",
+                    "hook_event_name": "Notification",
+                    "cwd": workspace.root,
+                    "message": message
+                ]
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+            let path = AgentHooks.eventsDirectory(for: workspace) + "/\(UUID().uuidString).json"
+            try? data.write(to: URL(fileURLWithPath: path))
+            return AgentHooks.drain(for: workspace).first
+        }
+
+        let permission = resolve("Claude needs your permission to use Bash")
+        let idle = resolve("Claude is waiting for your input")
+        print("notification/permission: \(permission?.state.rawValue ?? "-") · \(permission?.message ?? "-")")
+        print("notification/idle:       \(idle?.state.rawValue ?? "-")")
+        return permission?.state == .blocked && idle?.state == .waiting
+    }
+}
+
+private extension String {
+    /// Left-aligned in a fixed column, for the harness listings.
+    func padded(_ width: Int) -> String {
+        count >= width ? self + " " : self + String(repeating: " ", count: width - count)
+    }
+}
+
 /// Checks that zooming magnifies a terminal rather than reflowing its grid.
 /// `Meshvy --zoomtest`.
 @MainActor
@@ -329,10 +476,10 @@ enum ZoomTest {
         }
         let container = TerminalSurface.FlippedContainer()
         container.addSubview(session.surface)
-        container.contentSize = node.size
 
         var results: [(CGFloat, Int, Int, CGFloat)] = []
         for scale in [CGFloat(0.6), 1.0, 2.0] {
+            container.scale = scale
             container.frame = CGRect(
                 origin: .zero,
                 size: CGSize(width: node.size.width * scale, height: node.size.height * scale)
@@ -355,6 +502,70 @@ enum ZoomTest {
         print("grid stays put: \(gridStable)")
         print(magnificationsTrack && gridStable ? "ZOOMTEST OK" : "ZOOMTEST FAILED")
         exit(magnificationsTrack && gridStable ? 0 : 1)
+    }
+}
+
+/// Exercises the updater against the real GitHub release.
+/// `Meshvy --updatetest [--install]`.
+@MainActor
+enum UpdateTest {
+    static func run(install: Bool) {
+        print("running version: \(UpdateService.currentVersion ?? "none (dev build)")")
+
+        // Version comparison is the part that silently does the wrong thing.
+        let cases: [(String, String, Bool)] = [
+            ("0.8.0", "0.7.0", true), ("0.7.0", "0.7.0", false), ("0.7.0", "0.8.0", false),
+            ("1.2.10", "1.2.9", true), ("v0.9.0", "0.10.0", false), ("0.10.0", "0.9.0", true)
+        ]
+        var ok = true
+        for (candidate, current, expected) in cases {
+            let got = UpdateService.isNewer(candidate, than: current)
+            if got != expected { ok = false; print("  FAIL \(candidate) > \(current): \(got)") }
+        }
+        print("version comparison: \(ok ? "ok" : "FAILED")")
+        guard ok else { exit(1) }
+
+        let service = UpdateService()
+        service.check(announceNoUpdate: true)
+        poll(service: service, install: install, attempts: 40)
+    }
+
+    private static func poll(service: UpdateService, install: Bool, attempts: Int) {
+        switch service.state {
+        case .checking, .idle:
+            guard attempts > 0 else { print("UPDATETEST TIMEOUT"); exit(1) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                MainActor.assumeIsolated { poll(service: service, install: install, attempts: attempts - 1) }
+            }
+        case .upToDate:
+            print("state: up to date")
+            print("UPDATETEST OK")
+            exit(0)
+        case .available(let release):
+            print("state: update available")
+            print("  version: \(release.version)  tag: \(release.tag)")
+            print("  zip: \(release.zipURL.lastPathComponent) (\(release.sizeBytes) bytes)")
+            print("  checksum asset: \(release.checksumURL != nil)")
+            print("  notes: \(release.notes.prefix(60).replacingOccurrences(of: "\n", with: " "))…")
+            if install {
+                print("installing…")
+                service.installAndRestart()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                    MainActor.assumeIsolated { print("install state: \(service.state)"); exit(0) }
+                }
+            } else {
+                print("UPDATETEST OK")
+                exit(0)
+            }
+        case .failed(let message):
+            print("state: failed — \(message)")
+            print("UPDATETEST FAILED")
+            exit(1)
+        default:
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                MainActor.assumeIsolated { poll(service: service, install: install, attempts: attempts - 1) }
+            }
+        }
     }
 }
 
@@ -393,6 +604,13 @@ struct SnapshotRequest {
     var waitSeconds: Double
     var zoom: Double?
     var zoomToFit: Bool
+    /// Overlays to open before rendering, so the panels that only exist on a
+    /// keystroke can be captured too.
+    var palette: Bool
+    var shortcuts: Bool
+    /// Start the orchestrator and wait for it to report, so the status chrome
+    /// has something to show.
+    var withAgent: Bool
 
     init?(arguments: [String]) {
         guard let flag = arguments.firstIndex(of: "--snapshot"), flag + 1 < arguments.count else { return nil }
@@ -409,6 +627,9 @@ struct SnapshotRequest {
         waitSeconds = value("--wait").flatMap(Double.init) ?? 6
         zoom = value("--zoom").flatMap(Double.init)
         zoomToFit = zoom == nil && !arguments.contains("--no-fit")
+        palette = arguments.contains("--palette")
+        shortcuts = arguments.contains("--shortcuts")
+        withAgent = arguments.contains("--agent")
     }
 }
 
@@ -458,8 +679,33 @@ enum Snapshot {
             store.fit()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-            MainActor.assumeIsolated { render(store: store, request: request) }
+        store.paletteOpen = request.palette
+        store.shortcutsOpen = request.shortcuts
+
+        guard request.withAgent else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                MainActor.assumeIsolated { render(store: store, request: request) }
+            }
+            return
+        }
+        store.startOrchestrator()
+        if let id = store.activeWorkspace?.id { store.select(.workspace(id)); store.reveal(.workspace(id)) }
+        waitForAgent(store: store, request: request, attempts: 60)
+    }
+
+    /// Holds the render until the orchestrator's hooks have said something, so
+    /// `--agent` captures a board with live status on it rather than a blank card.
+    private static func waitForAgent(store: MeshvyStore, request: SnapshotRequest, attempts: Int) {
+        if !store.activity.isEmpty || attempts <= 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                MainActor.assumeIsolated { render(store: store, request: request) }
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            MainActor.assumeIsolated {
+                waitForAgent(store: store, request: request, attempts: attempts - 1)
+            }
         }
     }
 

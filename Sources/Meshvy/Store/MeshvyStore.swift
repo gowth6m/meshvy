@@ -34,6 +34,11 @@ final class MeshvyStore {
     private(set) var live: [String: LiveSession] = [:]
     /// Sub-agents the orchestrator has dispatched, read from its transcript.
     private(set) var subAgents: [SubAgent] = []
+    /// What each agent is doing, keyed by session id. Fed by the agent's own
+    /// hooks — see `AgentHooks`.
+    private(set) var activity: [String: AgentActivity] = [:]
+    /// Terminals that changed state while you were looking elsewhere.
+    private(set) var unread: Set<UUID> = []
     /// Changed files per checkout, keyed by worktree path.
     private(set) var changes: [String: [FileChange]] = [:]
     /// The file currently open in the diff viewer.
@@ -54,6 +59,25 @@ final class MeshvyStore {
     var sidebarVisible = true
     var sidebarWidth: Double = 262
     var inspectorWidth: Double = 430
+
+    /// Open state of the ⌘K palette.
+    var paletteOpen = false
+    var shortcutsOpen = false
+
+    /// Permission mode new agents start in. Only the starting mode — ⇧⇥ still
+    /// cycles it live inside the session, exactly as it does in Claude Code.
+    var permissionMode = PermissionMode.acceptEdits { didSet { persistLayout() } }
+
+    /// Terminal the pointer is over, and the one it has dwelled on long enough
+    /// to be handed the scroll wheel. Nil means the canvas keeps panning.
+    private(set) var hoveredTerminal: UUID?
+    private(set) var armedTerminal: UUID?
+    private var armTask: Task<Void, Never>?
+
+    /// How long the pointer has to rest on a terminal before it takes the
+    /// wheel. Long enough that flicking across the board never scrolls one by
+    /// accident, short enough not to feel like waiting.
+    private static let armDelay = Duration.milliseconds(500)
 
     private(set) var isIndexing = false
     private(set) var isLoadingGit = false
@@ -77,6 +101,8 @@ final class MeshvyStore {
     // MARK: Collaborators
     let terminals = TerminalRegistry()
     let models = ModelCatalog()
+    let updates = UpdateService()
+    let notifier = Notifier()
     private let indexer = SessionIndexer()
     private let liveMonitor = LiveSessionMonitor()
     private let git = GitService()
@@ -91,6 +117,7 @@ final class MeshvyStore {
     private var pinned: [String: CGPoint] = [:]
     private var watchers: [DirectoryWatcher] = []
     private var bridgeWatcher: DirectoryWatcher?
+    private var hookWatcher: DirectoryWatcher?
     private var liveTimer: Timer?
     private var gitTimer: Timer?
     private var hasFitInitially = false
@@ -120,6 +147,8 @@ final class MeshvyStore {
         startWatching()
         startTimers()
         models.refresh()
+        // Quietly, on launch: only speaks up when there is something to take.
+        updates.check()
 
         guard hasWorkspace else {
             statusLine = "No workspace — create one to get started"
@@ -136,6 +165,8 @@ final class MeshvyStore {
         invertScroll = stored.invertScroll
         sidebarWidth = min(max(stored.sidebarWidth, 200), 520)
         inspectorWidth = min(max(stored.inspectorWidth, 320), 900)
+        permissionMode = PermissionMode(rawValue: stored.permissionMode) ?? .acceptEdits
+        notifier.isEnabled = stored.notificationsEnabled
         viewport.center = CGPoint(x: stored.cameraX, y: stored.cameraY)
         viewport.scale = max(Viewport.minScale, min(Viewport.maxScale, stored.scale))
         hasFitInitially = stored.scale > 0
@@ -152,6 +183,8 @@ final class MeshvyStore {
         rebuild()
         startIndexing(files: files)
         refreshGitStatus()
+        AgentHooks.reset(for: workspace)
+        activity = [:]
         startBridge(for: workspace)
     }
 
@@ -268,6 +301,9 @@ final class MeshvyStore {
         transcript = nil
         transcriptSessionID = nil
         worktrees = [:]
+        activity = [:]
+        unread = []
+        notifier.badge(0)
         hasFitInitially = false
         persistWorkspaces()
         loadActiveWorkspace()
@@ -346,11 +382,20 @@ final class MeshvyStore {
 
     private func startBridge(for workspace: Workspace) {
         AgentBridge.install(for: workspace)
+        AgentHooks.install(for: workspace)
         bridgeWatcher = DirectoryWatcher(
             paths: [AgentBridge.requestsDirectory(for: workspace)],
             debounce: 0.2
         ) { [weak self] in
             Task { @MainActor in self?.drainBridge() }
+        }
+        // Status should feel immediate — a badge that lags a second behind the
+        // agent is worse than no badge.
+        hookWatcher = DirectoryWatcher(
+            paths: [AgentHooks.eventsDirectory(for: workspace)],
+            debounce: 0.1
+        ) { [weak self] in
+            Task { @MainActor in self?.drainHooks() }
         }
         drainBridge()
     }
@@ -400,6 +445,179 @@ final class MeshvyStore {
         ))
     }
 
+    // MARK: - Agent status
+    //
+    // Every session Meshvy starts is handed a settings file whose hooks report
+    // what the agent is doing. Nothing here parses terminal output.
+
+    /// Applies everything the hooks have reported since the last pass.
+    private func drainHooks() {
+        guard let workspace = activeWorkspace else { return }
+        let before = activity
+        checkStartupPrompts()
+        for event in AgentHooks.drain(for: workspace) { apply(event) }
+        guard activity != before else { return }
+
+        notifier.badge(agentsNeedingYou.count)
+        statusLine = summaryLine()
+        AgentBridge.publishStatus(statusRows(), in: workspace)
+    }
+
+    /// What every agent is doing, in the shape `meshvy status` prints.
+    private func statusRows() -> [AgentBridge.StatusRow] {
+        guard let workspace = activeWorkspace else { return [] }
+        return workspace.allTerminals.compactMap { node in
+            guard let record = activity(for: node) else { return nil }
+            return AgentBridge.StatusRow(
+                id: node.bridgeID,
+                title: node.title,
+                repo: workspace.repos.first { $0.id == node.repoID }?.name,
+                state: record.state.rawValue,
+                line: record.line
+            )
+        }
+    }
+
+    private func apply(_ event: AgentHooks.Event) {
+        var record = activity[event.sessionID] ?? AgentActivity(sessionID: event.sessionID)
+        let previous = record.state
+
+        record.state = event.state
+        record.updatedAt = event.at
+        if event.startsTurn { record.turns += 1 }
+        if event.startsTool { record.toolCalls += 1 }
+        switch event.state {
+        case .working:
+            // A turn starting clears the previous turn's tool and reply.
+            if event.startsTurn { record.tool = nil; record.detail = nil }
+            if event.startsTool { record.tool = event.tool; record.detail = event.detail }
+            record.message = nil
+        case .blocked, .done:
+            record.message = event.message
+            record.tool = nil
+            record.detail = nil
+        case .waiting, .ended:
+            record.tool = nil
+            record.detail = nil
+            record.message = event.message
+        }
+        activity[event.sessionID] = record
+
+        guard previous != record.state,
+              let node = terminalNode(forSession: event.sessionID) else { return }
+        announce(record, node: node)
+    }
+
+    /// A question appearing, or a turn ending, is the moment worth a nudge —
+    /// and only if you are not already looking at that node.
+    private func announce(_ record: AgentActivity, node: TerminalNode) {
+        let worthTelling = record.state == .blocked || record.state == .done
+        let id = canvasID(for: node)
+        guard worthTelling, selection != id else { return }
+        unread.insert(node.id)
+
+        guard !NSApp.isActive else { return }
+        notifier.post(
+            title: record.state == .blocked
+                ? "\(node.title) needs you"
+                : "\(node.title) finished",
+            body: record.message,
+            node: id
+        )
+    }
+
+    /// Flags an agent stopped on a dialog that runs before its session exists,
+    /// which no hook can report. Only ever fills a gap: a session that has
+    /// reported once is left to its hooks forever.
+    private func checkStartupPrompts() {
+        guard let workspace = activeWorkspace else { return }
+        for node in workspace.allTerminals {
+            guard let sessionID = node.sessionID,
+                  activity[sessionID] == nil,
+                  let session = terminals.session(for: node.id), session.isRunning,
+                  let message = AgentHooks.startupPrompt(onScreen: session.screenText)
+            else { continue }
+            var record = AgentActivity(sessionID: sessionID)
+            record.state = .blocked
+            record.message = message
+            activity[sessionID] = record
+            announce(record, node: node)
+        }
+    }
+
+    private func terminalNode(forSession sessionID: String) -> TerminalNode? {
+        guard let workspace = activeWorkspace else { return nil }
+        return workspace.allTerminals.first { $0.sessionID == sessionID }
+    }
+
+    /// The orchestrator is hosted by the workspace node rather than having a
+    /// card of its own, so a terminal does not always map to `.terminal`.
+    func canvasID(for node: TerminalNode) -> NodeID {
+        if let workspace = activeWorkspace, workspace.orchestrator?.id == node.id {
+            return .workspace(workspace.id)
+        }
+        return .terminal(node.id)
+    }
+
+    /// Current state of one terminal. Terminals with no agent in them — and
+    /// agents that have exited — report nothing.
+    func activity(for node: TerminalNode) -> AgentActivity? {
+        guard let sessionID = node.sessionID else { return nil }
+        guard terminals.isRunning(node.id) else { return nil }
+        return activity[sessionID]
+    }
+
+    func isUnread(_ id: UUID) -> Bool { unread.contains(id) }
+
+    // MARK: - The hover guard
+    //
+    // The wheel pans the canvas, which is right almost everywhere — but it also
+    // means a terminal can never be scrolled back through. Resting the pointer
+    // on one hands it the wheel until the pointer leaves.
+
+    func hoverTerminal(_ id: UUID?) {
+        guard hoveredTerminal != id else { return }
+        hoveredTerminal = id
+        armTask?.cancel()
+        armedTerminal = nil
+        guard let id else { return }
+        armTask = Task { [weak self] in
+            try? await Task.sleep(for: MeshvyStore.armDelay)
+            guard !Task.isCancelled else { return }
+            guard let self, self.hoveredTerminal == id else { return }
+            self.armedTerminal = id
+        }
+    }
+
+    /// Agents stopped on something only you can answer.
+    var agentsNeedingYou: [TerminalNode] {
+        (activeWorkspace?.allTerminals ?? []).filter { activity(for: $0)?.state == .blocked }
+    }
+
+    /// Jumps to the next agent waiting on you, cycling through them if there
+    /// are several. The one shortcut worth having on a busy board.
+    func revealNextNeedingYou() {
+        let ids = agentsNeedingYou.map { canvasID(for: $0) }
+        guard !ids.isEmpty else {
+            show(.init(kind: .info, title: "No agent is waiting on you", detail: nil))
+            return
+        }
+        let current = selection.flatMap { ids.firstIndex(of: $0) }
+        let next = current.map { ids.index(after: $0) % ids.count } ?? 0
+        reveal(ids[next])
+    }
+
+    private func markRead(_ id: NodeID?) {
+        let terminalID: UUID?
+        switch id {
+        case .terminal(let value): terminalID = value
+        case .workspace: terminalID = activeWorkspace?.orchestrator?.id
+        default: terminalID = nil
+        }
+        guard let terminalID, unread.remove(terminalID) != nil else { return }
+        notifier.badge(agentsNeedingYou.count)
+    }
+
     /// One agent typing into another's terminal.
     private func handleSend(_ request: AgentBridge.Request) {
         guard let target = request.to, let message = request.message,
@@ -432,9 +650,14 @@ final class MeshvyStore {
             sessionID: sessionID
         )
         node.size = CGSize(width: workspace.boardWidth, height: workspace.boardHeight)
+        node.permissionMode = permissionMode
 
         AgentBridge.install(for: workspace)
-        let options = AgentCommand.Options(model: models.selectedModelID, permissionMode: "acceptEdits")
+        let options = AgentCommand.Options(
+            model: models.selectedModelID,
+            permissionMode: permissionMode,
+            settingsPath: AgentHooks.settingsPath(for: workspace)
+        )
         terminals.start(
             node: node,
             command: AgentCommand.orchestrator(
@@ -453,9 +676,12 @@ final class MeshvyStore {
     func stopOrchestrator() {
         guard var workspace = activeWorkspace, let node = workspace.orchestrator else { return }
         terminals.discard(node.id)
+        unread.remove(node.id)
+        if let sessionID = node.sessionID { activity[sessionID] = nil }
         workspace.orchestrator = nil
         subAgents = []
         update(workspace)
+        notifier.badge(agentsNeedingYou.count)
     }
 
     var isOrchestratorRunning: Bool {
@@ -498,6 +724,7 @@ final class MeshvyStore {
         node.size = CGSize(width: 580, height: 340)
         node.bridgeID = bridgeID
         node.openingTask = openingTask
+        node.permissionMode = permissionMode
 
         let command: [String]
         if role == .shell {
@@ -507,7 +734,11 @@ final class MeshvyStore {
             command = AgentCommand.repoAgent(
                 workspace: workspace, repo: repo, sessionID: sessionID!, name: name,
                 task: openingTask,
-                options: AgentCommand.Options(model: models.selectedModelID, permissionMode: "acceptEdits")
+                options: AgentCommand.Options(
+                    model: models.selectedModelID,
+                    permissionMode: permissionMode,
+                    settingsPath: AgentHooks.settingsPath(for: workspace)
+                )
             )
         }
 
@@ -548,10 +779,15 @@ final class MeshvyStore {
 
     func closeTerminal(_ id: UUID) {
         terminals.discard(id)
+        unread.remove(id)
         guard var workspace = activeWorkspace else { return }
+        if let sessionID = workspace.terminals.first(where: { $0.id == id })?.sessionID {
+            activity[sessionID] = nil
+        }
         workspace.terminals.removeAll { $0.id == id }
         update(workspace)
         if selection == .terminal(id) { selection = nil }
+        notifier.badge(agentsNeedingYou.count)
     }
 
     func restartTerminal(_ id: UUID) {
@@ -774,7 +1010,12 @@ final class MeshvyStore {
 
     private func startTimers() {
         liveTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshLive() }
+            Task { @MainActor in
+                self?.refreshLive()
+                // FSEvents is the fast path for hook payloads; this is the
+                // backstop for the ones it coalesces away.
+                self?.drainHooks()
+            }
         }
         gitTimer = Timer.scheduledTimer(withTimeInterval: 90, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshGitStatus() }
@@ -831,6 +1072,10 @@ final class MeshvyStore {
             "\(sessions) \(sessions == 1 ? "session" : "sessions")"
         ]
         if running > 0 { parts.append("\(running) \(running == 1 ? "terminal" : "terminals") running") }
+        let working = workspace.allTerminals.filter { activity(for: $0)?.state == .working }.count
+        if working > 0 { parts.append("\(working) working") }
+        let blocked = agentsNeedingYou.count
+        if blocked > 0 { parts.append("\(blocked) waiting on you") }
         return parts.joined(separator: "  ·  ")
     }
 
@@ -849,6 +1094,7 @@ final class MeshvyStore {
 
     func select(_ id: NodeID?) {
         selection = id
+        markRead(id)
         guard case .session(let sessionID)? = id else { return }
         loadTranscript(sessionID)
     }
@@ -886,6 +1132,8 @@ final class MeshvyStore {
         saved.invertScroll = invertScroll
         saved.sidebarWidth = sidebarWidth
         saved.inspectorWidth = inspectorWidth
+        saved.permissionMode = permissionMode.rawValue
+        saved.notificationsEnabled = notifier.isEnabled
         layoutStore.save(saved)
     }
 
@@ -928,6 +1176,7 @@ final class MeshvyStore {
             viewport.center = node.frame.center
         }
         selection = id
+        markRead(id)
         if case .session(let sessionID) = id { loadTranscript(sessionID) }
     }
 

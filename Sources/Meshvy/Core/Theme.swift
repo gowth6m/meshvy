@@ -57,6 +57,9 @@ enum Theme {
         static let clean = NightOwl.green
         static let danger = NightOwl.red
         static let sidechain = NightOwl.pink
+        /// An agent stopped on a question. The palette's loudest colour, and
+        /// the one thing on the board that should pull your eye across a room.
+        static let needsYou = NightOwl.pink
         static let reasoning = NightOwl.teal
         static let hairlineStrong = blend(NightOwl.surface, NightOwl.muted, 0.55)
     }
@@ -105,6 +108,9 @@ enum Theme {
     static let danger = Color(hex: Hex.danger)
     /// A sidechain — a session forked off another one.
     static let sidechain = Color(hex: Hex.sidechain)
+    /// An agent waiting on you. Shares the pink with `sidechain`, which only
+    /// ever appears in a transcript, so the two never sit side by side.
+    static let needsYou = Color(hex: Hex.needsYou)
     /// Informational banners.
     static let info = Color(hex: NightOwl.blue)
     /// Extended thinking in a transcript.

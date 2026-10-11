@@ -20,8 +20,13 @@ struct TerminalNodeView: View {
 
     private var session: TerminalSession? { store.terminals.session(for: node.id) }
     private var isRunning: Bool { session?.isRunning ?? false }
+    private var activity: AgentActivity? { store.activity(for: node) }
+    private var isArmed: Bool { store.armedTerminal == node.id }
 
     private var accent: SwiftUI.Color {
+        // An agent that needs you takes over the card's accent, so a board you
+        // are panning across tells you where to look before you read anything.
+        if activity?.state == .blocked { return Theme.needsYou }
         switch node.role {
         case .orchestrator: return Theme.accent
         case .repo: return Theme.worktree
@@ -33,6 +38,14 @@ struct TerminalNodeView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Theme.hairline)
+            if node.sessionID != nil {
+                AgentStatusStrip(
+                    activity: activity,
+                    fallback: node.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
+                    zoom: zoom
+                )
+                Divider().overlay(Theme.hairline)
+            }
             content
         }
         .background(
@@ -50,24 +63,33 @@ struct TerminalNodeView: View {
         .shadow(color: .black.opacity(isSelected ? 0.55 : 0.35), radius: zoom.s(isSelected ? 18 : 10), y: zoom.s(5))
         .opacity(isDimmed ? 0.25 : 1)
         .overlay(alignment: .bottomTrailing) { resizeGrip }
+        .overlay(alignment: .bottom) { scrollHint }
     }
 
     private var header: some View {
         HStack(spacing: zoom.s(6)) {
-            Image(systemName: node.role.icon)
-                .font(zoom.font(10, .semibold))
-                .foregroundStyle(accent)
+            if store.isUnread(node.id) {
+                UnreadDot(zoom: zoom)
+            } else {
+                Image(systemName: node.role.icon)
+                    .font(zoom.font(10, .semibold))
+                    .foregroundStyle(accent)
+            }
             Text(node.title)
                 .font(zoom.font(11.5, .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
-            Text(node.role.label.uppercased())
-                .font(zoom.font(7.5, .heavy))
-                .tracking(zoom.s(0.5))
-                .foregroundStyle(accent.opacity(0.9))
-                .padding(.horizontal, zoom.s(4))
-                .padding(.vertical, zoom.s(1.5))
-                .background(RoundedRectangle(cornerRadius: zoom.s(3)).fill(accent.opacity(0.14)))
+            if let state = activity?.state, state.badge != nil {
+                AgentBadge(state: state, zoom: zoom)
+            } else {
+                Text(node.role.label.uppercased())
+                    .font(zoom.font(7.5, .heavy))
+                    .tracking(zoom.s(0.5))
+                    .foregroundStyle(accent.opacity(0.9))
+                    .padding(.horizontal, zoom.s(4))
+                    .padding(.vertical, zoom.s(1.5))
+                    .background(RoundedRectangle(cornerRadius: zoom.s(3)).fill(accent.opacity(0.14)))
+            }
 
             Spacer(minLength: 0)
 
@@ -104,7 +126,7 @@ struct TerminalNodeView: View {
             // emulator does not scale — show the folder instead and keep the
             // process running untouched in the registry.
             if zoom.scale > 0.5 {
-                TerminalSurface(session: session, contentSize: node.size)
+                TerminalSurface(session: session, scale: zoom.scale)
             } else {
                 placeholder
             }
@@ -126,6 +148,25 @@ struct TerminalNodeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasDeep)
+    }
+
+    /// The wheel pans the canvas by default, so a terminal has to be dwelled on
+    /// before it gets the scrollback. That is invisible unless it says so —
+    /// shown only while the pointer is over this terminal and the dwell has not
+    /// completed, then it goes away.
+    @ViewBuilder
+    private var scrollHint: some View {
+        if store.hoveredTerminal == node.id, !isArmed, zoom.scale > 0.5 {
+            Text("hold to scroll")
+                .font(zoom.font(8.5, .medium))
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.horizontal, zoom.s(6))
+                .padding(.vertical, zoom.s(2))
+                .background(Capsule().fill(Theme.chrome.opacity(0.9)))
+                .padding(.bottom, zoom.s(6))
+                .transition(.opacity)
+                .allowsHitTesting(false)
+        }
     }
 
     private var resizeGrip: some View {

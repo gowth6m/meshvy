@@ -87,6 +87,26 @@ enum AgentBridge {
         try? data.write(to: URL(fileURLWithPath: agentsDirectory(for: workspace) + "/\(agent.id).json"))
     }
 
+    /// One row of `meshvy status`.
+    struct StatusRow: Codable {
+        var id: String?
+        var title: String
+        var repo: String?
+        var state: String
+        var line: String?
+    }
+
+    /// Publishes what every agent on the board is doing, so one agent can ask
+    /// about the others without interrupting them. Hook payloads are consumed
+    /// and deleted as they arrive, so this file is the only place the resolved
+    /// state is readable from outside the app.
+    static func publishStatus(_ rows: [StatusRow], in workspace: Workspace) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        guard let data = try? encoder.encode(rows) else { return }
+        try? data.write(to: URL(fileURLWithPath: directory(for: workspace) + "/status.json"), options: .atomic)
+    }
+
     // MARK: - The helper
 
     /// A small bash client. It only reads and writes files, plus Claude Code's
@@ -99,6 +119,8 @@ enum AgentBridge {
         #   meshvy spawn <repo> "<task>"   start an agent in <repo>, print its id
         #   meshvy wait <id>               block until that agent is done, print its reply
         #   meshvy send <id> "<message>"   type a message into that agent's terminal
+        #   meshvy context <id>            print what that agent has been doing
+        #   meshvy status                  what every agent on the board is doing
         #   meshvy list                    agents on the board
         #
         # Each spawned agent gets its own terminal node on the canvas.
@@ -228,12 +250,65 @@ enum AgentBridge {
         PY
         }
 
+        # Pull, not push: an agent reads another's work when it decides that is
+        # relevant, and the one being read is never interrupted.
+        cmd_context() {
+          local id="${1:-}" turns="${2:-6}"
+          [ -n "$id" ] || die "usage: meshvy context <id> [turns]"
+          local session; session="$(session_of "$id")"
+          [ -n "$session" ] || die "unknown agent '$id'"
+          python3 - "$session" "$turns" <<'PY'
+        import glob, json, os, sys
+        session, turns = sys.argv[1], int(sys.argv[2])
+        hits = glob.glob(os.path.expanduser("~/.claude/projects/*/%s.jsonl" % session))
+        if not hits:
+            print("no transcript yet"); sys.exit(0)
+        rows = []
+        for line in open(hits[0]):
+            try: r = json.loads(line)
+            except Exception: continue
+            kind = r.get("type")
+            if kind not in ("user", "assistant"): continue
+            content = (r.get("message") or {}).get("content")
+            if isinstance(content, str):
+                rows.append(("you" if kind == "user" else "agent", content))
+                continue
+            for b in content or []:
+                if not isinstance(b, dict): continue
+                if b.get("type") == "text" and b.get("text", "").strip():
+                    rows.append(("you" if kind == "user" else "agent", b["text"]))
+                elif b.get("type") == "tool_use":
+                    arg = b.get("input") or {}
+                    detail = arg.get("file_path") or arg.get("command") or arg.get("pattern") or ""
+                    rows.append(("tool", "%s %s" % (b.get("name"), str(detail)[:120])))
+        for who, text in rows[-(turns * 4):]:
+            body = " ".join(str(text).split())[:600]
+            print("[%s] %s" % (who, body))
+        PY
+        }
+
+        cmd_status() {
+          python3 - "$BRIDGE/status.json" <<'PY'
+        import json, sys
+        try: rows = json.load(open(sys.argv[1]))
+        except Exception: rows = []
+        if not rows:
+            print("no agents reporting (is Meshvy running?)"); sys.exit(0)
+        for r in rows:
+            print("%-12s %-10s %-22s %s" % (
+                r.get("id") or "-", r.get("state") or "?",
+                r.get("title") or r.get("repo") or "-", (r.get("line") or "")[:100]))
+        PY
+        }
+
         case "${1:-}" in
-          spawn) shift; cmd_spawn "$@" ;;
-          wait)  shift; cmd_wait "$@" ;;
-          send)  shift; cmd_send "$@" ;;
-          list)  shift; cmd_list "$@" ;;
-          *) die "usage: meshvy {spawn|wait|send|list}" ;;
+          spawn)   shift; cmd_spawn "$@" ;;
+          wait)    shift; cmd_wait "$@" ;;
+          send)    shift; cmd_send "$@" ;;
+          context) shift; cmd_context "$@" ;;
+          status)  shift; cmd_status "$@" ;;
+          list)    shift; cmd_list "$@" ;;
+          *) die "usage: meshvy {spawn|wait|send|context|status|list}" ;;
         esac
         """
     }

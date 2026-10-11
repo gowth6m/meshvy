@@ -69,36 +69,66 @@ struct Sidebar: View {
         .frame(height: 38)
     }
 
+    /// Every live terminal, orchestrator included, ordered by how much it wants
+    /// your attention. On a board of a dozen agents this is the list you read
+    /// first — the canvas tells you where they are, this tells you who is stuck.
     @ViewBuilder
     private var runningSection: some View {
-        let running = store.activeWorkspace?.terminals.filter { store.terminals.isRunning($0.id) } ?? []
+        let running = (store.activeWorkspace?.allTerminals ?? [])
+            .filter { store.terminals.isRunning($0.id) }
+            .sorted { lhs, rhs in
+                let left = store.activity(for: lhs)?.state.precedence ?? -1
+                let right = store.activity(for: rhs)?.state.precedence ?? -1
+                return left == right ? lhs.createdAt < rhs.createdAt : left > right
+            }
         if !running.isEmpty {
-            SectionHeader(title: "Running", count: running.count, tint: Theme.busy)
+            SectionHeader(
+                title: "Agents",
+                count: running.count,
+                tint: Theme.busy,
+                trailing: store.agentsNeedingYou.isEmpty
+                    ? nil : "\(store.agentsNeedingYou.count) waiting"
+            )
             ForEach(running) { terminal in
-                SidebarRow(
-                    isSelected: store.selection == .terminal(terminal.id),
-                    action: { store.reveal(.terminal(terminal.id)) }
-                ) {
-                    HStack(spacing: 7) {
-                        Image(systemName: terminal.role.icon)
-                            .font(Theme.ui(9.5))
-                            .foregroundStyle(terminal.role == .orchestrator ? Theme.accent : Theme.worktree)
-                            .frame(width: 13)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(terminal.title)
-                                .font(Theme.ui(11.5, .medium))
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
-                            Text(terminal.role.label)
-                                .font(Theme.mono(9.5))
-                                .foregroundStyle(Theme.textTertiary)
-                        }
-                        Spacer(minLength: 0)
-                        Circle().fill(Theme.clean).frame(width: 5, height: 5)
-                    }
-                }
+                agentRow(terminal)
             }
             Spacer().frame(height: 14)
+        }
+    }
+
+    private func agentRow(_ terminal: TerminalNode) -> some View {
+        let id = store.canvasID(for: terminal)
+        let activity = store.activity(for: terminal)
+        let tint: Color = switch activity?.state {
+        case .working: Theme.busy
+        case .blocked: Theme.needsYou
+        case .done: Theme.clean
+        default: Theme.textTertiary
+        }
+        return SidebarRow(isSelected: store.selection == id, action: { store.reveal(id) }) {
+            HStack(spacing: 7) {
+                Image(systemName: terminal.role.icon)
+                    .font(Theme.ui(9.5))
+                    .foregroundStyle(terminal.role == .orchestrator ? Theme.accent : Theme.worktree)
+                    .frame(width: 13)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(terminal.title)
+                        .font(Theme.ui(11.5, .medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Text(activity?.line ?? activity?.state.label ?? terminal.role.label)
+                        .font(Theme.mono(9.5))
+                        .foregroundStyle(tint)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+                if store.isUnread(terminal.id) {
+                    UnreadDot(zoom: Zoom(scale: 1))
+                } else {
+                    Circle().fill(tint).frame(width: 5, height: 5)
+                }
+            }
         }
     }
 

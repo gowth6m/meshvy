@@ -21,6 +21,12 @@ struct MeshvyCommands: Commands {
     var store: MeshvyStore
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") {
+                NotificationCenter.default.post(name: .meshvyCheckForUpdates, object: nil)
+            }
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("New Workspace…") {
                 NotificationCenter.default.post(name: .meshvyNewWorkspace, object: nil)
@@ -40,6 +46,30 @@ struct MeshvyCommands: Commands {
             .keyboardShortcut("o", modifiers: [.command, .shift])
         }
 
+        CommandMenu("Agents") {
+            Button("Command Palette…") {
+                NotificationCenter.default.post(name: .meshvyPalette, object: nil)
+            }
+            .keyboardShortcut("k", modifiers: .command)
+            Button("Next Agent Waiting On Me") {
+                NotificationCenter.default.post(name: .meshvyNextAgent, object: nil)
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
+            Divider()
+            Picker("Permission Mode", selection: Binding(
+                get: { store.permissionMode },
+                set: { store.permissionMode = $0 }
+            )) {
+                ForEach(PermissionMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            Toggle("Notify Me When An Agent Needs Me", isOn: Binding(
+                get: { store.notifier.isEnabled },
+                set: { store.notifier.isEnabled = $0; store.persistLayout() }
+            ))
+        }
+
         CommandMenu("View") {
             Button("Fit to Content") { store.fit() }
                 .keyboardShortcut("0", modifiers: .command)
@@ -51,9 +81,8 @@ struct MeshvyCommands: Commands {
                 .keyboardShortcut("1", modifiers: .command)
             Divider()
             Button("Show Ended Sessions") { store.showEndedSessions.toggle() }
-            Button("Invert Scroll Direction") { store.invertScroll.toggle() }
-            Button("Show Ended Sessions") { store.showEndedSessions.toggle() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+            Button("Invert Scroll Direction") { store.invertScroll.toggle() }
             Divider()
             Button("Toggle Sidebar") {
                 NotificationCenter.default.post(name: .meshvyToggleSidebar, object: nil)
@@ -80,6 +109,13 @@ struct MeshvyCommands: Commands {
             Divider()
             Button("Reset Auto-Layout") { store.resetLayout() }
         }
+
+        CommandGroup(replacing: .help) {
+            Button("Keyboard Shortcuts") {
+                NotificationCenter.default.post(name: .meshvyShortcuts, object: nil)
+            }
+            .keyboardShortcut("/", modifiers: .command)
+        }
     }
 }
 
@@ -92,7 +128,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         let arguments = CommandLine.arguments
-        if arguments.contains("--zoomtest") {
+        if arguments.contains("--updatetest") {
+            UpdateTest.run(install: arguments.contains("--install"))
+        } else if arguments.contains("--zoomtest") {
             ZoomTest.run()
         } else if let repo = BridgeTest.repo(arguments: arguments) {
             BridgeTest.run(repo: repo)
@@ -100,6 +138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DiffTest.run(path: path)
         } else if arguments.contains("--perftest") {
             PerfTest.run()
+        } else if arguments.contains("--hooktest") {
+            HookTest.run(keep: arguments.contains("--keep"))
         } else if arguments.contains("--launchtest") {
             LaunchTest.run()
         } else if let repos = SelfTest.repoPaths(arguments: arguments) {

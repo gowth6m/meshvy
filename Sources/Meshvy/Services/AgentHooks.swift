@@ -33,15 +33,22 @@ enum AgentHooks {
         AgentBridge.binDirectory(for: workspace) + "/meshvy-hook"
     }
 
-    /// Writes the script and the settings file, and clears anything an earlier
-    /// run left behind — a stale payload would report an agent that is long gone.
-    static func install(for workspace: Workspace) {
+    /// Drops anything an earlier run left behind — a stale payload would report
+    /// an agent that is long gone. Only on opening a workspace: doing it on
+    /// every install would throw away the events of agents still running.
+    static func reset(for workspace: Workspace) {
         let fm = FileManager.default
         let directory = eventsDirectory(for: workspace)
-        try? fm.createDirectory(atPath: directory, withIntermediateDirectories: true)
         for name in (try? fm.contentsOfDirectory(atPath: directory)) ?? [] {
             try? fm.removeItem(atPath: directory + "/" + name)
         }
+    }
+
+    /// Writes the script and the settings file. Idempotent, and rewritten every
+    /// time so an upgraded Meshvy ships an upgraded hook.
+    static func install(for workspace: Workspace) {
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: eventsDirectory(for: workspace), withIntermediateDirectories: true)
 
         let script = scriptPath(for: workspace)
         try? hookScript(workspace: workspace).write(toFile: script, atomically: true, encoding: .utf8)
@@ -60,6 +67,28 @@ enum AgentHooks {
             withJSONObject: ["hooks": hooks], options: [.prettyPrinted, .sortedKeys]
         ) else { return }
         try? data.write(to: URL(fileURLWithPath: settingsPath(for: workspace)))
+    }
+
+    // MARK: - Before the session exists
+
+    /// Dialogs Claude Code shows *before* a session starts, which therefore no
+    /// hook can report: the trust prompt for a folder it has not seen, and the
+    /// offer to carry on when a settings file will not parse.
+    ///
+    /// This is the one place Meshvy reads a terminal's screen. It is not agent
+    /// status — the agent does not exist yet — and without it a worktree's
+    /// first agent sits on a question looking like it is thinking.
+    static func startupPrompt(onScreen screen: String) -> String? {
+        let prompts = [
+            ("I trust this folder", "Asking whether to trust this folder"),
+            ("Do you trust the files", "Asking whether to trust this folder"),
+            ("Continue without these settings", "Asking about an unreadable settings file"),
+            ("Choose the text style", "Asking which theme to use")
+        ]
+        for (needle, message) in prompts where screen.contains(needle) {
+            return message + " — press Enter"
+        }
+        return nil
     }
 
     // MARK: - Reading

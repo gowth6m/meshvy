@@ -351,8 +351,15 @@ struct InspectorView: View {
                     .font(Theme.ui(10, .heavy))
                     .foregroundStyle(store.terminals.isRunning(terminal.id) ? Theme.clean : Theme.textTertiary)
             }
+            if let activity = store.activity(for: terminal) {
+                agentState(activity)
+            }
             FieldGrid(rows: [
                 .init(label: "Role", value: terminal.role.label),
+                .init(
+                    label: "Permission mode",
+                    value: (terminal.permissionMode ?? store.permissionMode).label
+                ),
                 .init(
                     label: "Folder",
                     value: terminal.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
@@ -372,6 +379,44 @@ struct InspectorView: View {
             Spacer(minLength: 0)
         }
         .padding(14)
+    }
+
+    /// What the agent is doing, as its own hooks reported it.
+    private func agentState(_ activity: AgentActivity) -> some View {
+        let tint: Color = switch activity.state {
+        case .working: Theme.busy
+        case .blocked: Theme.needsYou
+        case .done: Theme.clean
+        default: Theme.textTertiary
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                Text(activity.state.label.uppercased())
+                    .font(Theme.ui(9.5, .heavy))
+                    .tracking(0.7)
+                    .foregroundStyle(tint)
+                Spacer(minLength: 0)
+                Text("\(activity.turns) turn\(activity.turns == 1 ? "" : "s") · \(activity.toolCalls) tool calls")
+                    .font(Theme.ui(10))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            if let line = activity.line {
+                Text(line)
+                    .font(Theme.mono(10.5))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            Text("Reported by the session's own hooks · \(Format.relative(activity.updatedAt))")
+                .font(Theme.ui(9.5))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint.opacity(0.1)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(tint.opacity(0.3), lineWidth: 1)
+        )
     }
 
     private func worktreeInspector(_ worktree: Worktree, repoID: String?) -> some View {

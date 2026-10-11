@@ -24,7 +24,10 @@ enum AgentCommand {
 
     struct Options {
         var model: String? = ModelDefaults.modelID
-        var permissionMode: String = "acceptEdits"
+        var permissionMode: PermissionMode = .acceptEdits
+        /// Settings file holding the status hooks — see `AgentHooks`. An
+        /// additional source, so the user's own settings still apply.
+        var settingsPath: String?
     }
 
     /// Argv for an orchestrator sitting at the workspace root, with every
@@ -66,8 +69,13 @@ enum AgentCommand {
         if let model = options.model {
             arguments.append(contentsOf: ["--model", model])
         }
-        arguments.append(contentsOf: ["--permission-mode", options.permissionMode])
+        arguments.append(contentsOf: ["--permission-mode", options.permissionMode.rawValue])
         arguments.append(contentsOf: ["--allowedTools", allowedDelegationTools])
+        // Only when it is really there: a workspace whose folder has gone
+        // would otherwise hand the CLI a path to nothing.
+        if let settings = options.settingsPath, FileManager.default.fileExists(atPath: settings) {
+            arguments.append(contentsOf: ["--settings", settings])
+        }
         return arguments
     }
 
@@ -107,6 +115,10 @@ enum AgentCommand {
             meshvy wait <id>                block until it finishes, then print
                                             what it reported back
             meshvy send <id> "<message>"    type a follow-up into its terminal
+            meshvy context <id>             read what that agent has been doing,
+                                            without interrupting it
+            meshvy status                   every agent on the board and what it
+                                            is doing right now
             meshvy list                     agents currently on the board
 
         Work this way:
@@ -115,7 +127,10 @@ enum AgentCommand {
         2. `meshvy spawn` one agent per repository that has work to do, giving \
            each a task scoped to its own directory. Start them all before \
            waiting on any of them, so they run concurrently.
-        3. `meshvy wait` on each id and read what came back.
+        3. `meshvy wait` on each id and read what came back. `meshvy status` \
+           tells you where they all are without blocking, and `meshvy context` \
+           shows you one agent's recent work if you need to decide something \
+           before it finishes.
         4. Follow up with `meshvy send` where something needs correcting, \
            integrate the results, and keep the repositories consistent.
 

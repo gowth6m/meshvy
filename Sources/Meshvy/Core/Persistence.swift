@@ -58,4 +58,6 @@ struct SavedLayout: Codable {
     var invertScroll: Bool = false
     var sidebarWidth: Double = 262
     var inspectorWidth: Double = 430
+    var permissionMode: String = PermissionMode.acceptEdits.rawValue
+    var notificationsEnabled: Bool = false
 }

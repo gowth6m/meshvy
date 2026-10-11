@@ -6,11 +6,13 @@ import SwiftUI
 enum MeshvySheet: Identifiable {
     case newWorkspace
     case addRepos
+    case update
 
     var id: String {
         switch self {
         case .newWorkspace: return "newWorkspace"
         case .addRepos: return "addRepos"
+        case .update: return "update"
         }
     }
 }

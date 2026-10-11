@@ -69,6 +69,53 @@ struct WorkspaceRepo: Identifiable, Codable, Hashable {
     var isReady: Bool { failure == nil }
 }
 
+/// How much an agent asks before it acts.
+///
+/// Only the mode a session *starts* in — ⇧⇥ still cycles it live inside the
+/// session. The raw values are the ones `claude --permission-mode` accepts.
+enum PermissionMode: String, Codable, CaseIterable, Identifiable {
+    case `default`
+    case auto
+    case acceptEdits
+    case plan
+    case bypassPermissions
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .default: return "Ask every time"
+        case .auto: return "Auto"
+        case .acceptEdits: return "Accept edits"
+        case .plan: return "Plan first"
+        case .bypassPermissions: return "Bypass permissions"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .default: return "Asks before each action."
+        case .auto: return "Decides for itself which actions need you."
+        case .acceptEdits: return "Writes files without asking; still asks for commands."
+        case .plan: return "Plans first, acts once you approve."
+        case .bypassPermissions: return "Acts without asking. Use with care."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .default: return "hand.raised"
+        case .auto: return "wand.and.stars"
+        case .acceptEdits: return "square.and.pencil"
+        case .plan: return "list.bullet.rectangle"
+        case .bypassPermissions: return "bolt.fill"
+        }
+    }
+
+    /// Worth a warning in the menu: nothing will stop the agent.
+    var isRisky: Bool { self == .bypassPermissions }
+}
+
 /// A terminal placed on the canvas.
 ///
 /// Position and size are persisted so a board keeps its shape; the running
@@ -113,6 +160,9 @@ struct TerminalNode: Identifiable, Codable, Hashable {
     var bridgeID: String?
     /// The instruction it was started with.
     var openingTask: String?
+    /// Mode this session was launched in. Decoded as nil for boards saved before
+    /// the setting existed, which read as the app default.
+    var permissionMode: PermissionMode?
     var x: Double = 0
     var y: Double = 0
     var width: Double = 620

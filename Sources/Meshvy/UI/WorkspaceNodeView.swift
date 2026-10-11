@@ -22,12 +22,17 @@ struct WorkspaceNodeView: View {
         orchestrator.flatMap { store.terminals.session(for: $0.id) }
     }
     private var isRunning: Bool { session?.isRunning ?? false }
+    private var activity: AgentActivity? { orchestrator.flatMap { store.activity(for: $0) } }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             repoStrip
             Divider().overlay(Theme.hairline)
+            if isRunning {
+                AgentStatusStrip(activity: activity, fallback: workspace.root, zoom: zoom)
+                Divider().overlay(Theme.hairline)
+            }
             body(for: session)
         }
         .background(
@@ -38,7 +43,8 @@ struct WorkspaceNodeView: View {
         .overlay(
             RoundedRectangle(cornerRadius: zoom.s(14), style: .continuous)
                 .stroke(
-                    isSelected ? Theme.accent : Theme.accent.opacity(isRunning ? 0.5 : 0.25),
+                    activity?.state == .blocked ? Theme.needsYou
+                        : (isSelected ? Theme.accent : Theme.accent.opacity(isRunning ? 0.5 : 0.25)),
                     lineWidth: isSelected ? max(1.5, zoom.s(2)) : max(0.8, zoom.s(1.2))
                 )
         )
@@ -50,9 +56,13 @@ struct WorkspaceNodeView: View {
 
     private var header: some View {
         HStack(spacing: zoom.s(8)) {
-            Image(systemName: "rectangle.3.group.fill")
-                .font(zoom.font(13, .semibold))
-                .foregroundStyle(Theme.accent)
+            if let orchestrator, store.isUnread(orchestrator.id) {
+                UnreadDot(zoom: zoom)
+            } else {
+                Image(systemName: "rectangle.3.group.fill")
+                    .font(zoom.font(13, .semibold))
+                    .foregroundStyle(Theme.accent)
+            }
 
             VStack(alignment: .leading, spacing: zoom.s(1)) {
                 Text(workspace.name)
@@ -69,11 +79,15 @@ struct WorkspaceNodeView: View {
             Spacer(minLength: 0)
 
             if isRunning {
-                HStack(spacing: zoom.s(4)) {
-                    Circle().fill(Theme.clean).frame(width: zoom.s(6), height: zoom.s(6))
-                    Text("Claude Code")
-                        .font(zoom.font(10, .semibold))
-                        .foregroundStyle(Theme.clean)
+                if let state = activity?.state, state.badge != nil {
+                    AgentBadge(state: state, zoom: zoom)
+                } else {
+                    HStack(spacing: zoom.s(4)) {
+                        Circle().fill(Theme.clean).frame(width: zoom.s(6), height: zoom.s(6))
+                        Text("Claude Code")
+                            .font(zoom.font(10, .semibold))
+                            .foregroundStyle(Theme.clean)
+                    }
                 }
                 Button { store.stopOrchestrator() } label: {
                     Image(systemName: "stop.circle").font(zoom.font(11))
@@ -128,7 +142,7 @@ struct WorkspaceNodeView: View {
     @ViewBuilder
     private func body(for session: TerminalSession?) -> some View {
         if let session, zoom.scale > 0.45 {
-            TerminalSurface(session: session, contentSize: CGSize(width: workspace.boardWidth, height: workspace.boardHeight))
+            TerminalSurface(session: session, scale: zoom.scale)
         } else if session != nil {
             zoomedOutPlaceholder
         } else {
@@ -202,22 +216,26 @@ struct WorkspaceNodeView: View {
 
 /// Hosts a registry-owned terminal view.
 ///
-/// The terminal is laid out at the node's *world* size and magnified to fill
-/// the projected frame. That way zooming scales the text like everything else
-/// on the board, instead of the grid reflowing and the glyphs staying 11.5pt
+/// The terminal is laid out at its *world* size and magnified to fill the
+/// projected frame. That way zooming scales the text like everything else on
+/// the board, instead of the grid reflowing and the glyphs staying 11.5pt
 /// however far you zoom in — which was the one thing on the canvas whose size
 /// never responded to the zoom control.
 struct TerminalSurface: NSViewRepresentable {
     var session: TerminalSession
-    /// Node size in world coordinates, i.e. its size at 100%.
-    var contentSize: CGSize
+    /// Canvas zoom. The world size is derived from the frame SwiftUI hands the
+    /// container, rather than passed in: the card's chrome (header, status
+    /// strip, dividers) comes out of the terminal's share of the node, and
+    /// quoting the node's own size here stretched the glyphs by whatever that
+    /// chrome happened to be.
+    var scale: CGFloat
 
     func makeNSView(context: Context) -> NSView {
         let container = FlippedContainer()
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor(hex: Theme.Hex.canvasDeep).cgColor
         container.addSubview(session.surface)
-        container.contentSize = contentSize
+        container.scale = scale
         return container
     }
 
@@ -227,33 +245,34 @@ struct TerminalSurface: NSViewRepresentable {
             session.surface.removeFromSuperview()
             container.addSubview(session.surface)
         }
-        container.contentSize = contentSize
+        container.scale = scale
         container.needsLayout = true
         container.layoutSubtreeIfNeeded()
     }
 
     /// Lays the terminal out from the top-left, matching the card.
     final class FlippedContainer: NSView {
-        /// The coordinate space the terminal thinks it lives in.
-        var contentSize: CGSize = .zero
+        var scale: CGFloat = 1
 
         override var isFlipped: Bool { true }
 
         override func layout() {
             super.layout()
             guard let child = subviews.first else { return }
-            guard contentSize.width > 1, contentSize.height > 1 else {
+            guard scale > 0.01, frame.width > 1, frame.height > 1 else {
                 child.frame = bounds
                 return
             }
             // Scale *this* view's coordinate system rather than the terminal's.
-            // The container's frame is the projected rect and its bounds stay
-            // the world size, so everything inside is magnified by exactly the
-            // zoom — while the terminal's own frame never changes, which is
-            // what keeps SwiftTerm from recomputing its grid and making every
-            // running program redraw on each zoom step.
-            setBoundsSize(contentSize)
-            child.frame = CGRect(origin: .zero, size: contentSize)
+            // The container's frame is the projected rect and its bounds are
+            // that rect in world units, so everything inside is magnified by
+            // exactly the zoom, in both axes — while the terminal's own frame
+            // depends only on the node's size, which is what keeps SwiftTerm
+            // from recomputing its grid and making every running program redraw
+            // on each zoom step.
+            let world = CGSize(width: frame.width / scale, height: frame.height / scale)
+            setBoundsSize(world)
+            child.frame = CGRect(origin: .zero, size: world)
         }
     }
 }

@@ -2,6 +2,13 @@
 
 ## [0.8.0] - 2026-10-11
 
+- **In-app updates.** Meshvy checks GitHub Releases on launch, shows a pill in
+  the toolbar when there is a newer version, and installs it on request:
+  download, SHA-256 check against the published list, bundle validation, then a
+  detached helper swaps the app and relaunches it. It restores the old bundle
+  if the swap fails. The repository is private, so the token comes from the
+  `gh` CLI you are already signed in to; a public repository needs none.
+  Development builds never offer updates.
 - **Delegated agents are real terminals.** The orchestrator used Claude's Agent
   tool, whose sub-agents run inside the parent process with no pid and no pty —
   nothing a terminal could attach to, so the board could only draw them as
@@ -46,6 +53,63 @@ Delegated agents are real terminals now.
   readers racing for the same bridge requests.
 
 ## [Unreleased]
+
+**Agents say what they are doing.**
+
+- Every session Meshvy starts is handed a settings file whose hooks call a tiny
+  `meshvy-hook` script, so status comes from the agent itself rather than from
+  reading its screen. Four states — working, waiting, blocked, done — collapse
+  into the two words that matter on a header: a pulsing **RUNNING**, or
+  **NEEDS YOU** when something is stopped on a question only you can answer.
+- A node that has an agent in it carries a status strip under its header: the
+  tool in flight and what it is pointed at (`Edit  Sources/Theme.swift`), the
+  permission being asked for, or the first line of what the agent said when it
+  finished. The strip is always there — one that appeared and vanished with each
+  tool call would resize the terminal under it, and SwiftTerm reflows its whole
+  grid on a resize.
+- An agent that changes state while you are looking elsewhere is marked unread:
+  a dot on its header and in the sidebar, a count on the Dock icon, and — if you
+  turn notifications on — a notification that focuses the window and centres the
+  node when clicked. Nothing is posted until you ask for it.
+- The one dialog no hook can report is the one Claude Code shows *before* a
+  session exists: the trust prompt for a folder it has not seen, or the offer to
+  carry on when `settings.json` will not parse. An agent stopped on one used to
+  look like it was thinking. Those two are read off the screen, narrowly, and
+  only while a session has never reported.
+- `⌥⌘N` walks you through the agents waiting on you; the count in the toolbar
+  does the same with the mouse.
+- The sidebar's "Running" list is now **Agents** — orchestrator included,
+  ordered by how much each one wants your attention, with its live line
+  underneath.
+
+**⌘K.**
+
+- One box for starting an agent in any repository, switching workspace, jumping
+  to any node by name, branch or path, and changing the permission mode.
+- It also searches *inside* your terminals: with three characters or more it
+  matches each live terminal's screen and shows the line it found, which is the
+  one thing the canvas cannot tell you — which of a dozen terminals printed the
+  error you half-remember.
+- `⌘/` lists the keys, including the gestures a canvas cannot advertise.
+
+**Permission modes.** New agents launch in a mode you pick — ask every time,
+auto, accept edits, plan, or bypass — from the toolbar, the Agents menu or the
+palette. It sets the starting mode only; ⇧⇥ still cycles it inside a running
+session.
+
+**The wheel stops fighting the terminals.** Scrolling panned the canvas
+everywhere, which meant a terminal's scrollback was unreachable. Resting the
+pointer on one for half a second hands it the wheel until the pointer leaves,
+and the node says so while you wait. Zoom stays the canvas's.
+
+**Agents can read each other.** The helper gains `meshvy context <id>`, which
+prints what another agent has been doing without interrupting it, and
+`meshvy status`, which lists every agent on the board and its current state —
+pull, not push, so nothing is forced into anyone's context.
+
+- `Meshvy --hooktest` runs a real `claude` against the installed hooks and
+  checks what comes back. `--snapshot` gains `--palette`, `--shortcuts` and
+  `--agent` so the chrome that only exists on a keystroke can be captured.
 
 The board is **Night Owl**.
 

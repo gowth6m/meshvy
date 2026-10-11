@@ -51,8 +51,10 @@ struct CanvasView: View {
                 case .active(let point):
                     cursorPoint = point
                     cursorInCanvas = true
+                    store.hoverTerminal(terminal(under: point))
                 case .ended:
                     cursorInCanvas = false
+                    store.hoverTerminal(nil)
                 }
             }
             .onAppear {
@@ -212,6 +214,35 @@ struct CanvasView: View {
         }
     }
 
+    /// Which terminal's *body* the cursor is over, if any. The header band is
+    /// excluded: that is the handle you drag the node by, and resting there
+    /// should not arm the terminal under it.
+    private func terminal(under point: CGPoint) -> UUID? {
+        for node in store.graph.nodes.reversed() {
+            var rect = store.viewport.project(node.frame)
+            let id: UUID
+            switch node.kind {
+            case .terminal(let terminal):
+                id = terminal.id
+                // Header and its divider, plus the status strip and its own —
+                // which a plain shell does not draw.
+                let chrome: CGFloat = terminal.sessionID == nil ? 29 : 48
+                rect.origin.y += zoom.s(chrome)
+                rect.size.height -= zoom.s(chrome)
+            case .workspace(let workspace):
+                guard let orchestrator = workspace.orchestrator else { continue }
+                id = orchestrator.id
+                // Header plus the repository strip.
+                rect.origin.y += zoom.s(78)
+                rect.size.height -= zoom.s(78)
+            default:
+                continue
+            }
+            if rect.height > 0, rect.contains(point) { return id }
+        }
+        return nil
+    }
+
     private func attachedSessions(to path: String) -> (total: Int, live: Int) {
         var total = 0
         var live = 0
@@ -323,6 +354,10 @@ struct CanvasView: View {
                 store.viewport.zoom(to: store.viewport.scale * (1 + step), anchor: cursorPoint)
                 return nil
             }
+
+            // A terminal the pointer has rested on keeps the wheel, so its
+            // scrollback is reachable at all. Zoom still belongs to the canvas.
+            if store.armedTerminal != nil { return event }
 
             var deltaX = event.scrollingDeltaX
             var deltaY = event.scrollingDeltaY
