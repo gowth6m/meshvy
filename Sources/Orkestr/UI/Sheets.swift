@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Which modal flow is open. One enum keeps the presentation logic in `RootView`
 /// to a single `.sheet`.
-enum ArcforgeSheet: Identifiable {
+enum OrkestrSheet: Identifiable {
     case newWorkspace
     case addRepos
 
@@ -141,7 +141,7 @@ struct SecondaryButton: View {
 /// Collects repositories for a workspace, either from folders on disk or by
 /// cloning a remote.
 struct RepoPicker: View {
-    @Bindable var store: ArcforgeStore
+    @Bindable var store: OrkestrStore
     @Binding var picked: [WorkspaceRepo]
     @Binding var cloneTargets: [String]
     @State private var remote = ""
@@ -251,7 +251,7 @@ struct RepoPicker: View {
 // MARK: - New workspace
 
 struct NewWorkspaceSheet: View {
-    @Bindable var store: ArcforgeStore
+    @Bindable var store: OrkestrStore
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var picked: [WorkspaceRepo] = []
@@ -271,7 +271,7 @@ struct NewWorkspaceSheet: View {
     var body: some View {
         SheetFrame(
             title: "New workspace",
-            subtitle: "Pick the repositories you work on together. Arcforge cuts one branch across all of them and checks each one out side by side under ~/.forge."
+            subtitle: "Pick the repositories you work on together. Orkestr cuts one branch across all of them and checks each one out side by side under ~/.forge."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 FormField(label: "Name") {
@@ -346,7 +346,7 @@ struct NewWorkspaceSheet: View {
 // MARK: - Add repositories
 
 struct AddReposSheet: View {
-    @Bindable var store: ArcforgeStore
+    @Bindable var store: OrkestrStore
     @Environment(\.dismiss) private var dismiss
     @State private var picked: [WorkspaceRepo] = []
     @State private var cloneTargets: [String] = []

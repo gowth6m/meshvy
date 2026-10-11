@@ -77,7 +77,7 @@ struct ChangesList: View {
 /// read, and the inspector can be dragged wider when you need more room.
 struct DiffBody: View {
     var diff: FileDiff
-    @Environment(\.arcforgeSnapshotMode) private var isSnapshot
+    @Environment(\.orkestrSnapshotMode) private var isSnapshot
 
     var body: some View {
         if diff.isBinary {

@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Arcforge</string>
+	<string>Orkestr</string>
 	<key>CFBundleDisplayName</key>
-	<string>Arcforge</string>
+	<string>Orkestr</string>
 	<key>CFBundleExecutable</key>
-	<string>Arcforge</string>
+	<string>Orkestr</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.gowtham.arcforge</string>
+	<string>dev.gowtham.orkestr</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>

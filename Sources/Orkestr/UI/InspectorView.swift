@@ -3,8 +3,8 @@ import SwiftUI
 /// Right panel: everything known about the selected node, plus the transcript
 /// reader for sessions.
 struct InspectorView: View {
-    @Bindable var store: ArcforgeStore
-    @Binding var sheet: ArcforgeSheet?
+    @Bindable var store: OrkestrStore
+    @Binding var sheet: OrkestrSheet?
 
     var body: some View {
         VStack(spacing: 0) {

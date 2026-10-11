@@ -33,7 +33,7 @@ fi
 echo "$VERSION" > VERSION
 git add VERSION
 git commit -m "release: $VERSION"
-git tag -a "v$VERSION" -m "Arcforge $VERSION"
+git tag -a "v$VERSION" -m "Orkestr $VERSION"
 
 echo
 echo "Tagged v$VERSION. Push to publish:"

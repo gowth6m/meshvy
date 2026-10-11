@@ -6,8 +6,8 @@ import SwiftUI
 /// the open one. Clicking a repository pans the canvas to its card; clicking a
 /// different workspace switches the board.
 struct Sidebar: View {
-    @Bindable var store: ArcforgeStore
-    @Binding var sheet: ArcforgeSheet?
+    @Bindable var store: OrkestrStore
+    @Binding var sheet: OrkestrSheet?
     @State private var collapsed: Set<UUID> = []
 
     var body: some View {

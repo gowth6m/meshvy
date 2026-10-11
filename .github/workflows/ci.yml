@@ -12,12 +12,15 @@ jobs:
       - uses: actions/checkout@v4
       - run: swift --version
       - name: Build
-        run: swift build -c release
-      - name: Warnings are not allowed to pile up
+        run: swift build -c release 2>&1 | tee /tmp/build.log
+      - name: No warnings in our own sources
         run: |
-          swift build -c release 2>&1 | tee /tmp/build.log
-          if grep -q "warning:" /tmp/build.log; then
-            echo "::error::build produced warnings"
-            grep "warning:" /tmp/build.log | head -20
+          # Scoped to Sources/Orkestr: a dependency's warnings are not ours to
+          # fix, and failing on them would make CI red for reasons nobody here
+          # can act on.
+          if grep "warning:" /tmp/build.log | grep -q "Sources/Orkestr/"; then
+            echo "::error::build produced warnings in Sources/Orkestr"
+            grep "warning:" /tmp/build.log | grep "Sources/Orkestr/" | head -20
             exit 1
           fi
+          echo "clean"

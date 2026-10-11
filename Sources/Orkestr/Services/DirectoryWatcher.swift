@@ -7,7 +7,7 @@ import Foundation
 /// agent turn produces a burst of writes.
 final class DirectoryWatcher {
     private var stream: FSEventStreamRef?
-    private let queue = DispatchQueue(label: "arcforge.fsevents")
+    private let queue = DispatchQueue(label: "orkestr.fsevents")
     private let debounce: DispatchWorkItem? = nil
     private var pendingWork: DispatchWorkItem?
     private let interval: TimeInterval

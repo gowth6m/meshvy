@@ -55,7 +55,7 @@ enum Shell {
         var outData = Data()
         var errData = Data()
         let group = DispatchGroup()
-        let ioQueue = DispatchQueue(label: "arcforge.shell.io", attributes: .concurrent)
+        let ioQueue = DispatchQueue(label: "orkestr.shell.io", attributes: .concurrent)
         let lock = NSLock()
         for (pipe, isOut) in [(outPipe, true), (errPipe, false)] {
             group.enter()

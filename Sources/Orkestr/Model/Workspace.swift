@@ -36,11 +36,11 @@ struct Workspace: Identifiable, Codable, Hashable {
     var worktreePaths: [String] { readyRepos.map(\.worktreePath) }
 
     static func root(for name: String) -> String {
-        Workspace.arcforgeHome + "/" + Workspace.slug(name)
+        Workspace.orkestrHome + "/" + Workspace.slug(name)
     }
 
-    /// Everything Arcforge creates lives here, out of the way of your own folders.
-    static var arcforgeHome: String { NSHomeDirectory() + "/.arcforge" }
+    /// Everything Orkestr creates lives here, out of the way of your own folders.
+    static var orkestrHome: String { NSHomeDirectory() + "/.orkestr" }
 
     /// Filesystem- and branch-safe form of a display name.
     static func slug(_ raw: String) -> String {
@@ -125,7 +125,7 @@ struct TerminalNode: Identifiable, Codable, Hashable {
     }
 }
 
-/// Role an agent plays, used for the brief Arcforge writes.
+/// Role an agent plays, used for the brief Orkestr writes.
 enum AgentRole: String, Codable, CaseIterable, Identifiable {
     case orchestrator
     case worker

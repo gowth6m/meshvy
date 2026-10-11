@@ -2,12 +2,12 @@
 
 ## [0.6.0] - 2026-10-11
 
-Renamed to **Arcforge**, and set up for release.
+Renamed to **Orkestr**, and set up for release.
 
-- The app, bundle (`dev.gowtham.arcforge`), binary and support directory are
-  all Arcforge now. State written under the old name is migrated on first
-  launch rather than silently ignored. New workspaces live under
-  `~/.arcforge/`; existing ones keep the root they were created with, since
+- The app, bundle (`dev.gowtham.orkestr`), binary and support directory are
+  all Orkestr now. State written under either former name is migrated on
+  first launch rather than silently ignored. New workspaces live under
+  `~/.orkestr/`; existing ones keep the root they were created with, since
   git stores absolute paths in its worktree registrations.
 - A generated app icon, drawn by `scripts/make-icon.swift` rather than checked
   in as art.

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Headless exercise of the workspace flow, for development:
-/// `Arcforge --selftest <repoA> <repoB> … [--keep]`. Creates a throwaway
+/// `Orkestr --selftest <repoA> <repoB> … [--keep]`. Creates a throwaway
 /// workspace, checks every worktree landed on the shared branch, then removes
 /// it again unless `--keep` is passed.
 @MainActor
@@ -17,7 +17,7 @@ enum SelfTest {
 
     static func run(repoPaths: [String], keep: Bool) {
         Self.keep = keep
-        let store = ArcforgeStore()
+        let store = OrkestrStore()
         store.bootstrap()
 
         let found = store.inspectRepos(at: repoPaths)
@@ -25,13 +25,13 @@ enum SelfTest {
         guard !found.repos.isEmpty else { exit(1) }
 
         store.createWorkspace(
-            name: "Arcforge Selftest", repos: found.repos, baseRef: nil, branch: "selftest-feature"
+            name: "Orkestr Selftest", repos: found.repos, baseRef: nil, branch: "selftest-feature"
         )
         poll(store: store, attempts: 80)
     }
 
-    private static func poll(store: ArcforgeStore, attempts: Int) {
-        guard let workspace = store.workspaces.first(where: { $0.name == "Arcforge Selftest" }) else {
+    private static func poll(store: OrkestrStore, attempts: Int) {
+        guard let workspace = store.workspaces.first(where: { $0.name == "Orkestr Selftest" }) else {
             guard attempts > 0 else { print("SELFTEST TIMEOUT"); exit(1) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 MainActor.assumeIsolated { poll(store: store, attempts: attempts - 1) }
@@ -70,11 +70,11 @@ enum SelfTest {
 }
 
 /// Opens an orchestrator terminal in the active workspace and waits for the
-/// agent to register itself. `Arcforge --launchtest`.
+/// agent to register itself. `Orkestr --launchtest`.
 @MainActor
 enum LaunchTest {
     static func run() {
-        let store = ArcforgeStore()
+        let store = OrkestrStore()
         store.bootstrap()
         guard let workspace = store.activeWorkspace else { print("no workspace"); exit(1) }
 
@@ -96,7 +96,7 @@ enum LaunchTest {
     /// Clears the prompts Claude Code shows on first run in a new folder, the
     /// way a person at the keyboard would, so the harness reaches the agent.
     private static func answerStartupPrompts(
-        store: ArcforgeStore, node: TerminalNode, attempts: Int, answered: Int
+        store: OrkestrStore, node: TerminalNode, attempts: Int, answered: Int
     ) {
         guard let session = store.terminals.session(for: node.id) else {
             print("LAUNCHTEST FAILED: no session"); exit(1)
@@ -133,7 +133,7 @@ enum LaunchTest {
     }
 
     /// Types a task that forces a fan-out, then watches for sub-agent nodes.
-    private static func dispatchTask(store: ArcforgeStore) {
+    private static func dispatchTask(store: OrkestrStore) {
         guard let terminal = store.activeWorkspace?.orchestrator,
               let session = store.terminals.session(for: terminal.id) else {
             print("LAUNCHTEST FAILED: no orchestrator session"); exit(1)
@@ -150,7 +150,7 @@ enum LaunchTest {
         }
     }
 
-    private static func watchSubAgents(store: ArcforgeStore, attempts: Int) {
+    private static func watchSubAgents(store: OrkestrStore, attempts: Int) {
         let agents = store.subAgents
         if !agents.isEmpty {
             print("sub-agent nodes: \(agents.count)")
@@ -173,7 +173,7 @@ enum LaunchTest {
         }
     }
 
-    private static func poll(store: ArcforgeStore, sessionID: String?, attempts: Int) {
+    private static func poll(store: OrkestrStore, sessionID: String?, attempts: Int) {
         store.refreshLive()
         if let sessionID, let session = store.live[sessionID] {
             print("LIVE: name=\(session.name ?? "-") status=\(session.status.rawValue) pid=\(session.pid)")
@@ -198,7 +198,7 @@ enum LaunchTest {
 
 private extension LaunchTest {}
 
-/// Checks the diff pipeline against a real worktree. `Arcforge --difftest <path>`.
+/// Checks the diff pipeline against a real worktree. `Orkestr --difftest <path>`.
 @MainActor
 enum DiffTest {
     static func path(arguments: [String]) -> String? {
@@ -234,7 +234,7 @@ enum DiffTest {
 }
 
 /// Measures transcript loading on the largest session on disk.
-/// `Arcforge --perftest`.
+/// `Orkestr --perftest`.
 @MainActor
 enum PerfTest {
     static func run() {
@@ -258,7 +258,7 @@ enum PerfTest {
     }
 }
 
-/// Offscreen renderer for development: `Arcforge --snapshot out.png`.
+/// Offscreen renderer for development: `Orkestr --snapshot out.png`.
 ///
 /// Renders the real view tree against the real data with `ImageRenderer`, so
 /// the UI can be reviewed from a terminal without a visible window.
@@ -290,7 +290,7 @@ struct SnapshotRequest {
 @MainActor
 enum Snapshot {
     static func run(_ request: SnapshotRequest) {
-        let store = ArcforgeStore()
+        let store = OrkestrStore()
         let chromeHeight: CGFloat = 48 + 26 + 2
         let panels: CGFloat = 262 + 430 + 2
         store.viewport.size = CGSize(
@@ -301,7 +301,7 @@ enum Snapshot {
         poll(store: store, request: request, deadline: Date().addingTimeInterval(request.waitSeconds))
     }
 
-    private static func poll(store: ArcforgeStore, request: SnapshotRequest, deadline: Date) {
+    private static func poll(store: OrkestrStore, request: SnapshotRequest, deadline: Date) {
         let settled = !store.isIndexing && !store.isLoadingGit && !store.graph.nodes.isEmpty
         guard settled || Date() >= deadline else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
@@ -338,11 +338,11 @@ enum Snapshot {
         }
     }
 
-    private static func render(store: ArcforgeStore, request: SnapshotRequest) {
+    private static func render(store: OrkestrStore, request: SnapshotRequest) {
         let view = RootView(store: store)
             .frame(width: request.size.width, height: request.size.height)
             .environment(\.colorScheme, .dark)
-            .environment(\.arcforgeSnapshotMode, true)
+            .environment(\.orkestrSnapshotMode, true)
 
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2

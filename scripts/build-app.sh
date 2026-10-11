@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds Arcforge.app. No Xcode required — SwiftPM compiles the binary and the
+# Builds Orkestr.app. No Xcode required — SwiftPM compiles the binary and the
 # bundle is assembled here, then signed.
 #
 # Signing: set MACOS_SIGN_IDENTITY to a "Developer ID Application: ..." identity
@@ -9,7 +9,7 @@ set -euo pipefail
 
 CONFIG="${CONFIG:-release}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/dist/Arcforge.app"
+APP="$ROOT/dist/Orkestr.app"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 
 cd "$ROOT"
@@ -22,22 +22,22 @@ if [ "${UNIVERSAL:-1}" = "1" ]; then
   echo "==> swift build -c $CONFIG (arm64 + x86_64)"
   swift build -c "$CONFIG" --triple arm64-apple-macosx14.0
   swift build -c "$CONFIG" --triple x86_64-apple-macosx14.0
-  BIN="$ROOT/.build/Arcforge-universal"
+  BIN="$ROOT/.build/Orkestr-universal"
   lipo -create \
-    "$ROOT/.build/arm64-apple-macosx/$CONFIG/Arcforge" \
-    "$ROOT/.build/x86_64-apple-macosx/$CONFIG/Arcforge" \
+    "$ROOT/.build/arm64-apple-macosx/$CONFIG/Orkestr" \
+    "$ROOT/.build/x86_64-apple-macosx/$CONFIG/Orkestr" \
     -output "$BIN"
   lipo -archs "$BIN"
 else
   echo "==> swift build -c $CONFIG (native only)"
   swift build -c "$CONFIG"
-  BIN="$(swift build -c "$CONFIG" --show-bin-path)/Arcforge"
+  BIN="$(swift build -c "$CONFIG" --show-bin-path)/Orkestr"
 fi
 
 echo "==> assembling $APP ($VERSION)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/Arcforge"
+cp "$BIN" "$APP/Contents/MacOS/Orkestr"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 

@@ -2,40 +2,40 @@ import AppKit
 import SwiftUI
 
 @main
-struct ArcforgeApp: App {
+struct OrkestrApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var store = ArcforgeStore()
+    @State private var store = OrkestrStore()
 
     var body: some Scene {
-        WindowGroup("Arcforge") {
+        WindowGroup("Orkestr") {
             RootView(store: store)
                 .frame(minWidth: 1040, minHeight: 640)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1560, height: 960)
-        .commands { ArcforgeCommands(store: store) }
+        .commands { OrkestrCommands(store: store) }
     }
 }
 
-struct ArcforgeCommands: Commands {
-    var store: ArcforgeStore
+struct OrkestrCommands: Commands {
+    var store: OrkestrStore
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Workspace…") {
-                NotificationCenter.default.post(name: .arcforgeNewWorkspace, object: nil)
+                NotificationCenter.default.post(name: .orkestrNewWorkspace, object: nil)
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Open Orchestrator Terminal") {
-                NotificationCenter.default.post(name: .arcforgeOpenOrchestrator, object: nil)
+                NotificationCenter.default.post(name: .orkestrOpenOrchestrator, object: nil)
             }
             .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("Open Shell") {
-                NotificationCenter.default.post(name: .arcforgeOpenShell, object: nil)
+                NotificationCenter.default.post(name: .orkestrOpenShell, object: nil)
             }
             .keyboardShortcut("t", modifiers: .command)
             Button("Add Repositories…") {
-                NotificationCenter.default.post(name: .arcforgeAddRepos, object: nil)
+                NotificationCenter.default.post(name: .orkestrAddRepos, object: nil)
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
         }
@@ -56,11 +56,11 @@ struct ArcforgeCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             Divider()
             Button("Toggle Sidebar") {
-                NotificationCenter.default.post(name: .arcforgeToggleSidebar, object: nil)
+                NotificationCenter.default.post(name: .orkestrToggleSidebar, object: nil)
             }
             .keyboardShortcut("s", modifiers: [.command, .option])
             Button("Toggle Inspector") {
-                NotificationCenter.default.post(name: .arcforgeToggleInspector, object: nil)
+                NotificationCenter.default.post(name: .orkestrToggleInspector, object: nil)
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
         }
@@ -72,7 +72,7 @@ struct ArcforgeCommands: Commands {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             Divider()
             Button("Find…") {
-                NotificationCenter.default.post(name: .arcforgeFocusSearch, object: nil)
+                NotificationCenter.default.post(name: .orkestrFocusSearch, object: nil)
             }
             .keyboardShortcut("f", modifiers: .command)
             Button("Focus Search Matches") { store.focusMatches() }

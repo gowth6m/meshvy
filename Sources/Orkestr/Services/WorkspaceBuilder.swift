@@ -177,7 +177,7 @@ struct WorkspaceBuilder {
 
     /// Clones a remote into `~/.forge/repos` and returns it ready to add.
     func clone(_ reference: String) -> CloneResult {
-        let directory = Workspace.arcforgeHome + "/repos"
+        let directory = Workspace.orkestrHome + "/repos"
         let url = Self.normalizeRemote(reference)
         let destination = directory + "/" + Self.repoName(from: url)
 

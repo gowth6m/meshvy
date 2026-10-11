@@ -9,7 +9,7 @@ import SwiftUI
 /// works from. A fresh install has no workspaces, so the board starts empty.
 @MainActor
 @Observable
-final class ArcforgeStore {
+final class OrkestrStore {
     // MARK: Workspaces
     private(set) var workspaces: [Workspace] = []
     private(set) var activeWorkspaceID: UUID?

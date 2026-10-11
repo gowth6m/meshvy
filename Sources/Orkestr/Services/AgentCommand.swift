@@ -2,7 +2,7 @@ import Foundation
 
 /// Builds the `claude` invocation a terminal node runs.
 ///
-/// Arcforge does not host the agent. It starts the real CLI inside a PTY with a
+/// Orkestr does not host the agent. It starts the real CLI inside a PTY with a
 /// pre-assigned session id, so the agent registers itself in
 /// `~/.claude/sessions` and the board can match its transcript to the terminal
 /// it is running in.
@@ -69,7 +69,7 @@ enum AgentCommand {
     static func orchestratorBrief(workspace: Workspace) -> String {
         var lines: [String] = []
         lines.append("""
-        You are the orchestrator for the Arcforge workspace `\(workspace.name)`.
+        You are the orchestrator for the Orkestr workspace `\(workspace.name)`.
 
         Your working directory is the workspace root. Every repository in this \
         workspace is checked out as a subdirectory of it, all on the branch \
@@ -97,7 +97,7 @@ enum AgentCommand {
     static func repoBrief(workspace: Workspace, repo: WorkspaceRepo) -> String {
         let siblings = workspace.readyRepos.filter { $0.id != repo.id }.map(\.name)
         var text = """
-        You are working in `\(repo.name)`, one repository of the Arcforge workspace \
+        You are working in `\(repo.name)`, one repository of the Orkestr workspace \
         `\(workspace.name)`, checked out on branch `\(workspace.branch)`.
         """
         if !siblings.isEmpty {

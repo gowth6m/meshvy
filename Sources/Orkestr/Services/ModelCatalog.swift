@@ -28,7 +28,7 @@ enum ModelSource: Equatable {
     }
 }
 
-/// Supplies the models Arcforge can launch an agent with.
+/// Supplies the models Orkestr can launch an agent with.
 ///
 /// The built-in list is always available and is what the app ships with. When an
 /// Anthropic API key is present — from `ANTHROPIC_API_KEY` or saved in the
@@ -156,9 +156,9 @@ final class ModelCatalog {
     }
 }
 
-/// Minimal keychain wrapper for the one secret Arcforge stores.
+/// Minimal keychain wrapper for the one secret Orkestr stores.
 enum Keychain {
-    private static let service = "dev.gowtham.arcforge"
+    private static let service = "dev.gowtham.orkestr"
 
     static func set(_ value: String, account: String) {
         delete(account: account)

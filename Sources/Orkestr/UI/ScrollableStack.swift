@@ -6,7 +6,7 @@ import SwiftUI
 /// on one comes out blank in a `--snapshot`. Swapping the container keeps those
 /// renders faithful without changing anything about the shipped behaviour.
 struct ScrollableStack<Content: View>: View {
-    @Environment(\.arcforgeSnapshotMode) private var isSnapshot
+    @Environment(\.orkestrSnapshotMode) private var isSnapshot
     var alignment: HorizontalAlignment = .center
     @ViewBuilder var content: Content
 
@@ -27,13 +27,13 @@ struct ScrollableStack<Content: View>: View {
     }
 }
 
-private struct ArcforgeSnapshotModeKey: EnvironmentKey {
+private struct OrkestrSnapshotModeKey: EnvironmentKey {
     static let defaultValue = false
 }
 
 extension EnvironmentValues {
-    var arcforgeSnapshotMode: Bool {
-        get { self[ArcforgeSnapshotModeKey.self] }
-        set { self[ArcforgeSnapshotModeKey.self] = newValue }
+    var orkestrSnapshotMode: Bool {
+        get { self[OrkestrSnapshotModeKey.self] }
+        set { self[OrkestrSnapshotModeKey.self] = newValue }
     }
 }

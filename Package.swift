@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "Arcforge",
+    name: "Orkestr",
     platforms: [.macOS(.v14)],
     dependencies: [
         // PTY-backed terminal emulator for the canvas terminal nodes.
@@ -10,9 +10,9 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "Arcforge",
+            name: "Orkestr",
             dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
-            path: "Sources/Arcforge",
+            path: "Sources/Orkestr",
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

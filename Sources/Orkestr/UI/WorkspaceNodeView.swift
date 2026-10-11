@@ -12,7 +12,7 @@ import SwiftUI
 /// shown in the header is a subdirectory of it.
 struct WorkspaceNodeView: View {
     var workspace: Workspace
-    @Bindable var store: ArcforgeStore
+    @Bindable var store: OrkestrStore
     var zoom: Zoom
     var isSelected: Bool
     var onResize: (CGSize) -> Void

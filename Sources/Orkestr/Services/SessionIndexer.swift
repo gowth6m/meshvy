@@ -348,7 +348,7 @@ enum PromptCleaner {
         ("<system-reminder>", "</system-reminder>"),
         ("<command-name>", "</command-name>"),
         ("<local-command-stdout>", "</local-command-stdout>"),
-        ("<arcforge-brief>", "</arcforge-brief>")
+        ("<orkestr-brief>", "</orkestr-brief>")
     ]
 
     static func clean(_ raw: String) -> String {

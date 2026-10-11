@@ -8,7 +8,7 @@ import SwiftUI
 /// made the panel feel slow to open.
 struct TranscriptView: View {
     var transcript: Transcript
-    @Environment(\.arcforgeSnapshotMode) private var isSnapshot
+    @Environment(\.orkestrSnapshotMode) private var isSnapshot
     @State private var expanded: Set<String> = []
     @State private var hidden: Set<EventFilter> = [.tools]
     @State private var visible: [TranscriptEvent] = []

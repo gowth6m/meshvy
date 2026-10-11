@@ -2,8 +2,8 @@ import Combine
 import SwiftUI
 
 struct RootView: View {
-    @Bindable var store: ArcforgeStore
-    @State private var sheet: ArcforgeSheet?
+    @Bindable var store: OrkestrStore
+    @State private var sheet: OrkestrSheet?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,21 +50,21 @@ struct RootView: View {
             }
         }
         .onAppear { store.bootstrap() }
-        .onReceive(of: .arcforgeToggleSidebar) { store.sidebarVisible.toggle() }
-        .onReceive(of: .arcforgeToggleInspector) { store.inspectorVisible.toggle() }
-        .onReceive(of: .arcforgeFocusSearch) { store.sidebarVisible = true }
-        .onReceive(of: .arcforgeNewWorkspace) { sheet = .newWorkspace }
-        .onReceive(of: .arcforgeAddRepos) { if store.hasWorkspace { sheet = .addRepos } }
-        .onReceive(of: .arcforgeOpenOrchestrator) { if store.hasWorkspace { store.startOrchestrator() } }
-        .onReceive(of: .arcforgeOpenShell) { if store.hasWorkspace { store.openTerminal(role: .shell) } }
+        .onReceive(of: .orkestrToggleSidebar) { store.sidebarVisible.toggle() }
+        .onReceive(of: .orkestrToggleInspector) { store.inspectorVisible.toggle() }
+        .onReceive(of: .orkestrFocusSearch) { store.sidebarVisible = true }
+        .onReceive(of: .orkestrNewWorkspace) { sheet = .newWorkspace }
+        .onReceive(of: .orkestrAddRepos) { if store.hasWorkspace { sheet = .addRepos } }
+        .onReceive(of: .orkestrOpenOrchestrator) { if store.hasWorkspace { store.startOrchestrator() } }
+        .onReceive(of: .orkestrOpenShell) { if store.hasWorkspace { store.openTerminal(role: .shell) } }
     }
 }
 
 // MARK: - Empty state
 
 struct EmptyStateView: View {
-    @Bindable var store: ArcforgeStore
-    @Binding var sheet: ArcforgeSheet?
+    @Bindable var store: OrkestrStore
+    @Binding var sheet: OrkestrSheet?
 
     var body: some View {
         ZStack {
@@ -120,8 +120,8 @@ struct EmptyStateView: View {
 // MARK: - Top bar
 
 private struct TopBar: View {
-    @Bindable var store: ArcforgeStore
-    @Binding var sheet: ArcforgeSheet?
+    @Bindable var store: OrkestrStore
+    @Binding var sheet: OrkestrSheet?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -325,7 +325,7 @@ struct SegmentedControl<Option: Hashable>: View {
 // MARK: - Status bar
 
 private struct StatusBar: View {
-    @Bindable var store: ArcforgeStore
+    @Bindable var store: OrkestrStore
 
     var body: some View {
         HStack(spacing: 10) {
@@ -353,7 +353,7 @@ private struct StatusBar: View {
 // MARK: - Banner
 
 private struct BannerView: View {
-    @Bindable var store: ArcforgeStore
+    @Bindable var store: OrkestrStore
 
     var body: some View {
         if let banner = store.banner {
@@ -393,7 +393,7 @@ private struct BannerView: View {
         }
     }
 
-    private func icon(_ kind: ArcforgeStore.Banner.Kind) -> String {
+    private func icon(_ kind: OrkestrStore.Banner.Kind) -> String {
         switch kind {
         case .info: return "info.circle.fill"
         case .success: return "checkmark.circle.fill"
@@ -401,7 +401,7 @@ private struct BannerView: View {
         }
     }
 
-    private func tint(_ kind: ArcforgeStore.Banner.Kind) -> Color {
+    private func tint(_ kind: OrkestrStore.Banner.Kind) -> Color {
         switch kind {
         case .info: return Theme.sidechain
         case .success: return Theme.clean
@@ -416,13 +416,13 @@ private struct BannerView: View {
 // commands are relayed as notifications rather than threaded through bindings.
 
 extension Notification.Name {
-    static let arcforgeToggleSidebar = Notification.Name("arcforge.toggleSidebar")
-    static let arcforgeToggleInspector = Notification.Name("arcforge.toggleInspector")
-    static let arcforgeFocusSearch = Notification.Name("arcforge.focusSearch")
-    static let arcforgeNewWorkspace = Notification.Name("arcforge.newWorkspace")
-    static let arcforgeAddRepos = Notification.Name("arcforge.addRepos")
-    static let arcforgeOpenOrchestrator = Notification.Name("arcforge.openOrchestrator")
-    static let arcforgeOpenShell = Notification.Name("arcforge.openShell")
+    static let orkestrToggleSidebar = Notification.Name("orkestr.toggleSidebar")
+    static let orkestrToggleInspector = Notification.Name("orkestr.toggleInspector")
+    static let orkestrFocusSearch = Notification.Name("orkestr.focusSearch")
+    static let orkestrNewWorkspace = Notification.Name("orkestr.newWorkspace")
+    static let orkestrAddRepos = Notification.Name("orkestr.addRepos")
+    static let orkestrOpenOrchestrator = Notification.Name("orkestr.openOrchestrator")
+    static let orkestrOpenShell = Notification.Name("orkestr.openShell")
 }
 
 extension View {

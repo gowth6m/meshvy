@@ -1,5 +1,5 @@
 #!/usr/bin/env swift
-// Draws Arcforge's app icon and writes a PNG at the requested size.
+// Draws Orkestr's app icon and writes a PNG at the requested size.
 //
 // Run through scripts/make-icon.sh, which renders every size macOS wants and
 // packs them with iconutil. Kept as source rather than a checked-in binary so

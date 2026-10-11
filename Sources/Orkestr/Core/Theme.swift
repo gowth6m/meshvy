@@ -24,7 +24,7 @@ enum Theme {
     static let textTertiary = Color(hex: 0x646B7B)
 
     // MARK: Accents
-    /// Arcforge amber — selection, primary actions, and work in flight.
+    /// Orkestr amber — selection, primary actions, and work in flight.
     static let accent = Color(hex: 0xF2A33C)
     static let busy = Color(hex: 0xF2A33C)
     static let idle = Color(hex: 0x45C0A8)

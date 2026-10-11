@@ -12,7 +12,7 @@ import SwiftUI
 /// in `makeNSView` would kill and restart the shell each time.
 struct TerminalNodeView: View {
     var node: TerminalNode
-    @Bindable var store: ArcforgeStore
+    @Bindable var store: OrkestrStore
     var zoom: Zoom
     var isSelected: Bool
     var isDimmed: Bool

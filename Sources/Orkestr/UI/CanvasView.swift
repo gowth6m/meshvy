@@ -4,8 +4,8 @@ import SwiftUI
 /// The board. Pan by dragging empty space, zoom with the scroll wheel or a
 /// pinch, drag a card to pin it where you want it.
 struct CanvasView: View {
-    @Bindable var store: ArcforgeStore
-    @Binding var sheet: ArcforgeSheet?
+    @Bindable var store: OrkestrStore
+    @Binding var sheet: OrkestrSheet?
 
     @State private var panOrigin: CGPoint?
     @State private var dragOrigin: CGPoint?

@@ -12,14 +12,18 @@ struct FileStore<Value: Codable> {
     static func supportDirectory() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        let directory = base.appendingPathComponent("Arcforge", isDirectory: true)
+        let directory = base.appendingPathComponent("Orkestr", isDirectory: true)
 
-        // The app used to be called Forge; carry its state over rather than
-        // silently starting empty for anyone who used it under the old name.
-        let legacy = base.appendingPathComponent("Forge", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: directory.path),
-           FileManager.default.fileExists(atPath: legacy.path) {
-            try? FileManager.default.moveItem(at: legacy, to: directory)
+        // The app has been called Forge and Arcforge; carry state over rather
+        // than silently starting empty for anyone who used an earlier name.
+        if !FileManager.default.fileExists(atPath: directory.path) {
+            for former in ["Arcforge", "Forge"] {
+                let legacy = base.appendingPathComponent(former, isDirectory: true)
+                if FileManager.default.fileExists(atPath: legacy.path) {
+                    try? FileManager.default.moveItem(at: legacy, to: directory)
+                    break
+                }
+            }
         }
 
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
