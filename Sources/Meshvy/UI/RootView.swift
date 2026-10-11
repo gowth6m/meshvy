@@ -312,7 +312,7 @@ private struct TopBar: View {
     }
 
     private var workspaceMenu: some View {
-        Menu {
+        SnapshotSafeMenu {
             ForEach(store.workspaces) { workspace in
                 Button {
                     store.activate(workspace.id)
@@ -356,9 +356,6 @@ private struct TopBar: View {
             .padding(.vertical, 4)
             .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.fill))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
     }
 
     private func counts(_ workspace: Workspace) -> String {

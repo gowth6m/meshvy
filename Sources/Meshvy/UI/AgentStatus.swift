@@ -125,7 +125,7 @@ struct PermissionModePicker: View {
     @Bindable var store: MeshvyStore
 
     var body: some View {
-        Menu {
+        SnapshotSafeMenu {
             ForEach(PermissionMode.allCases) { mode in
                 Button {
                     store.permissionMode = mode
@@ -148,9 +148,6 @@ struct PermissionModePicker: View {
             .padding(.vertical, 4)
             .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.fill))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
         .help("Permission mode new agents start in")
     }
 }

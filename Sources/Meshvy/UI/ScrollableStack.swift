@@ -37,3 +37,48 @@ extension EnvironmentValues {
         set { self[MeshvySnapshotModeKey.self] = newValue }
     }
 }
+
+/// A text field that becomes plain text when rendered offscreen.
+///
+/// `ImageRenderer` cannot draw AppKit-backed controls — a `TextField` comes out
+/// as a solid yellow block — so a `--snapshot` would show broken chrome. The
+/// live app always gets the real control.
+struct SnapshotSafeField: View {
+    @Environment(\.meshvySnapshotMode) private var isSnapshot
+    var placeholder: String
+    @Binding var text: String
+
+    var body: some View {
+        if isSnapshot {
+            Text(text.isEmpty ? placeholder : text)
+                .font(Theme.ui(12))
+                .foregroundStyle(text.isEmpty ? Theme.textTertiary : Theme.textPrimary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(Theme.ui(12))
+                .foregroundStyle(Theme.textPrimary)
+        }
+    }
+}
+
+/// A menu that becomes its own label when rendered offscreen, for the same
+/// reason as `SnapshotSafeField`.
+struct SnapshotSafeMenu<Label: View, Content: View>: View {
+    @Environment(\.meshvySnapshotMode) private var isSnapshot
+    @ViewBuilder var content: Content
+    @ViewBuilder var label: Label
+
+    var body: some View {
+        if isSnapshot {
+            label
+        } else {
+            Menu { content } label: { label }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+        }
+    }
+}

@@ -48,11 +48,11 @@ struct Sidebar: View {
             Image(systemName: "magnifyingglass")
                 .font(Theme.ui(11, .medium))
                 .foregroundStyle(Theme.textTertiary)
-            TextField("Search sessions, paths, branches", text: $store.searchQuery)
-                .textFieldStyle(.plain)
-                .font(Theme.ui(12))
-                .foregroundStyle(Theme.textPrimary)
-                .onSubmit { store.focusMatches() }
+            SnapshotSafeField(
+                placeholder: "Search sessions, paths, branches",
+                text: $store.searchQuery
+            )
+            .onSubmit { store.focusMatches() }
             if store.isSearching {
                 Text("\(store.matchingNodes.count)")
                     .font(Theme.mono(10, .semibold))

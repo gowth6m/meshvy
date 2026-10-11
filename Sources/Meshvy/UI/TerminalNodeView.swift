@@ -11,6 +11,7 @@ import SwiftUI
 /// here — SwiftUI rebuilds this view on every pan and zoom, and making the view
 /// in `makeNSView` would kill and restart the shell each time.
 struct TerminalNodeView: View {
+    @Environment(\.meshvySnapshotMode) private var isSnapshot
     var node: TerminalNode
     @Bindable var store: MeshvyStore
     var zoom: Zoom
@@ -121,7 +122,9 @@ struct TerminalNodeView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let session {
+        if let session, isSnapshot {
+            TerminalSnapshotText(session: session, zoom: zoom)
+        } else if let session {
             // Below roughly half scale the glyphs are unreadable anyway, and the
             // emulator does not scale — show the folder instead and keep the
             // process running untouched in the registry.

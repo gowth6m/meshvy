@@ -11,6 +11,7 @@ import SwiftUI
 /// orchestrator's working directory *is* this workspace, and every repository
 /// shown in the header is a subdirectory of it.
 struct WorkspaceNodeView: View {
+    @Environment(\.meshvySnapshotMode) private var isSnapshot
     var workspace: Workspace
     @Bindable var store: MeshvyStore
     var zoom: Zoom
@@ -141,7 +142,9 @@ struct WorkspaceNodeView: View {
 
     @ViewBuilder
     private func body(for session: TerminalSession?) -> some View {
-        if let session, zoom.scale > 0.45 {
+        if let session, isSnapshot {
+            TerminalSnapshotText(session: session, zoom: zoom)
+        } else if let session, zoom.scale > 0.45 {
             TerminalSurface(session: session, scale: zoom.scale)
         } else if session != nil {
             zoomedOutPlaceholder
@@ -211,6 +214,39 @@ struct WorkspaceNodeView: View {
                     .onEnded { _ in store.commitTerminalMove() }
             )
             .opacity(isRunning ? 1 : 0)
+    }
+}
+
+/// Draws a terminal's current screen as plain text.
+///
+/// `ImageRenderer` cannot draw an `NSViewRepresentable`, so a terminal is blank
+/// in every `--snapshot`. Reading the emulator's own screen buffer and setting
+/// it in a monospaced font keeps documentation shots honest — it is the real
+/// output of the real session, just drawn by SwiftUI rather than SwiftTerm.
+struct TerminalSnapshotText: View {
+    var session: TerminalSession
+    var zoom: Zoom
+
+    var body: some View {
+        Text(trimmed)
+            .font(.system(size: max(5, 7.4 * zoom.scale), design: .monospaced))
+            .foregroundStyle(Theme.textPrimary)
+            .lineSpacing(0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(zoom.s(6))
+            .background(Theme.canvasDeep)
+            .clipped()
+    }
+
+    /// The emulator pads every row to the full width; the trailing blanks waste
+    /// the card and push the real output off the bottom.
+    private var trimmed: String {
+        session.screenText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
+            .drop { $0.isEmpty }
+            .reversed().drop { $0.isEmpty }.reversed()
+            .joined(separator: "\n")
     }
 }
 

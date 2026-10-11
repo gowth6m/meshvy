@@ -604,6 +604,9 @@ struct SnapshotRequest {
     var waitSeconds: Double
     var zoom: Double?
     var zoomToFit: Bool
+    /// Start the orchestrator and give it this task before rendering, so a
+    /// documentation shot shows a terminal with real output in it.
+    var orchestratorTask: String?
     /// Overlays to open before rendering, so the panels that only exist on a
     /// keystroke can be captured too.
     var palette: Bool
@@ -626,6 +629,7 @@ struct SnapshotRequest {
         )
         waitSeconds = value("--wait").flatMap(Double.init) ?? 6
         zoom = value("--zoom").flatMap(Double.init)
+        orchestratorTask = value("--orchestrator")
         zoomToFit = zoom == nil && !arguments.contains("--no-fit")
         palette = arguments.contains("--palette")
         shortcuts = arguments.contains("--shortcuts")
@@ -635,8 +639,11 @@ struct SnapshotRequest {
 
 @MainActor
 enum Snapshot {
+    private static var pending: SnapshotRequest?
+
     static func run(_ request: SnapshotRequest) {
         let store = MeshvyStore.shared
+        Self.pending = request
         let chromeHeight: CGFloat = 48 + 26 + 2
         let panels: CGFloat = 262 + 430 + 2
         store.viewport.size = CGSize(
@@ -653,6 +660,14 @@ enum Snapshot {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 MainActor.assumeIsolated { poll(store: store, request: request, deadline: deadline) }
             }
+            return
+        }
+
+        // Bring an orchestrator up first when one was asked for; its terminal
+        // is the centre of a documentation shot.
+        if let task = request.orchestratorTask, !store.isOrchestratorRunning {
+            store.startOrchestrator()
+            settleOrchestrator(store: store, task: task, request: request, attempts: 120)
             return
         }
 
@@ -706,6 +721,61 @@ enum Snapshot {
             MainActor.assumeIsolated {
                 waitForAgent(store: store, request: request, attempts: attempts - 1)
             }
+        }
+    }
+
+    /// Clears Claude Code's first-run prompts, sends the task, and waits for a
+    /// reply to land on screen before handing back to the renderer.
+    private static func settleOrchestrator(
+        store: MeshvyStore, task: String, request: SnapshotRequest, attempts: Int
+    ) {
+        guard let node = store.activeWorkspace?.orchestrator,
+              let session = store.terminals.session(for: node.id) else {
+            finish(store: store, request: request)
+            return
+        }
+        let screen = session.screenText
+
+        if screen.contains("I trust this folder") {
+            session.send("\r")
+        } else if screen.contains("Continue without these settings") {
+            session.send("3\r")
+        } else if !Self.sentTask,
+                  screen.contains("shift+tab to cycle")
+                    || screen.contains("? for shortcuts")
+                    || screen.contains("for agents") {
+            Self.sentTask = true
+            session.send(task)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                MainActor.assumeIsolated { session.send("\r") }
+            }
+        } else if Self.sentTask, attempts < 110, !screen.contains("esc to interrupt") {
+            // It has answered; let the last frame paint, then shoot.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                MainActor.assumeIsolated { finish(store: store, request: request) }
+            }
+            return
+        }
+
+        guard attempts > 0 else { finish(store: store, request: request); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            MainActor.assumeIsolated {
+                settleOrchestrator(store: store, task: task, request: request, attempts: attempts - 1)
+            }
+        }
+    }
+
+    private static var sentTask = false
+
+    private static func finish(store: MeshvyStore, request: SnapshotRequest) {
+        if let zoom = request.zoom {
+            store.viewport.scale = CGFloat(zoom)
+            if let id = store.activeWorkspace?.id { store.viewport.center = store.graph.node(.workspace(id))?.frame.center ?? .zero }
+        } else if request.zoomToFit {
+            store.fit()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            MainActor.assumeIsolated { render(store: store, request: request) }
         }
     }
 

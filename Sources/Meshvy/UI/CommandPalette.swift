@@ -39,6 +39,7 @@ struct PaletteItem: Identifiable {
 /// panning, and the output search is the part that has no other home — the
 /// canvas can show you where a node is but not what is on its screen.
 struct CommandPalette: View {
+    @Environment(\.meshvySnapshotMode) private var isSnapshot
     @Bindable var store: MeshvyStore
     @Binding var sheet: MeshvySheet?
 
@@ -111,6 +112,14 @@ struct CommandPalette: View {
             Image(systemName: "magnifyingglass")
                 .font(Theme.ui(13, .medium))
                 .foregroundStyle(Theme.textTertiary)
+            // A snapshot cannot draw an AppKit text field; the live app always
+            // gets the real one.
+            if isSnapshot {
+                Text(query.isEmpty ? "Start an agent, go to a node, search output…" : query)
+                    .font(Theme.ui(14))
+                    .foregroundStyle(query.isEmpty ? Theme.textTertiary : Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
             TextField("Start an agent, go to a node, search output…", text: $query)
                 .textFieldStyle(.plain)
                 .font(Theme.ui(14))
@@ -120,6 +129,7 @@ struct CommandPalette: View {
                 .onKeyPress(.downArrow) { move(1) }
                 .onKeyPress(.upArrow) { move(-1) }
                 .onKeyPress(.escape) { close(); return .handled }
+            }
             Text("esc")
                 .font(Theme.mono(9.5, .medium))
                 .foregroundStyle(Theme.textTertiary)

@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+- Documentation rewritten around what the app actually does now, with fresh
+  screenshots of the board, the changes panel, the command palette and the
+  empty state.
+- Snapshots render honestly. `ImageRenderer` cannot draw an embedded terminal
+  or an AppKit control, so a documentation shot used to show a blank card and
+  yellow blocks where the search field and menus are. Terminals now draw their
+  real screen buffer as text, and each control has a static twin, both behind
+  the `meshvySnapshotMode` flag — the live app is untouched.
+- `--snapshot --orchestrator "<task>"` starts an agent, answers Claude Code's
+  first-run prompts and waits for a reply before rendering, so the hero shot
+  shows a real exchange rather than an empty terminal.
+
 ## [0.8.0] - 2026-10-11
 
 - **In-app updates.** Meshvy checks GitHub Releases on launch, shows a pill in
