@@ -14,7 +14,7 @@ struct SubAgentNodeView: View {
     private var tint: SwiftUI.Color {
         switch agent.state {
         case .running: return Theme.busy
-        case .finished(let ok): return ok ? Theme.clean : Theme.dirty
+        case .finished(let ok): return ok ? Theme.clean : Theme.danger
         }
     }
 

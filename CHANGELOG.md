@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.8.0] - 2026-10-11
+
+Delegated agents are real terminals now.
+
+- **The orchestrator spawns actual Claude Code sessions.** Claude's Agent tool
+  runs sub-agents inside the parent process — they have no pid and no pty, so
+  there was nothing a terminal node could attach to and they could only be
+  drawn as cards. The orchestrator is now told to delegate with a `meshvy`
+  helper placed on its PATH instead; each agent it starts is a real session
+  with its own terminal on the canvas, linked back to the workspace node.
+- `meshvy spawn | wait | send | list` — including `send`, which types one
+  agent's message into another's terminal.
+- The helper is pre-approved (`Bash(meshvy:*)`), because `acceptEdits` does not
+  cover Bash and an orchestrator that stops to ask permission for every spawn
+  never gets going.
+- The agent bridge starts with the workspace rather than with the orchestrator,
+  so any terminal can delegate.
+- Agent-tool sub-agents still appear as cards if one is used anyway, so no work
+  goes invisible.
+- One store per process. The scene and the headless harnesses were each making
+  their own, which meant two sets of timers, two filesystem watchers, and two
+  readers racing for the same bridge requests.
+
+## [Unreleased]
+
+The board is **Night Owl**.
+
+- `Theme` now holds the thirteen Night Owl values and derives everything else
+  from them: the surface ramp (`#001122` chrome → `#011627` canvas → three card
+  fills blended toward `#1D3B53`), the text ramp down to `#637777`, hairlines
+  and hover fills, which are tinted with the palette's panel colour instead of
+  white. No view hardcodes a colour any more.
+- Blue `#82AAFF` carries selection and primary actions. Because every Night Owl
+  accent is pastel, anything filled with it puts the background back on top
+  (`Theme.onAccent`) to stay readable.
+- Status: busy amber `#ECC48D`, idle teal, clean green, dirty orange, branches
+  purple, sidechains pink. Failures split out of "dirty" into their own red
+  `#FF6363` — a failed tool call, an unusable repository and a deleted line are
+  red; a checkout with uncommitted work stays orange.
+- Terminals are themed too: background, foreground, caret, selection and the
+  sixteen ANSI slots, so what an agent prints on the canvas is Night Owl as
+  well. Bright variants are lifted 22% toward the foreground.
+- Repository tints are drawn from the palette's seven accents rather than the
+  whole hue wheel, and system controls follow the accent instead of the user's
+  macOS one.
+- The mark keeps its shape and takes the palette's purple `#C792EA`; the
+  shipped icon assets are unchanged.
+
+The top bar is one row.
+
+- The window's hidden title bar no longer leaves a 32pt strip above the bar
+  with the traffic lights marooned in it: the bar runs to the top of the
+  window and the lights are nudged onto its centre line, so every control in
+  the chrome sits on one line. They are put back after the relayouts (resize,
+  key changes, full screen) that reset them.
+- The sidebar toggle moves left to sit just past the lights, and the inspector
+  toggle ends the bar, so the two panel toggles read as its ends. Zoom and
+  refresh group with the inspector toggle behind a divider, mirroring the
+  sidebar toggle's. In full screen, where there are no lights, the bar takes
+  their gutter back.
+- The toggle stays in place, dimmed, when there is no workspace open, so the
+  mark and workspace menu do not shift sideways when one opens.
+
 ## [0.7.0] - 2026-10-11
 
 Renamed to **Meshvy**, with the brand applied.

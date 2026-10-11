@@ -7,8 +7,8 @@ import SwiftUI
 /// exactly (viewBox 2 4 44 40).
 struct BrandMark: View {
     var size: CGFloat
-    var tint: SwiftUI.Color = Theme.brandCream
-    var accent: SwiftUI.Color = Theme.brandPurple
+    var tint: SwiftUI.Color = Theme.markTint
+    var accent: SwiftUI.Color = Theme.markAccent
 
     /// The SVG's viewBox, so the published coordinates can be used verbatim.
     private let box = CGRect(x: 2, y: 4, width: 44, height: 40)

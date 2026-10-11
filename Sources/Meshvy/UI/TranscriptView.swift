@@ -133,9 +133,9 @@ private struct EventRow: View {
         switch event.kind {
         case .userMessage: return Theme.accent
         case .assistantMessage: return Theme.textPrimary
-        case .thinking: return Theme.sidechain
+        case .thinking: return Theme.reasoning
         case .toolUse: return Theme.worktree
-        case .toolResult(let ok): return ok ? Theme.clean : Theme.dirty
+        case .toolResult(let ok): return ok ? Theme.clean : Theme.danger
         case .system, .attachment: return Theme.textTertiary
         }
     }

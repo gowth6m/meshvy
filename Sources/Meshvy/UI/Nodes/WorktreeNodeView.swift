@@ -95,7 +95,7 @@ struct WorktreeNodeView: View {
                     .padding(.vertical, zoom.s(1))
                     .background(
                         RoundedRectangle(cornerRadius: zoom.s(3))
-                            .fill(Color.white.opacity(0.07))
+                            .fill(Theme.fill)
                     )
                     .help("This directory no longer exists — its sessions are kept here")
             } else if worktree.isMain {
@@ -107,7 +107,7 @@ struct WorktreeNodeView: View {
                     .padding(.vertical, zoom.s(1))
                     .background(
                         RoundedRectangle(cornerRadius: zoom.s(3))
-                            .fill(Color.white.opacity(0.07))
+                            .fill(Theme.fill)
                     )
             }
             Spacer(minLength: 0)

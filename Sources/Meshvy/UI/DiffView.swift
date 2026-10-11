@@ -47,7 +47,7 @@ struct ChangesList: View {
                 if change.deletions > 0 {
                     Text("−\(change.deletions)")
                         .font(Theme.mono(9.5, .medium))
-                        .foregroundStyle(Theme.dirty)
+                        .foregroundStyle(Theme.danger)
                 }
             }
             .padding(.horizontal, 8)
@@ -64,7 +64,7 @@ struct ChangesList: View {
     private func tint(_ kind: FileChange.Kind) -> SwiftUI.Color {
         switch kind {
         case .added, .untracked: return Theme.clean
-        case .deleted: return Theme.dirty
+        case .deleted: return Theme.danger
         case .renamed: return Theme.branch
         case .modified: return Theme.accent
         }
@@ -142,7 +142,7 @@ struct DiffBody: View {
     private func foreground(_ kind: FileDiff.Line.Kind) -> SwiftUI.Color {
         switch kind {
         case .added: return Theme.clean
-        case .removed: return Theme.dirty
+        case .removed: return Theme.danger
         case .hunk: return Theme.branch
         case .meta: return Theme.textTertiary
         case .context: return Theme.textSecondary
@@ -152,8 +152,8 @@ struct DiffBody: View {
     private func background(_ kind: FileDiff.Line.Kind) -> SwiftUI.Color {
         switch kind {
         case .added: return Theme.clean.opacity(0.09)
-        case .removed: return Theme.dirty.opacity(0.09)
-        case .hunk: return SwiftUI.Color.white.opacity(0.045)
+        case .removed: return Theme.danger.opacity(0.09)
+        case .hunk: return Theme.fillSubtle
         default: return .clear
         }
     }

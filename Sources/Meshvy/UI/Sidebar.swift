@@ -191,7 +191,7 @@ struct Sidebar: View {
                 Image(systemName: repo.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
                     .font(Theme.ui(9))
                     .foregroundStyle(
-                        !repo.isReady ? Theme.dirty
+                        !repo.isReady ? Theme.danger
                             : (worktree?.isDirty == true ? Theme.dirty : Theme.worktree)
                     )
                     .frame(width: 12)
@@ -202,7 +202,7 @@ struct Sidebar: View {
                         .lineLimit(1)
                     Text(repo.failure ?? (worktree.map(describe) ?? "checking…"))
                         .font(Theme.mono(9.5))
-                        .foregroundStyle(repo.isReady ? Theme.textTertiary : Theme.dirty)
+                        .foregroundStyle(repo.isReady ? Theme.textTertiary : Theme.danger)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -281,7 +281,7 @@ private struct SidebarRow<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isSelected ? Theme.accent.opacity(0.16) : (hovering ? SwiftUI.Color.white.opacity(0.05) : .clear))
+                        .fill(isSelected ? Theme.accent.opacity(0.16) : (hovering ? Theme.fill : .clear))
                 )
                 .contentShape(Rectangle())
         }

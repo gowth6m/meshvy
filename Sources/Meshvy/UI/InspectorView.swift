@@ -208,12 +208,12 @@ struct InspectorView: View {
                                 HStack(spacing: 7) {
                                     Image(systemName: repo.isReady ? "square.on.square" : "exclamationmark.triangle.fill")
                                         .font(Theme.ui(9))
-                                        .foregroundStyle(repo.isReady ? Theme.worktree : Theme.dirty)
+                                        .foregroundStyle(repo.isReady ? Theme.worktree : Theme.danger)
                                     Text(repo.name).font(Theme.ui(11.5)).foregroundStyle(Theme.textPrimary)
                                     Spacer(minLength: 0)
                                     Text(repo.failure ?? "clean")
                                         .font(Theme.mono(9.5))
-                                        .foregroundStyle(repo.isReady ? Theme.textTertiary : Theme.dirty)
+                                        .foregroundStyle(repo.isReady ? Theme.textTertiary : Theme.danger)
                                         .lineLimit(1)
                                 }
                                 .padding(.horizontal, 8)
@@ -431,7 +431,7 @@ struct InspectorView: View {
                     .foregroundStyle(Theme.clean)
                 Text("−\(files.reduce(0) { $0 + $1.deletions })")
                     .font(Theme.mono(10.5, .medium))
-                    .foregroundStyle(Theme.dirty)
+                    .foregroundStyle(Theme.danger)
             }
             if let ahead = worktree.ahead, let behind = worktree.behind, ahead + behind > 0 {
                 Text("\(ahead)↑ \(behind)↓")

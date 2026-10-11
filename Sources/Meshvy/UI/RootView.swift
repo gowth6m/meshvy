@@ -40,8 +40,16 @@ struct RootView: View {
             Divider().overlay(Theme.hairline)
             StatusBar(store: store)
         }
+        // The title bar is hidden, but SwiftUI still insets the window's content
+        // below where it would have been — a 32pt strip above the top bar with
+        // the traffic lights marooned in it. Taking the inset back lets the bar
+        // run to the top of the window and hold the lights on its own centre line.
+        .ignoresSafeArea(.container, edges: .top)
         .background(Theme.canvas)
         .preferredColorScheme(.dark)
+        // System controls — text selection, spinners, menu checkmarks — follow
+        // the palette rather than the user's macOS accent colour.
+        .tint(Theme.accent)
         .overlay(alignment: .top) { BannerView(store: store) }
         .sheet(item: $sheet) { which in
             switch which {
@@ -122,17 +130,45 @@ struct EmptyStateView: View {
 private struct TopBar: View {
     @Bindable var store: MeshvyStore
     @Binding var sheet: MeshvySheet?
+    @State private var trafficLights = true
+
+    static let height: CGFloat = 48
+
+    /// The traffic lights run to x=69, so the first control sits just past them
+    /// and the panel toggles read as the two ends of the bar. In full screen
+    /// the lights go away and the gutter with them.
+    private var leadingInset: CGFloat { trafficLights ? 78 : 12 }
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Room for the traffic lights, since the title bar is hidden.
-            Spacer().frame(width: 68)
+        HStack(spacing: 0) {
+            leadingCluster
+            Spacer(minLength: 12)
+            if store.hasWorkspace { trailingCluster }
+        }
+        .padding(.leading, leadingInset)
+        .padding(.trailing, 12)
+        .frame(height: Self.height)
+        .background(Theme.chrome)
+        .background(
+            TrafficLightLayout(barHeight: Self.height) { trafficLights = $0 }
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+        )
+    }
 
-            if store.hasWorkspace {
-                ChromeButton(icon: "sidebar.leading", isActive: store.sidebarVisible) {
-                    store.sidebarVisible.toggle()
-                }
+    /// Panel toggle, identity, then the one action worth filling with accent.
+    private var leadingCluster: some View {
+        HStack(spacing: 7) {
+            ChromeButton(icon: "sidebar.leading", isActive: store.sidebarVisible) {
+                store.sidebarVisible.toggle()
             }
+            .help("Toggle sidebar (⌥⌘S)")
+            .disabled(!store.hasWorkspace)
+            // Dimmed rather than dropped, so the identity block does not shift
+            // sideways when a workspace opens.
+            .opacity(store.hasWorkspace ? 1 : 0.4)
+
+            barDivider
 
             BrandMark(size: 17)
                 .help("Meshvy")
@@ -140,8 +176,6 @@ private struct TopBar: View {
             workspaceMenu
 
             if store.hasWorkspace {
-                Divider().frame(height: 16).overlay(Theme.hairline).padding(.horizontal, 2)
-
                 AccentButton(
                     icon: store.isOrchestratorRunning ? "point.3.connected.trianglepath.dotted" : "play.fill",
                     label: store.isOrchestratorRunning ? "Go to orchestrator" : "Start Claude Code"
@@ -153,23 +187,33 @@ private struct TopBar: View {
                     }
                 }
                 .help("Claude Code runs on the workspace node, with every repo beneath it")
-                Spacer(minLength: 16)
-
-
-                zoomCluster
-
-                ChromeButton(icon: "arrow.clockwise") { store.refreshAll() }
-                    .help("Refresh everything (⌘R)")
-                ChromeButton(icon: "sidebar.trailing", isActive: store.inspectorVisible) {
-                    store.inspectorVisible.toggle()
-                }
-            } else {
-                Spacer(minLength: 12)
+                .padding(.leading, 3)
             }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 48)
-        .background(Theme.chrome)
+    }
+
+    /// View controls, then the inspector toggle mirroring the sidebar one.
+    private var trailingCluster: some View {
+        HStack(spacing: 7) {
+            zoomCluster
+
+            ChromeButton(icon: "arrow.clockwise") { store.refreshAll() }
+                .help("Refresh everything (⌘R)")
+
+            barDivider
+
+            ChromeButton(icon: "sidebar.trailing", isActive: store.inspectorVisible) {
+                store.inspectorVisible.toggle()
+            }
+            .help("Toggle inspector (⌥⌘I)")
+        }
+    }
+
+    private var barDivider: some View {
+        Rectangle()
+            .fill(Theme.hairlineStrong)
+            .frame(width: 1, height: 18)
+            .padding(.horizontal, 1)
     }
 
     private var zoomCluster: some View {
@@ -199,7 +243,7 @@ private struct TopBar: View {
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 2)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.fill))
     }
 
     private var workspaceMenu: some View {
@@ -245,7 +289,7 @@ private struct TopBar: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.fill))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -309,7 +353,7 @@ struct SegmentedControl<Option: Hashable>: View {
                     .padding(.vertical, 4)
                     .background(
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(selected ? Color.white.opacity(0.1) : .clear)
+                            .fill(selected ? Theme.fillStrong : .clear)
                     )
                     .contentShape(Rectangle())
                 }
@@ -317,7 +361,7 @@ struct SegmentedControl<Option: Hashable>: View {
             }
         }
         .padding(2)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.fill))
     }
 }
 
@@ -402,9 +446,9 @@ private struct BannerView: View {
 
     private func tint(_ kind: MeshvyStore.Banner.Kind) -> Color {
         switch kind {
-        case .info: return Theme.sidechain
+        case .info: return Theme.info
         case .success: return Theme.clean
-        case .failure: return Theme.dirty
+        case .failure: return Theme.danger
         }
     }
 }

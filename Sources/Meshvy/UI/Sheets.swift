@@ -52,6 +52,7 @@ struct SheetFrame<Content: View, Footer: View>: View {
         .frame(width: 540)
         .background(Theme.surfaceSunken)
         .preferredColorScheme(.dark)
+        .tint(Theme.accent)
     }
 }
 
@@ -105,12 +106,12 @@ struct PrimaryButton: View {
         Button(action: action) {
             Text(title)
                 .font(Theme.ui(12, .semibold))
-                .foregroundStyle(isEnabled ? Theme.brandCream : Theme.textTertiary)
+                .foregroundStyle(isEnabled ? Theme.onAccent : Theme.textTertiary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(isEnabled ? Theme.accent : Color.white.opacity(0.07))
+                        .fill(isEnabled ? Theme.accent : Theme.fill)
                 )
         }
         .buttonStyle(.plain)
@@ -130,7 +131,7 @@ struct SecondaryButton: View {
                 .foregroundStyle(Theme.textSecondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.fill))
         }
         .buttonStyle(.plain)
     }
@@ -166,7 +167,7 @@ struct RepoPicker: View {
             if !rejected.isEmpty {
                 Text("Not a git repository: " + rejected.joined(separator: ", "))
                     .font(Theme.ui(10.5))
-                    .foregroundStyle(Theme.dirty)
+                    .foregroundStyle(Theme.danger)
             }
 
             if picked.isEmpty && cloneTargets.isEmpty {

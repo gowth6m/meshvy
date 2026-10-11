@@ -92,7 +92,7 @@ struct WorkspaceNodeView: View {
         HStack(spacing: zoom.s(5)) {
             ForEach(workspace.repos) { repo in
                 let worktree = store.worktrees[repo.worktreePath]
-                let tint: SwiftUI.Color = !repo.isReady ? Theme.dirty
+                let tint: SwiftUI.Color = !repo.isReady ? Theme.danger
                     : (worktree?.isDirty == true ? Theme.dirty : Theme.worktree)
                 Button {
                     store.reveal(.worktree(repo.worktreePath))
@@ -107,7 +107,7 @@ struct WorkspaceNodeView: View {
                     .padding(.vertical, zoom.s(3.5))
                     .background(
                         RoundedRectangle(cornerRadius: zoom.s(5), style: .continuous)
-                            .fill(SwiftUI.Color.white.opacity(0.05))
+                            .fill(Theme.fill)
                     )
                     .contentShape(Rectangle())
                 }
@@ -168,7 +168,7 @@ struct WorkspaceNodeView: View {
                     Image(systemName: "play.fill").font(zoom.font(10, .bold))
                     Text("Start orchestrator").font(zoom.font(11.5, .semibold))
                 }
-                .foregroundStyle(Theme.brandCream)
+                .foregroundStyle(Theme.onAccent)
                 .padding(.horizontal, zoom.s(14))
                 .padding(.vertical, zoom.s(7))
                 .background(RoundedRectangle(cornerRadius: zoom.s(7), style: .continuous).fill(Theme.accent))
@@ -207,7 +207,7 @@ struct TerminalSurface: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = FlippedContainer()
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(srgbRed: 0.035, green: 0.039, blue: 0.051, alpha: 1).cgColor
+        container.layer?.backgroundColor = NSColor(hex: Theme.Hex.canvasDeep).cgColor
         container.addSubview(session.surface)
         return container
     }

@@ -75,7 +75,7 @@ struct StatusDot: View {
                 .fill(color)
                 .frame(width: zoom.s(7), height: zoom.s(7))
                 .overlay(
-                    Circle().stroke(Color.white.opacity(status == .ended ? 0 : 0.35), lineWidth: max(0.5, zoom.s(0.6)))
+                    Circle().stroke(Theme.textPrimary.opacity(status == .ended ? 0 : 0.3), lineWidth: max(0.5, zoom.s(0.6)))
                 )
         }
         .frame(width: zoom.s(16), height: zoom.s(16))
@@ -118,7 +118,7 @@ struct ChromeButton: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isActive ? Theme.accent.opacity(0.14) : (hovering ? Color.white.opacity(0.07) : .clear))
+                    .fill(isActive ? Theme.accent.opacity(0.14) : (hovering ? Theme.fill : .clear))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
