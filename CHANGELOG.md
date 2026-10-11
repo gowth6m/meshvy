@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.0] - 2026-10-11
 
 - **Install and uninstall in one command.** `scripts/install.sh` fetches the
   latest release, verifies its checksum, installs to `/Applications` and clears
