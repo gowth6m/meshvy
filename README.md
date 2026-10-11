@@ -15,7 +15,17 @@ agent — with its own terminal — on each of them.
 
 ## Install
 
-Grab the latest `.dmg` from
+One command, if you have the [`gh` CLI](https://cli.github.com) signed in:
+
+```sh
+gh api repos/gowth6m/meshvy/contents/scripts/install.sh --jq .content | base64 -d | bash
+```
+
+It downloads the latest release, checks it against the published SHA-256,
+installs to `/Applications` and clears the quarantine flag. Run it again to
+update, or `PREFIX=~/Applications` to install somewhere else.
+
+Or grab the `.dmg` from
 [Releases](https://github.com/gowth6m/meshvy/releases), open it, and drag
 Meshvy to Applications. Universal — Apple Silicon and Intel. **macOS 14+.**
 
@@ -31,6 +41,33 @@ Meshvy drives the `claude` CLI rather than the API, so install
 > ```
 
 Once installed, Meshvy updates itself — see [Updating](#updating).
+
+## Uninstall
+
+**Meshvy → Uninstall Meshvy…**, or run the script that ships inside the app:
+
+```sh
+/Applications/Meshvy.app/Contents/Resources/uninstall.sh --dry-run   # look first
+/Applications/Meshvy.app/Contents/Resources/uninstall.sh
+```
+
+It removes the app, `~/Library/Application Support/Meshvy`, the keychain entry,
+and the workspaces under `~/.meshvy`.
+
+The workspaces are the part worth care. They are not ordinary folders — each is
+a `git worktree` registered inside your real repository, so deleting them with
+`rm` would leave every source repo pointing at a checkout that no longer
+exists. The uninstaller hands each one back with `git worktree remove` and
+prunes the origin, and **leaves alone any checkout holding uncommitted or
+unpushed work**, telling you which and why. Nothing in your own repositories is
+touched.
+
+| Flag | |
+|---|---|
+| `--dry-run` | print the plan, change nothing |
+| `--keep-worktrees` | remove the app but leave `~/.meshvy` alone |
+| `--force` | also remove checkouts with unsaved work |
+| `--yes` | skip the confirmation |
 
 ## The model
 

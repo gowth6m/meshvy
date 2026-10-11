@@ -25,6 +25,10 @@ struct MeshvyCommands: Commands {
             Button("Check for Updates…") {
                 NotificationCenter.default.post(name: .meshvyCheckForUpdates, object: nil)
             }
+            Divider()
+            Button("Uninstall Meshvy…") {
+                NotificationCenter.default.post(name: .meshvyUninstall, object: nil)
+            }
         }
 
         CommandGroup(replacing: .newItem) {

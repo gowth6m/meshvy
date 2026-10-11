@@ -44,6 +44,11 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist" >/dev/null
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER:-$VERSION}" "$APP/Contents/Info.plist" >/dev/null
 
+# Ship the uninstaller inside the bundle: someone who installed from a DMG has
+# no checkout to run it from.
+cp "$ROOT/scripts/uninstall.sh" "$APP/Contents/Resources/uninstall.sh"
+chmod +x "$APP/Contents/Resources/uninstall.sh"
+
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 else

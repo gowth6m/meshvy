@@ -1223,6 +1223,37 @@ final class MeshvyStore {
         NSWorkspace.shared.open(url)
     }
 
+    /// Opens the uninstaller in Terminal.
+    ///
+    /// Deliberately not run silently in-process: it hands git worktrees back to
+    /// their repositories and can decline to remove checkouts holding unsaved
+    /// work, and that conversation belongs in a terminal where it can be read
+    /// and answered. The script ships inside the bundle.
+    func runUninstaller() {
+        let bundled = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources/uninstall.sh")
+        guard FileManager.default.isExecutableFile(atPath: bundled.path) else {
+            show(.init(
+                kind: .failure,
+                title: "No uninstaller in this build",
+                detail: "Run scripts/uninstall.sh from the repository instead."
+            ))
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Terminal", bundled.path]
+        do {
+            try process.run()
+        } catch {
+            show(.init(
+                kind: .failure,
+                title: "Could not open Terminal",
+                detail: "Run this yourself:\n\(bundled.path)"
+            ))
+        }
+    }
+
     func copyToClipboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)

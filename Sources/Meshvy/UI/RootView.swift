@@ -88,6 +88,7 @@ struct RootView: View {
         .onReceive(of: .meshvyFocusSearch) { store.sidebarVisible = true }
         .onReceive(of: .meshvyNewWorkspace) { sheet = .newWorkspace }
         .onReceive(of: .meshvyAddRepos) { if store.hasWorkspace { sheet = .addRepos } }
+        .onReceive(of: .meshvyUninstall) { store.runUninstaller() }
         .onReceive(of: .meshvyCheckForUpdates) {
             store.updates.check(announceNoUpdate: true)
             sheet = .update
@@ -555,6 +556,7 @@ extension Notification.Name {
     static let meshvyNewWorkspace = Notification.Name("meshvy.newWorkspace")
     static let meshvyAddRepos = Notification.Name("meshvy.addRepos")
     static let meshvyCheckForUpdates = Notification.Name("meshvy.checkForUpdates")
+    static let meshvyUninstall = Notification.Name("meshvy.uninstall")
     static let meshvyOpenOrchestrator = Notification.Name("meshvy.openOrchestrator")
     static let meshvyOpenShell = Notification.Name("meshvy.openShell")
     static let meshvyPalette = Notification.Name("meshvy.palette")

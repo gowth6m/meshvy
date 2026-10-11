@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- **Install and uninstall in one command.** `scripts/install.sh` fetches the
+  latest release, verifies its checksum, installs to `/Applications` and clears
+  the quarantine flag; run it again to update.
+- `scripts/uninstall.sh` removes the app, its settings, the keychain entry and
+  the workspaces — and ships inside the bundle, reachable from
+  **Meshvy → Uninstall Meshvy…**, so someone who installed from a DMG has it
+  without a checkout. Workspaces under `~/.meshvy` are git worktrees registered
+  in real repositories, so each is handed back with `git worktree remove` and
+  the origin pruned rather than deleted; a checkout holding uncommitted or
+  unpushed work is kept and reported unless `--force`. It also declines to
+  remove the root while it holds a workspace Meshvy has no record of, and
+  leaves a development build in a checkout alone.
+
 - Documentation rewritten around what the app actually does now, with fresh
   screenshots of the board, the changes panel, the command palette and the
   empty state.
