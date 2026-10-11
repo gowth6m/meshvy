@@ -1,0 +1,141 @@
+name: Release
+
+# Tag a version to publish it:
+#   ./scripts/release.sh 0.7.0
+#
+# Signing and notarisation are optional. Without the secrets below the release
+# still builds, but macOS warns on first open and the install note in the
+# release body tells users how to get past it. To sign, add repository secrets:
+#   MACOS_CERTIFICATE          base64 of a Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD password for that .p12
+#   MACOS_SIGN_IDENTITY        e.g. "Developer ID Application: Name (TEAMID)"
+#   NOTARY_KEY                 base64 of an App Store Connect .p8 key
+#   NOTARY_KEY_ID              key id
+#   NOTARY_ISSUER              issuer uuid
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (defaults to the VERSION file)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: What credentials do we have
+        id: creds
+        env:
+          CERT: ${{ secrets.MACOS_CERTIFICATE }}
+          IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY: ${{ secrets.NOTARY_KEY }}
+        run: |
+          [ -n "$CERT" ] && echo "cert=true" >> "$GITHUB_OUTPUT" || echo "cert=false" >> "$GITHUB_OUTPUT"
+          [ -n "$IDENTITY" ] && echo "signed=true" >> "$GITHUB_OUTPUT" || echo "signed=false" >> "$GITHUB_OUTPUT"
+          [ -n "$NOTARY" ] && echo "notary=true" >> "$GITHUB_OUTPUT" || echo "notary=false" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ -n "$TAG" ] && [ "$TAG" != "$GITHUB_REF_NAME" ] && [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Tag v$TAG does not match VERSION ($VERSION)."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Import signing certificate
+        if: steps.creds.outputs.cert == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          PASSWORD="$(uuidgen)"
+          security create-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Write notarisation key
+        if: steps.creds.outputs.notary == 'true'
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+        run: |
+          echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          echo "NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+
+      - name: Build and package
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: ./scripts/package-release.sh
+
+      - name: Verify the bundle is universal
+        run: |
+          lipo -archs dist/Arcforge.app/Contents/MacOS/Arcforge | tee /tmp/archs
+          grep -q arm64 /tmp/archs && grep -q x86_64 /tmp/archs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Arcforge-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*SHA256.txt
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          SIGNED="${{ steps.creds.outputs.signed }}"
+          {
+            echo "## Install"
+            echo
+            echo "Download \`Arcforge-$VERSION.dmg\`, open it, and drag Arcforge to Applications."
+            echo
+            if [ "$SIGNED" != "true" ]; then
+              echo "> This build is **not signed with an Apple Developer ID**, so macOS will"
+              echo "> refuse to open it the first time. Either right-click the app and choose"
+              echo "> **Open**, or run:"
+              echo '> ```sh'
+              echo '> xattr -dr com.apple.quarantine /Applications/Arcforge.app'
+              echo '> ```'
+              echo
+            fi
+            echo "Requires macOS 14 or later. Universal (Apple Silicon and Intel)."
+            echo
+            echo "Arcforge drives the \`claude\` CLI, so install Claude Code first:"
+            echo "<https://claude.com/claude-code>"
+            echo
+            echo "### Checksums"
+            echo '```'
+            cat "dist/Arcforge-$VERSION-SHA256.txt"
+            echo '```'
+          } > /tmp/notes.md
+
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Arcforge $VERSION" \
+            --notes-file /tmp/notes.md \
+            dist/*.dmg dist/*.zip dist/*SHA256.txt

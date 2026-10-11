@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - name: Build
+        run: swift build -c release
+      - name: Warnings are not allowed to pile up
+        run: |
+          swift build -c release 2>&1 | tee /tmp/build.log
+          if grep -q "warning:" /tmp/build.log; then
+            echo "::error::build produced warnings"
+            grep "warning:" /tmp/build.log | head -20
+            exit 1
+          fi

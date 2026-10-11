@@ -2,6 +2,25 @@
 
 ## [0.6.0] - 2026-10-11
 
+Renamed to **Arcforge**, and set up for release.
+
+- The app, bundle (`dev.gowtham.arcforge`), binary and support directory are
+  all Arcforge now. State written under the old name is migrated on first
+  launch rather than silently ignored. New workspaces live under
+  `~/.arcforge/`; existing ones keep the root they were created with, since
+  git stores absolute paths in its worktree registrations.
+- A generated app icon, drawn by `scripts/make-icon.swift` rather than checked
+  in as art.
+- Universal builds. SwiftPM's `--arch` needs Xcode's `xcbuild`, which the
+  Command Line Tools lack, so each slice is cross-compiled and `lipo`-ed.
+- `scripts/package-release.sh` produces a DMG, a zip and SHA-256 checksums,
+  signing and notarising when Apple credentials are present and saying so when
+  they are not.
+- `.github/workflows/release.yml` builds and publishes on a `v*` tag;
+  `ci.yml` builds every push and fails on compiler warnings.
+
+## [0.5.1] - 2026-10-11
+
 A place to read code changes, resizable panels, and less chrome.
 
 - **Diff viewer.** Selecting a repository lists every file it has touched

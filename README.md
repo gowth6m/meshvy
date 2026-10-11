@@ -1,15 +1,39 @@
-# Forge
+# Arcforge
 
 A native macOS app for running coding agents across several repositories at
 once, on an infinite canvas.
 
-Forge starts empty. You create a **workspace** by picking the repositories you
-work on together; Forge cuts one branch across all of them and checks each one
-out side by side under `~/.forge/<workspace>/`. That folder is the parent an
+Arcforge starts empty. You create a **workspace** by picking the repositories you
+work on together; Arcforge cuts one branch across all of them and checks each one
+out side by side under `~/.arcforge/<workspace>/`. That folder is the parent an
 orchestrator works from — open a terminal at its root and every repository is
 literally a subdirectory, so one agent can put a sub-agent on each of them.
 
 ![The board](docs/board.png)
+
+## Install
+
+Grab the latest `.dmg` from
+[Releases](https://github.com/gowth6m/arcforge/releases), open it, and drag
+Arcforge to Applications.
+
+Requires **macOS 14 or later**. The build is universal — Apple Silicon and
+Intel.
+
+Arcforge drives the `claude` CLI rather than talking to the API itself, so
+install [Claude Code](https://claude.com/claude-code) first and sign in.
+
+> **Unsigned builds.** Until the project has an Apple Developer ID, releases are
+> not signed or notarised, and macOS will refuse to open the app the first time
+> with *"Apple could not verify Arcforge is free of malware."* Either
+> right-click the app and choose **Open**, or clear the quarantine flag:
+>
+> ```sh
+> xattr -dr com.apple.quarantine /Applications/Arcforge.app
+> ```
+>
+> Once signing secrets are added to the repository the releases are notarised
+> and this step goes away — see [Releasing](#releasing).
 
 ## The model
 
@@ -17,7 +41,7 @@ literally a subdirectory, so one agent can put a sub-agent on each of them.
 you picked, all under one folder:
 
 ```
-~/.forge/payments-revamp/
+~/.arcforge/payments-revamp/
   api/      → repo "api"    on branch payments-revamp
   web/      → repo "web"    on branch payments-revamp
   worker/   → repo "worker" on branch payments-revamp
@@ -37,7 +61,7 @@ the work itself. Edges run down to each repository it owns.
 node, linked back to the parent, showing the task it was given, which agent type
 it is, whether it is still running, and what it reported back. These are Agent
 tool calls inside the orchestrator's session rather than separate processes, so
-Forge reads them live out of its transcript.
+Arcforge reads them live out of its transcript.
 
 **Repo terminals** — right-click a repository card for its own `claude` or a
 plain shell, in that checkout alone.
@@ -47,7 +71,7 @@ HEAD, with a unified diff showing both line numbers. Untracked files render as
 all-added. Select the workspace node instead and you get the same list across
 every repository at once, which is what you want after an orchestrator run.
 
-Forge does not host the agent. It starts the real CLI inside the PTY with a
+Arcforge does not host the agent. It starts the real CLI inside the PTY with a
 pre-assigned session id, so the agent registers itself in `~/.claude/sessions`
 and the board can match its transcript to the terminal it runs in.
 `claude agents --json` sees them too.
@@ -80,7 +104,7 @@ Scrolling follows the system "natural scrolling" preference;
 
 Claude Code asks you to trust a folder it has not seen before, so the first
 orchestrator you open in a workspace shows its trust prompt — press Enter.
-Forge deliberately does not pre-answer this: it would mean writing to
+Arcforge deliberately does not pre-answer this: it would mean writing to
 `~/.claude.json`, which every running Claude Code instance also writes, and a
 read-modify-write there could clobber their changes.
 
@@ -91,12 +115,53 @@ compiler and macOS SDK from the Command Line Tools are enough:
 
 ```sh
 xcode-select --install     # if you don't already have the tools
-./scripts/build-app.sh     # -> dist/Forge.app
-open dist/Forge.app
+./scripts/build-app.sh     # -> dist/Arcforge.app
+open dist/Arcforge.app
 ```
 
+`build-app.sh` produces a universal binary by cross-compiling each slice and
+`lipo`-ing them together — SwiftPM's own `--arch a --arch b` needs Xcode's
+`xcbuild`, which the Command Line Tools do not ship. Set `UNIVERSAL=0` for a
+faster native-only build while developing.
+
 The only dependency is [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)
-for the terminal emulator.
+for the terminal emulator. The app icon is generated, not checked in as art —
+`./scripts/make-icon.sh` redraws `Resources/AppIcon.icns` from
+`scripts/make-icon.swift`.
+
+## Releasing
+
+`VERSION` is the single source of truth. Write the notes in `CHANGELOG.md`
+under a matching `## [x.y.z]` heading, then:
+
+```sh
+./scripts/release.sh 0.7.0
+git push origin HEAD && git push origin v0.7.0
+```
+
+The tag triggers `.github/workflows/release.yml`, which builds a universal app
+on a macOS runner, packages a DMG and a zip with checksums, and publishes a
+GitHub Release. `scripts/release.sh` refuses to tag if the tree is dirty, the
+tag exists, or the changelog has no section for the version.
+
+To build artifacts locally without tagging: `./scripts/package-release.sh`.
+
+### Signing and notarisation
+
+Releases work without an Apple Developer ID — they are just unsigned, and the
+install note above applies. To sign them, add these repository secrets:
+
+| Secret | What |
+|---|---|
+| `MACOS_CERTIFICATE` | base64 of a Developer ID Application `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | password for that `.p12` |
+| `MACOS_SIGN_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
+| `NOTARY_KEY` | base64 of an App Store Connect `.p8` key |
+| `NOTARY_KEY_ID` | that key's id |
+| `NOTARY_ISSUER` | issuer UUID |
+
+The workflow detects them and skips signing cleanly when they are absent, so
+nothing breaks before you have them.
 
 ## How it stays fast
 
@@ -122,7 +187,7 @@ cards are too small to read.
 ## Layout
 
 ```
-Sources/Forge/
+Sources/Arcforge/
   App/        entry point, menus, snapshot + test harnesses
   Core/       canvas geometry, theme, persistence
   Model/      workspaces, terminals, sub-agents, sessions, git, diffs,
@@ -137,11 +202,11 @@ Sources/Forge/
 ### Development harnesses
 
 ```sh
-Forge --snapshot out.png [--zoom 0.8] [--width W] [--height H]
-Forge --selftest <repoA> <repoB> <repoC> [--keep]   # build a workspace, verify, tear down
-Forge --launchtest                                  # open an orchestrator and wait for it to register
-Forge --perftest                                    # time transcript loading on your largest session
-Forge --difftest <worktree>                         # dump the change list and a parsed diff
+Arcforge --snapshot out.png [--zoom 0.8] [--width W] [--height H]
+Arcforge --selftest <repoA> <repoB> <repoC> [--keep]   # build a workspace, verify, tear down
+Arcforge --launchtest                                  # open an orchestrator and wait for it to register
+Arcforge --perftest                                    # time transcript loading on your largest session
+Arcforge --difftest <worktree>                         # dump the change list and a parsed diff
 ```
 
 `--snapshot` renders the real view tree against your real data with no window.
@@ -150,7 +215,7 @@ AppKit-backed controls (`TextField`, `Menu`) as a yellow placeholder — scrolli
 panels swap to a plain stack under the `forgeSnapshotMode` flag, and the search
 field and workspace menu look wrong **in snapshots only**.
 
-## What Forge does not do
+## What Arcforge does not do
 
 It never pushes, merges or rewrites history. Inspection is read-only and runs
 with `GIT_OPTIONAL_LOCKS=0`, so looking at a tree never contends with an agent

@@ -3,21 +3,21 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Forge</string>
+	<string>Arcforge</string>
 	<key>CFBundleDisplayName</key>
-	<string>Forge</string>
+	<string>Arcforge</string>
 	<key>CFBundleExecutable</key>
-	<string>Forge</string>
+	<string>Arcforge</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.gowtham.forge</string>
+	<string>dev.gowtham.arcforge</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>0.1.0</string>
+	<string>0.0.0</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>LSMinimumSystemVersion</key>
@@ -28,9 +28,7 @@
 	<true/>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Forge opens Terminal to resume a Claude session or to cd into a worktree.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string></string>
+	<string>Copyright © 2026 Gowtham Ravindrathas</string>
 </dict>
 </plist>
