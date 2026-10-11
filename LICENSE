@@ -1,0 +1,87 @@
+Meshvy Source-Available License
+Copyright (c) 2026 Gowtham Ravindrathas. All rights reserved.
+
+This is not an open source licence. The source is published so you can read it,
+run it and change it for yourself. It is not published so it can be passed on.
+
+1. DEFINITIONS
+
+   "Software" means Meshvy, in source or compiled form, together with this
+   repository's contents.
+
+   "Owner" means Gowtham Ravindrathas, who holds all right, title and interest
+   in the Software.
+
+   "You" means the individual or organisation exercising the permissions below.
+
+2. WHAT YOU MAY DO
+
+   a. Use the Software, for any purpose, including at work and including
+      commercially, on machines you or your organisation control.
+
+   b. Copy the Software and make derivative works of it — fork it, patch it,
+      build it, run your own modified version — for your own use.
+
+   c. Share the Software within your own organisation, provided every recipient
+      is bound by this licence.
+
+3. WHAT YOU MAY NOT DO
+
+   a. Distribute, publish, sublicense, lend, rent, sell or otherwise make the
+      Software, or any derivative work of it, available to anyone outside your
+      organisation, whether or not for a fee, and whether in source or compiled
+      form.
+
+   b. Offer the Software, or any derivative work of it, to third parties as a
+      hosted or managed service.
+
+   c. Remove or obscure this licence, the copyright notice, or the Meshvy name
+      and marks.
+
+   The Meshvy name, logo and other brand assets are not licensed for any use
+   beyond running and modifying the Software for yourself.
+
+4. CONTRIBUTIONS
+
+   If you submit a contribution to the Software, you assign to the Owner all
+   right, title and interest in that contribution, to the extent permitted by
+   law, and otherwise grant the Owner a perpetual, worldwide, irrevocable,
+   royalty-free licence to use it for any purpose without restriction. You
+   confirm you have the right to do so. Ownership of the Software remains
+   entirely with the Owner.
+
+5. RESERVATION OF RIGHTS
+
+   No rights are granted except those stated in section 2. In particular, no
+   trademark rights and no patent rights are granted. The Owner may licence the
+   Software to anyone else on any terms, and may release any version of it
+   under a different licence at any time.
+
+6. TERMINATION
+
+   This licence ends automatically if you breach it. On termination you must
+   stop using the Software and destroy the copies you hold. Sections 4, 5, 7
+   and 8 survive.
+
+7. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+8. NO LIABILITY
+
+   TO THE FULLEST EXTENT PERMITTED BY LAW, THE OWNER SHALL NOT BE LIABLE FOR
+   ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+   OR ITS USE. Meshvy drives developer tooling and runs agents that modify
+   files and execute commands on your machine; you are responsible for what you
+   point it at.
+
+9. THIRD-PARTY COMPONENTS
+
+   The Software depends on SwiftTerm (https://github.com/migueldeicaza/SwiftTerm),
+   which is licensed separately under the MIT licence by its own authors. This
+   licence does not alter their terms.
+
+For permission beyond this licence, contact the Owner.

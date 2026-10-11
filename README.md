@@ -340,3 +340,13 @@ with `GIT_OPTIONAL_LOCKS=0`, so looking at a tree never contends with an agent
 working in it. The only git commands that write are `worktree add` and
 `worktree remove`, both of which you ask for explicitly. Closing a workspace
 keeps its checkouts unless you choose to delete them.
+
+## Licence
+
+Source-available, not open source — see [LICENSE](LICENSE). You may run Meshvy
+and fork or modify it for your own use, including at work. You may not
+redistribute it or a derivative, or offer it to others as a service.
+Gowtham Ravindrathas retains ownership; contributions are assigned to him.
+
+The terminal emulator, [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm),
+is MIT-licensed by its own authors.

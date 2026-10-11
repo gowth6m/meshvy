@@ -29,31 +29,6 @@
 - One store per process; the scene and the headless harnesses were each making
   their own, racing for the same agent-bridge requests.
 
-## [0.8.0] - 2026-10-11
-
-Delegated agents are real terminals now.
-
-- **The orchestrator spawns actual Claude Code sessions.** Claude's Agent tool
-  runs sub-agents inside the parent process — they have no pid and no pty, so
-  there was nothing a terminal node could attach to and they could only be
-  drawn as cards. The orchestrator is now told to delegate with a `meshvy`
-  helper placed on its PATH instead; each agent it starts is a real session
-  with its own terminal on the canvas, linked back to the workspace node.
-- `meshvy spawn | wait | send | list` — including `send`, which types one
-  agent's message into another's terminal.
-- The helper is pre-approved (`Bash(meshvy:*)`), because `acceptEdits` does not
-  cover Bash and an orchestrator that stops to ask permission for every spawn
-  never gets going.
-- The agent bridge starts with the workspace rather than with the orchestrator,
-  so any terminal can delegate.
-- Agent-tool sub-agents still appear as cards if one is used anyway, so no work
-  goes invisible.
-- One store per process. The scene and the headless harnesses were each making
-  their own, which meant two sets of timers, two filesystem watchers, and two
-  readers racing for the same bridge requests.
-
-## [Unreleased]
-
 **Agents say what they are doing.**
 
 - Every session Meshvy starts is handed a settings file whose hooks call a tiny
