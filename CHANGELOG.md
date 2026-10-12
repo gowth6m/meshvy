@@ -1,8 +1,21 @@
 # Changelog
 
-## [0.10.2] - 2026-10-12
+## [0.10.3] - 2026-10-12
 
 No change to the app itself — this one is about what surrounds it.
+
+- **Stapling now checks that it took.** 0.10.2 never shipped: `stapler staple`
+  reported success on the app, and two steps later the ticket was not there.
+  It was never reproduced, and Gatekeeper accepted the build regardless because
+  it can look a ticket up online — but a stapled ticket is the entire point of
+  stapling, since it is what lets the app open on a machine that is offline or
+  behind a filter. Both the staple and the ticket fetch are idempotent and cost
+  nothing, so it now validates after stapling and retries rather than shipping
+  a build that is notarised in name only.
+- `verify-release.sh` repeats what stapler actually said instead of reporting
+  every failure as "no notarisation ticket". The generic message is what made
+  the above take an hour to pin down: it hid the difference between a ticket
+  that was never fetched and one that could not be checked.
 
 - **Release pages carry the changelog.** They listed how to install and the
   checksums, and said nothing about what had changed; the prose only ever

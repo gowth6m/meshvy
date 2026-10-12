@@ -48,6 +48,18 @@ fail() { printf '  \033[31m✗\033[0m %s\n' "$*"; PROBLEMS=$((PROBLEMS + 1)); }
 describe() { codesign -dvvv "$1" 2>&1 || true; }
 verdict() { spctl -a -vvv -t "$2" "$1" 2>&1 || true; }
 
+# Stapler's own words on failure. Collapsing every outcome into "no ticket"
+# once hid the difference between a ticket that was never fetched and one that
+# could not be checked, which is a long way to go for a one-word message.
+ticket() {
+  local output
+  if output="$(xcrun stapler validate "$1" 2>&1)"; then
+    pass "notarisation ticket stapled"
+  else
+    fail "no notarisation ticket — $(printf '%s' "$output" | grep -v '^Processing:' | tr '\n' ' ' | sed 's/  */ /g')"
+  fi
+}
+
 check_app() {
   local app="$1" details authority team
   details="$(describe "$app")"
@@ -83,11 +95,7 @@ check_app() {
     fail "no secure timestamp — sign with --timestamp or Apple will refuse it"
   fi
 
-  if xcrun stapler validate "$app" >/dev/null 2>&1; then
-    pass "notarisation ticket stapled"
-  else
-    fail "no notarisation ticket"
-  fi
+  ticket "$app"
 
   if printf '%s' "$(verdict "$app" exec)" | grep -q 'accepted'; then
     pass "Gatekeeper accepts it"
@@ -98,11 +106,7 @@ check_app() {
 
 check_dmg() {
   local dmg="$1"
-  if xcrun stapler validate "$dmg" >/dev/null 2>&1; then
-    pass "notarisation ticket stapled"
-  else
-    fail "no notarisation ticket"
-  fi
+  ticket "$dmg"
   # `-t open` with the primary-signature context is how Gatekeeper judges a
   # disk image, rather than the `exec` it uses for an app.
   if printf '%s' "$(spctl -a -vvv -t open --context context:primary-signature "$dmg" 2>&1 || true)" \

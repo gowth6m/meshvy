@@ -17,6 +17,29 @@ ZIP="$DIST/Meshvy-$VERSION-macOS.zip"
 
 "$ROOT/scripts/build-app.sh"
 
+# Stapling that checks it actually took.
+#
+# `stapler staple` reported success on a release where the ticket was then not
+# there two steps later — never reproduced, and Gatekeeper accepted the app
+# anyway because it can look the ticket up online. But a stapled ticket is the
+# whole point of stapling: it is what makes the app open on a machine that is
+# offline or behind a filter. Both the staple and the ticket fetch are
+# idempotent and cost nothing, so a ticket that has not landed is worth
+# retrying rather than failing a release over.
+staple() {
+  local target="$1" attempt
+  for attempt in 1 2 3; do
+    xcrun stapler staple "$target" || true
+    if xcrun stapler validate "$target" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "    ticket did not land on $(basename "$target") (attempt $attempt); retrying"
+    sleep 5
+  done
+  echo "    could not staple $(basename "$target")" >&2
+  return 1
+}
+
 notarize() {
   local target="$1"
   if [ -n "${NOTARY_PROFILE:-}" ]; then
@@ -53,7 +76,7 @@ fi
 
 if notarize "$DMG"; then
   echo "==> stapling"
-  xcrun stapler staple "$DMG"
+  staple "$DMG"
   # The zip has to be notarised separately — stapling a zip is not supported,
   # so staple the app and re-zip it.
   #
@@ -61,7 +84,7 @@ if notarize "$DMG"; then
   # one, because the release notes would then tell people it is signed while
   # macOS refuses to open it.
   notarize "$ZIP"
-  xcrun stapler staple "$APP"
+  staple "$APP"
   rm -f "$ZIP"
   /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
 else
