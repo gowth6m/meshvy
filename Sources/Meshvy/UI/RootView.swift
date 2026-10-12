@@ -171,6 +171,7 @@ struct EmptyStateView: View {
 // MARK: - Top bar
 
 private struct TopBar: View {
+    @Environment(\.meshvySnapshotMode) private var isSnapshot
     @Bindable var store: MeshvyStore
     @Binding var sheet: MeshvySheet?
     @State private var confirmingArchive = false
@@ -183,8 +184,12 @@ private struct TopBar: View {
 
     /// The traffic lights run to x=69, so the first control sits just past them
     /// and the panel toggles read as the two ends of the bar. In full screen
-    /// the lights go away and the gutter with them.
-    private var leadingInset: CGFloat { chrome.trafficLightsVisible ? 78 : 12 }
+    /// the lights go away and the gutter with them — as it does in a snapshot,
+    /// which has no window and so no lights to leave room for. `WindowChrome`
+    /// cannot tell: its reading is of a window, and there is not one.
+    private var leadingInset: CGFloat {
+        isSnapshot || !chrome.trafficLightsVisible ? 12 : 78
+    }
 
     var body: some View {
         HStack(spacing: 0) {
