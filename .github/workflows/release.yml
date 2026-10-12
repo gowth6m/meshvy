@@ -116,12 +116,16 @@ jobs:
             echo "Download \`Meshvy-$VERSION.dmg\`, open it, and drag Meshvy to Applications."
             echo
             if [ "$SIGNED" != "true" ]; then
-              echo "> This build is **not signed with an Apple Developer ID**, so macOS will"
-              echo "> refuse to open it the first time. Either right-click the app and choose"
-              echo "> **Open**, or run:"
+              echo "> This build is **not signed with an Apple Developer ID**, so macOS"
+              echo "> refuses the first launch with \"Apple could not verify Meshvy is free"
+              echo "> of malware\". Clear the quarantine flag it was downloaded with:"
               echo '> ```sh'
               echo '> xattr -dr com.apple.quarantine /Applications/Meshvy.app'
               echo '> ```'
+              echo "> Or open it once, let it be refused, then **System Settings → Privacy &"
+              echo "> Security → Open Anyway**. Right-clicking and choosing **Open** no longer"
+              echo "> works: macOS 15 removed that bypass for software that is not notarised."
+              echo "> The install script in the README does this step for you."
               echo
             fi
             echo "Requires macOS 14 or later. Universal (Apple Silicon and Intel)."

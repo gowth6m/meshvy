@@ -33,12 +33,18 @@ Meshvy drives the `claude` CLI rather than the API, so install
 [Claude Code](https://claude.com/claude-code) first and sign in.
 
 > **Unsigned builds.** Until the project has an Apple Developer ID, releases
-> are not notarised and macOS refuses to open the app the first time. Either
-> right-click it and choose **Open**, or:
+> are not notarised, and macOS refuses the first launch with *“Apple could not
+> verify Meshvy is free of malware”*. The install script above clears this for
+> you; if you dragged the app out of the DMG yourself, clear it by hand:
 >
 > ```sh
 > xattr -dr com.apple.quarantine /Applications/Meshvy.app
 > ```
+>
+> Or open it once, let it be refused, then **System Settings → Privacy &
+> Security → Open Anyway**. Right-clicking the app and choosing **Open** used
+> to work and no longer does: macOS 15 removed that bypass for software that is
+> not notarised.
 
 Once installed, Meshvy updates itself — see [Updating](#updating).
 
