@@ -57,10 +57,16 @@ fi
 
 if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
   echo "==> signing with $MACOS_SIGN_IDENTITY"
-  # The hardened runtime is required for notarisation.
-  codesign --force --deep --options runtime --timestamp \
+  # `--options runtime` and `--timestamp` are both required for notarisation;
+  # without either, Apple refuses the submission rather than the app.
+  #
+  # Not `--deep`: Apple's own guidance is that it is for verifying, not for
+  # signing, and it re-signs nested code with whatever options it feels like.
+  # The bundle is one Mach-O and no frameworks, so there is nothing nested to
+  # reach — if that ever changes, sign the nested code first, inside out.
+  codesign --force --options runtime --timestamp \
            --sign "$MACOS_SIGN_IDENTITY" "$APP"
-  codesign --verify --strict --verbose=2 "$APP"
+  codesign --verify --strict --deep --verbose=2 "$APP"
 else
   echo "==> ad-hoc signing (no MACOS_SIGN_IDENTITY set)"
   codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || echo "    (ad-hoc signing skipped)"

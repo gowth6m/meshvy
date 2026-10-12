@@ -92,8 +92,28 @@ jobs:
 
       - name: Verify the bundle is universal
         run: |
+          set -o pipefail
           lipo -archs dist/Meshvy.app/Contents/MacOS/Meshvy | tee /tmp/archs
           grep -q arm64 /tmp/archs && grep -q x86_64 /tmp/archs
+
+      - name: Verify what Apple will make of it
+        id: verify
+        run: |
+          # Whether the release notes warn about Gatekeeper is decided here, by
+          # asking the artifact, rather than by whether a secret happens to be
+          # set. The two came apart once already: a half-notarised build would
+          # have shipped notes saying it was signed while macOS refused it.
+          if ./scripts/verify-release.sh --require-notarised dist/Meshvy.app dist/*.dmg; then
+            echo "notarised=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notarised=false" >> "$GITHUB_OUTPUT"
+            if [ "${{ steps.creds.outputs.signed }}" = "true" ] \
+               && [ "${{ steps.creds.outputs.notary }}" = "true" ]; then
+              echo "::error::signing credentials are set, but the build is not notarised"
+              exit 1
+            fi
+            echo "no Apple credentials — publishing an unsigned build, as before"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -109,7 +129,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          SIGNED="${{ steps.creds.outputs.signed }}"
+          SIGNED="${{ steps.verify.outputs.notarised }}"
           {
             echo "## Install"
             echo

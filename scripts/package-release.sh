@@ -43,13 +43,25 @@ rm -f "$ZIP"
 # ditto preserves the bundle's symlinks and signature; `zip` does not.
 /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
 
+# The app inside is signed, but the disk image is its own container and
+# Gatekeeper judges it separately. An unsigned one can still be stapled, but a
+# signed one is what Apple asks for and costs nothing here.
+if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+  echo "==> signing $DMG"
+  codesign --force --timestamp --sign "$MACOS_SIGN_IDENTITY" "$DMG"
+fi
+
 if notarize "$DMG"; then
   echo "==> stapling"
   xcrun stapler staple "$DMG"
   # The zip has to be notarised separately — stapling a zip is not supported,
   # so staple the app and re-zip it.
-  notarize "$ZIP" || true
-  xcrun stapler staple "$APP" || true
+  #
+  # Deliberately not `|| true`: a half-notarised release is worse than a failed
+  # one, because the release notes would then tell people it is signed while
+  # macOS refuses to open it.
+  notarize "$ZIP"
+  xcrun stapler staple "$APP"
   rm -f "$ZIP"
   /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
 else
@@ -63,3 +75,6 @@ shasum -a 256 "$(basename "$DMG")" "$(basename "$ZIP")" | tee "Meshvy-$VERSION-S
 echo
 echo "artifacts:"
 ls -lh "$DMG" "$ZIP" "$DIST/Meshvy-$VERSION-SHA256.txt"
+
+# What Apple will make of it, said out loud rather than discovered by a user.
+"$ROOT/scripts/verify-release.sh" "$APP" "$DMG" || true
