@@ -311,7 +311,10 @@ The only dependency is [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)
 for the terminal emulator. Brand assets are in `Resources/brand/`;
 `./scripts/make-icon.sh` rebuilds the icon from `app-icon.png`, scaling it onto
 Apple's grid so it sits at the same size as other Dock icons. The toolbar mark
-is drawn in SwiftUI from the same geometry as `mark-on-dark.svg`.
+is drawn in SwiftUI from the same geometry as `mark-on-dark.svg`, in the same
+colours — Night Owl's foreground with the brand mint `#64FFDA` on the lit node,
+which is also the app's accent. `app-icon-mint.png` is the inverse of the
+shipped icon, mint ground and dark mark, for use on dark backgrounds.
 
 ## Releasing
 

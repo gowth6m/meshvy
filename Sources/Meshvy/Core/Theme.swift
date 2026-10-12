@@ -6,12 +6,14 @@ import SwiftUI
 /// appearance — node accents are tuned against this background.
 ///
 /// The palette is **Night Owl**. Every colour the app draws is either one of the
-/// thirteen palette values or a blend of two of them, so the whole board — cards,
+/// fourteen palette values or a blend of two of them, so the whole board — cards,
 /// chrome, diffs and the terminals themselves — reads as one theme.
 enum Theme {
     // MARK: Palette
-    /// Night Owl, verbatim. Held as 24-bit hex because all three consumers —
-    /// SwiftUI, AppKit and the terminal emulator — take their colours that way.
+    /// Night Owl, verbatim, plus `mint` — the one value from outside the theme,
+    /// taken off the icon so the app and its artwork share a primary. Held as
+    /// 24-bit hex because all three consumers — SwiftUI, AppKit and the terminal
+    /// emulator — take their colours that way.
     enum NightOwl {
         static let background: UInt32 = 0x011627
         static let sidebar: UInt32 = 0x001122
@@ -26,6 +28,9 @@ enum Theme {
         static let yellow: UInt32 = 0xECC48D
         static let red: UInt32 = 0xFF6363
         static let pink: UInt32 = 0xFF2C83
+        /// The brand mint, from the lit node in the mark. Brighter and more
+        /// saturated than `teal`, which it sits beside on a session card.
+        static let mint: UInt32 = 0x64FFDA
     }
 
     /// Semantic colours as hex, so AppKit and the terminal can reach them too.
@@ -43,9 +48,9 @@ enum Theme {
         static let textSecondary = blend(NightOwl.muted, NightOwl.foreground, 0.5)
         static let textTertiary = NightOwl.muted
 
-        static let accent = NightOwl.blue
-        /// Night Owl's accents are all pastel, so anything filled with `accent`
-        /// has to put the background colour back on top to stay readable.
+        static let accent = NightOwl.mint
+        /// The accent is a light mint, so anything filled with `accent` has to
+        /// put the background colour back on top to stay readable.
         static let onAccent = NightOwl.background
 
         static let busy = NightOwl.yellow
@@ -90,7 +95,7 @@ enum Theme {
     static let textTertiary = Color(hex: Hex.textTertiary)
 
     // MARK: Accents
-    /// Night Owl's blue carries selection and primary actions. Status keeps
+    /// The brand mint carries selection and primary actions. Status keeps
     /// colours of its own — an agent at work is amber whatever the accent is.
     static let accent = Color(hex: Hex.accent)
     /// Text and glyphs sitting on top of a solid `accent` fill.
@@ -117,10 +122,10 @@ enum Theme {
     static let reasoning = Color(hex: Hex.reasoning)
 
     // MARK: Brand
-    /// The mark, drawn in the palette: Night Owl's purple for the lit node. The
-    /// shipped icon assets keep the original brand purple.
+    /// The mark, drawn in the palette, matching the shipped artwork exactly:
+    /// `mark-on-dark.svg` is Night Owl's foreground with a mint lit node.
     static let markTint = Color(hex: Hex.textPrimary)
-    static let markAccent = Color(hex: NightOwl.purple)
+    static let markAccent = Color(hex: NightOwl.mint)
 
     // MARK: Metrics
     static let nodeCorner: CGFloat = 12
