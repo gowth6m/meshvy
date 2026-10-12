@@ -5,9 +5,9 @@
 #   ./scripts/install.sh 0.8.0        a specific version
 #   PREFIX=~/Applications ./scripts/install.sh
 #
-# The repository is private, so the release is fetched with the `gh` CLI you
-# are already signed in to. If it is ever made public, curl is used instead and
-# no sign-in is needed.
+# The repository is public, so the release is fetched with curl and no sign-in
+# is needed. If it is ever made private again, the `gh` CLI you are already
+# signed in to is used instead.
 set -euo pipefail
 
 REPO="gowth6m/meshvy"
