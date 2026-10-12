@@ -36,5 +36,13 @@ git commit -m "release: $VERSION"
 git tag -a "v$VERSION" -m "Meshvy $VERSION"
 
 echo
-echo "Tagged v$VERSION. Push to publish:"
-echo "  git push origin HEAD && git push origin v$VERSION"
+echo "Tagged v$VERSION. Push the branch first, let CI go green, then the tag:"
+echo
+echo "  git push origin HEAD:main"
+echo "  gh run watch            # or just wait for the CI run to pass"
+echo "  git push origin v$VERSION"
+echo
+echo "Pushing both at once means the tag starts a release build before anything"
+echo "has checked the commit — which is how 0.10.0 came to fail on the runner"
+echo "after CI had reported success. The tag is the expensive one: it builds,"
+echo "signs, notarises and publishes."

@@ -130,7 +130,21 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           SIGNED="${{ steps.verify.outputs.notarised }}"
+          # What changed, taken from the CHANGELOG section for this version so
+          # the release page and the repository cannot drift apart.
+          NOTES="$(awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { flag = 1; next }
+            flag && /^## / { exit }
+            flag { print }
+          ' CHANGELOG.md)"
+
           {
+            if [ -n "$NOTES" ]; then
+              printf '%s\n' "$NOTES"
+            else
+              echo "_No CHANGELOG section for $VERSION._"
+              echo
+            fi
             echo "## Install"
             echo
             echo "Download \`Meshvy-$VERSION.dmg\`, open it, and drag Meshvy to Applications."
