@@ -89,7 +89,8 @@ if ! mv "$STAGED" "$APP"; then
 fi
 rm -rf "$APP.meshvy-previous"
 
-# Releases are not notarised yet, so Gatekeeper would block the first launch.
+# Releases are notarised, so this is belt and braces — but it costs nothing and
+# covers anyone installing an older build, which was not.
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
 say "installed Meshvy $VERSION to $APP"

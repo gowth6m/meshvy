@@ -32,19 +32,17 @@ Meshvy to Applications. Universal — Apple Silicon and Intel. **macOS 14+.**
 Meshvy drives the `claude` CLI rather than the API, so install
 [Claude Code](https://claude.com/claude-code) first and sign in.
 
-> **Unsigned builds.** Until the project has an Apple Developer ID, releases
-> are not notarised, and macOS refuses the first launch with *“Apple could not
-> verify Meshvy is free of malware”*. The install script above clears this for
-> you; if you dragged the app out of the DMG yourself, clear it by hand:
->
-> ```sh
-> xattr -dr com.apple.quarantine /Applications/Meshvy.app
-> ```
->
-> Or open it once, let it be refused, then **System Settings → Privacy &
-> Security → Open Anyway**. Right-clicking the app and choosing **Open** used
-> to work and no longer does: macOS 15 removed that bypass for software that is
-> not notarised.
+Releases are signed with a Developer ID and notarised by Apple, so a download
+opens without a warning. Check for yourself:
+
+```sh
+./scripts/verify-release.sh /Applications/Meshvy.app
+```
+
+> **Before 0.10.1** builds were unsigned, and macOS refused the first launch
+> with *“Apple could not verify Meshvy is free of malware”*. If you are still
+> on one, update — or clear the flag it was downloaded with:
+> `xattr -dr com.apple.quarantine /Applications/Meshvy.app`.
 
 Once installed, Meshvy updates itself — see [Updating](#updating).
 
@@ -299,18 +297,14 @@ To build artifacts locally without tagging: `./scripts/package-release.sh`.
 
 ### Signing and notarisation
 
-Releases work unsigned — the install note above applies. To sign them, add
-these repository secrets; the workflow detects them and skips cleanly when they
-are absent:
+Releases are signed and notarised; `scripts/verify-release.sh` says whether a
+given build really is, and the release workflow runs it as a gate rather than
+trusting that the secrets were set. The six secrets, how to issue a new
+certificate or notarisation key without Xcode, and what expires when are in
+[docs/signing.md](docs/signing.md).
 
-| Secret | What |
-|---|---|
-| `MACOS_CERTIFICATE` | base64 of a Developer ID Application `.p12` |
-| `MACOS_CERTIFICATE_PASSWORD` | password for that `.p12` |
-| `MACOS_SIGN_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
-| `NOTARY_KEY` | base64 of an App Store Connect `.p8` key |
-| `NOTARY_KEY_ID` | that key's id |
-| `NOTARY_ISSUER` | issuer UUID |
+The workflow still skips cleanly when the secrets are absent — a fork builds
+an unsigned release, and its notes say so.
 
 ## How it stays fast
 
