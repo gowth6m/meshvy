@@ -122,9 +122,9 @@ struct EmptyStateView: View {
                         .foregroundStyle(Theme.textPrimary)
                     Text("""
                     A workspace is the repositories you work on together, each \
-                    checked out on one shared branch under ~/.forge. Open an \
-                    orchestrator terminal at its root and it can put a sub-agent \
-                    on every repo at once.
+                    checked out on one shared branch under ~/.meshvy. Open an \
+                    orchestrator terminal at its root and it can put a real \
+                    agent, with its own terminal, on every repo at once.
                     """)
                         .font(Theme.ui(12))
                         .foregroundStyle(Theme.textSecondary)

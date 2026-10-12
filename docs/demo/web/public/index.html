@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ledger — Payments</title>
+<style>
+  :root {
+    --bg: #0d1013;
+    --panel: #14181d;
+    --line: #222830;
+    --ink: #e8edf2;
+    --muted: #8d99a6;
+    --dim: #5f6b78;
+    --accent: #4ade80;
+    --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .shell { display: grid; grid-template-columns: 168px 1fr; min-height: 100vh; }
+
+  nav { border-right: 1px solid var(--line); padding: 16px 12px; background: #0b0e11; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 0 6px 16px; }
+  .brand b { font-size: 13.5px; letter-spacing: -0.2px; }
+  .dot { width: 16px; height: 16px; border-radius: 5px; background: linear-gradient(140deg, var(--accent), #15803d); }
+  nav a {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 8px; border-radius: 6px; color: var(--muted);
+    text-decoration: none; font-size: 12.5px; margin-bottom: 1px;
+  }
+  nav a.on { background: #1a2027; color: var(--ink); }
+  nav a .n { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  nav .grp { padding: 14px 8px 5px; font-size: 9.5px; letter-spacing: 0.9px; text-transform: uppercase; color: var(--dim); }
+
+  main { padding: 18px 22px 26px; }
+  header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+  h1 { font-size: 17px; font-weight: 650; letter-spacing: -0.3px; }
+  .env {
+    font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--accent); background: rgba(74,222,128,.1);
+    border: 1px solid rgba(74,222,128,.22); border-radius: 999px; padding: 2px 8px;
+  }
+  .spacer { flex: 1; }
+  .range { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .range span { padding: 3px 10px; font-size: 11px; color: var(--muted); border-right: 1px solid var(--line); }
+  .range span:last-child { border: 0; }
+  .range span.on { background: #1a2027; color: var(--ink); }
+
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; }
+  .tile .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--dim); }
+  .tile .v { font-size: 21px; font-weight: 620; letter-spacing: -0.6px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .tile .d { font-size: 11px; margin-top: 3px; color: var(--muted); }
+  .up { color: var(--accent); }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; }
+  .card h2 { font-size: 12px; font-weight: 600; padding: 11px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
+  .chart { padding: 12px 14px 6px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 10px; letter-spacing: 0.7px; text-transform: uppercase; color: var(--dim); font-weight: 500; padding: 8px 14px; }
+  td { padding: 8px 14px; border-top: 1px solid var(--line); font-size: 12px; }
+  td.id, td.amt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { font-size: 10.5px; padding: 1.5px 7px; border-radius: 999px; }
+  .ok { color: var(--accent); background: rgba(74,222,128,.1); }
+  .ref { color: var(--warn); background: rgba(251,191,36,.1); }
+  .mut { color: var(--dim); }
+  footer { margin-top: 12px; font-size: 11px; color: var(--dim); display: flex; gap: 14px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav>
+    <div class="brand"><div class="dot"></div><b>Ledger</b></div>
+    <a class="on" href="#">Overview</a>
+    <a href="#">Charges <span class="n">1,284</span></a>
+    <a href="#">Refunds <span class="n">9</span></a>
+    <a href="#">Payouts <span class="n">2</span></a>
+    <div class="grp">Develop</div>
+    <a href="#">API keys</a>
+    <a href="#">Webhooks <span class="n">3</span></a>
+    <a href="#">Logs</a>
+  </nav>
+
+  <main>
+    <header>
+      <h1>Overview</h1>
+      <span class="env">localhost:5173</span>
+      <div class="spacer"></div>
+      <div class="range"><span>24h</span><span class="on">7d</span><span>30d</span></div>
+    </header>
+
+    <div class="tiles">
+      <div class="tile"><div class="k">Volume</div><div class="v">£48,211.60</div><div class="d"><span class="up">▲ 12.4%</span> on last week</div></div>
+      <div class="tile"><div class="k">Refund rate</div><div class="v">0.7%</div><div class="d">9 of 1,284 charges</div></div>
+      <div class="tile"><div class="k">Next payout</div><div class="v">£412.80</div><div class="d">arrives Wed 14 Oct</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <h2>Volume · last 7 days</h2>
+      <div class="chart">
+        <svg viewBox="0 0 660 96" width="100%" height="96" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#4ade80" stop-opacity=".34"/>
+              <stop offset="100%" stop-color="#4ade80" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M0,74 L94,62 L188,68 L282,40 L376,47 L470,26 L564,33 L660,14 L660,96 L0,96 Z" fill="url(#g)"/>
+          <path d="M0,74 L94,62 L188,68 L282,40 L376,47 L470,26 L564,33 L660,14"
+                fill="none" stroke="#4ade80" stroke-width="1.6" stroke-linejoin="round"/>
+          <circle cx="660" cy="14" r="2.6" fill="#4ade80"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent charges</h2>
+      <table>
+        <thead><tr><th>Charge</th><th>Customer</th><th>Status</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>
+          <tr><td class="id">ch_3f91a0c2</td><td>Hale &amp; Sons</td><td><span class="pill ok">succeeded</span></td><td class="amt">£1,240.00</td></tr>
+          <tr><td class="id">ch_3f918ad1</td><td>Mirren Studio</td><td><span class="pill ok">succeeded</span></td><td class="amt">£89.00</td></tr>
+          <tr><td class="id">ch_3f9177e4</td><td>Orford Ltd</td><td><span class="pill ref">refunded</span></td><td class="amt mut">£320.00</td></tr>
+          <tr><td class="id">ch_3f915b08</td><td>Brightline</td><td><span class="pill ok">succeeded</span></td><td class="amt">£57.50</td></tr>
+          <tr><td class="id">ch_3f9142bb</td><td>Kestrel Co</td><td><span class="pill ok">succeeded</span></td><td class="amt">£2,100.00</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <footer><span>vite v6 · ready in 212 ms</span><span>api :8787 — connected</span></footer>
+  </main>
+</div>
+<script type="module">
+  console.log('[vite] connected.')
+
+  // The refunds panel is the half of this page the API has not caught up with
+  // yet: the route is not there, so the fetch comes back 404 and the table
+  // below it stays empty.
+  fetch('/v1/refunds')
+    .then((r) => {
+      if (!r.ok) throw new Error(`GET /v1/refunds — ${r.status} ${r.statusText}`)
+      return r.json()
+    })
+    .catch((e) => console.error('refunds panel failed to load:', e.message))
+</script>
+</body>
+</html>

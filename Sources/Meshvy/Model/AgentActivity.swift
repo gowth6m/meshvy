@@ -37,6 +37,15 @@ enum AgentState: String, Codable, Hashable {
         }
     }
 
+    /// The turn is over and the agent is not coming back without you: either it
+    /// reported, or it is stopped on a question, or the process has gone.
+    var isFinished: Bool {
+        switch self {
+        case .done, .blocked, .ended: return true
+        case .working, .waiting: return false
+        }
+    }
+
     /// Hook events arriving within the same second cannot be ordered by their
     /// timestamp, so they are ordered by how much they override each other
     /// instead. A permission question raised during a tool call is the state

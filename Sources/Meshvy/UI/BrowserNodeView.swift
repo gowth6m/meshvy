@@ -194,6 +194,14 @@ struct BrowserNodeView: View {
     private var content: some View {
         if let session, !isSnapshot, zoom.scale > 0.5 {
             BrowserSurface(session: session, scale: zoom.scale)
+        } else if let poster = session?.poster, isSnapshot {
+            // A documentation shot of a browser that showed a globe would be a
+            // shot of the wrong thing. See `BrowserSession.capturePoster`.
+            Image(nsImage: poster)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
         } else {
             placeholder
         }

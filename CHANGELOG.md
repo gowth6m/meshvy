@@ -1,5 +1,48 @@
 # Changelog
 
+## [Unreleased]
+
+- **New screenshots, of the build that actually ships.** The old ones predated
+  the browser, the agent settings on every card and archiving, and showed a
+  board of two repositories with nothing running on it. The hero is now a real
+  delegated run: three repositories on one branch, an agent in flight in two of
+  them, the orchestrator waiting on both, and the app they are changing open on
+  the board beside them. There is a new shot of a browser node and its console,
+  and the rest have been retaken.
+- `scripts/make-shots.sh` builds the board the images are taken against instead
+  of using whatever happens to be on the author's machine — three throwaway
+  repositories from `docs/demo/`, a workspace cut across them, a dev server,
+  and an orchestrator run that delegates. It puts the worktrees, the scratch
+  repositories and your own board back afterwards. The shots are reproducible,
+  and a public README no longer depends on private work being open.
+- **A browser draws its real page in a documentation shot.** `ImageRenderer`
+  cannot draw a `WKWebView` at all, so every shot with a browser in it showed a
+  grey globe. The session now captures a still — in an offscreen window, since
+  a view with no window snapshots to nothing — and the snapshot twin draws
+  that, the same trick the terminals already use for their screen buffer.
+- `--snapshot` waits on the agent's own hooks rather than on the word "esc to
+  interrupt" being on screen. The CLI rotates that hint, so a shot timed on it
+  landed on half-written answers. It also refreshes git before rendering and
+  waits for the read to finish, so the repository cards are not caught empty,
+  and it frames and selects what the shot is actually about: `--select
+  workspace|browser|repo`, and `--zoom` now centres on the selection rather
+  than always on the workspace node.
+- `--snapshot --browser` and `--snapshot --orchestrator` can be used together.
+  The browser was opened after the orchestrator branch had already returned, so
+  asking for both silently gave you neither.
+- A diff in a documentation shot had its left-hand gutter cut off, line numbers
+  and all. The stand-in for a `ScrollView` was given `.top` alignment, which
+  says nothing about the horizontal, so anything wider than its panel — a diff,
+  which deliberately does not wrap — was centred and clipped at both ends.
+- **The app still said `~/.forge` in three places** — the empty state, the New
+  workspace sheet and the path preview under every repository you pick — four
+  releases after the rename. Workspaces have been checked out under `~/.meshvy`
+  since 0.7.0, so the one place that told you where your repositories were
+  going was naming a directory that does not exist.
+- `--selftest` takes `--name` and `--branch`, which is how `make-shots.sh`
+  builds its board: the same path a person takes, so the shots are of a
+  workspace made the way workspaces are made.
+
 ## [0.10.3] - 2026-10-12
 
 No change to the app itself — this one is about what surrounds it.
