@@ -3,7 +3,7 @@ import Foundation
 /// Creates and tears down the worktrees that make up a workspace.
 ///
 /// Creating a workspace is one step: pick repositories and a base, and every
-/// repository gets a checkout of the same new branch under `~/.forge/<slug>/`.
+/// repository gets a checkout of the same new branch under `~/.meshvy/<slug>/`.
 /// Repositories are handled independently — if one fails the others still get
 /// their checkout, and the failure is recorded against that repo.
 struct WorkspaceBuilder {
@@ -175,7 +175,7 @@ struct WorkspaceBuilder {
         case failed(String)
     }
 
-    /// Clones a remote into `~/.forge/repos` and returns it ready to add.
+    /// Clones a remote into `~/.meshvy/repos` and returns it ready to add.
     func clone(_ reference: String) -> CloneResult {
         let directory = Workspace.meshvyHome + "/repos"
         let url = Self.normalizeRemote(reference)

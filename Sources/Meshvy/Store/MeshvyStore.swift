@@ -5,7 +5,7 @@ import SwiftUI
 /// Everything the board renders from, plus the refresh machinery.
 ///
 /// A workspace is a set of worktrees — one per repository, all on the same
-/// branch, under `~/.forge/<slug>/`. That folder is the parent an orchestrator
+/// branch, under `~/.meshvy/<slug>/`. That folder is the parent an orchestrator
 /// works from. A fresh install has no workspaces, so the board starts empty.
 @MainActor
 @Observable
@@ -231,7 +231,7 @@ final class MeshvyStore {
     }
 
     /// Creates the workspace and its worktrees in one step: every repository
-    /// gets a checkout of the same new branch under `~/.forge/<slug>/`.
+    /// gets a checkout of the same new branch under `~/.meshvy/<slug>/`.
     func createWorkspace(name: String, repos: [WorkspaceRepo], baseRef: String?, branch: String?) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = trimmed.isEmpty ? "Workspace" : trimmed

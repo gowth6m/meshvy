@@ -2,21 +2,42 @@ import AppKit
 import SwiftUI
 
 /// Headless exercise of the workspace flow, for development:
-/// `Meshvy --selftest <repoA> <repoB> … [--keep]`. Creates a throwaway
-/// workspace, checks every worktree landed on the shared branch, then removes
-/// it again unless `--keep` is passed.
+/// `Meshvy --selftest <repoA> <repoB> … [--keep] [--name N] [--branch B]`.
+/// Creates a throwaway workspace, checks every worktree landed on the shared
+/// branch, then removes it again unless `--keep` is passed.
+///
+/// `--name` and `--branch` are what `scripts/make-shots.sh` uses: the same
+/// build-a-workspace path, kept, so a documentation shot is taken against a
+/// board that was made the way a person would make one.
 @MainActor
 enum SelfTest {
     static var keep = false
+    private static var name = "Meshvy Selftest"
+
+    /// Flags that take a value, so the value is not mistaken for a repository.
+    private static let valued = ["--name", "--branch"]
 
     static func repoPaths(arguments: [String]) -> [String]? {
         guard let flag = arguments.firstIndex(of: "--selftest") else { return nil }
-        let paths = arguments[(flag + 1)...].filter { !$0.hasPrefix("--") }
-        return paths.isEmpty ? nil : Array(paths)
+        var paths: [String] = []
+        var index = flag + 1
+        while index < arguments.count {
+            let argument = arguments[index]
+            if valued.contains(argument) { index += 2; continue }
+            if !argument.hasPrefix("--") { paths.append(argument) }
+            index += 1
+        }
+        return paths.isEmpty ? nil : paths
     }
 
-    static func run(repoPaths: [String], keep: Bool) {
+    static func value(_ flag: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
+
+    static func run(repoPaths: [String], keep: Bool, name: String?, branch: String?) {
         Self.keep = keep
+        Self.name = name ?? "Meshvy Selftest"
         let store = MeshvyStore.shared
         store.bootstrap()
 
@@ -25,13 +46,14 @@ enum SelfTest {
         guard !found.repos.isEmpty else { exit(1) }
 
         store.createWorkspace(
-            name: "Meshvy Selftest", repos: found.repos, baseRef: nil, branch: "selftest-feature"
+            name: Self.name, repos: found.repos, baseRef: nil,
+            branch: branch ?? "selftest-feature"
         )
         poll(store: store, attempts: 80)
     }
 
     private static func poll(store: MeshvyStore, attempts: Int) {
-        guard let workspace = store.workspaces.first(where: { $0.name == "Meshvy Selftest" }) else {
+        guard let workspace = store.workspaces.first(where: { $0.name == Self.name }) else {
             guard attempts > 0 else { print("SELFTEST TIMEOUT"); exit(1) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 MainActor.assumeIsolated { poll(store: store, attempts: attempts - 1) }
@@ -618,6 +640,18 @@ struct SnapshotRequest {
     /// Open a browser node at this URL before rendering, so a board shot has the
     /// running application on it as well as the agents.
     var browserURL: String?
+    /// Which node the inspector should be showing. Left alone the shot picks
+    /// for itself: the workspace after an agent has run, the browser when the
+    /// shot is only about a browser, otherwise a checkout with changes in it.
+    var select: Selection?
+    /// Hand every free terminal and browser back to the layout before
+    /// rendering. An agent lands wherever there was room, so without this the
+    /// same shot frames differently every time it is taken.
+    var tidy: Bool
+
+    enum Selection: String {
+        case workspace, browser, repo
+    }
 
     init?(arguments: [String]) {
         guard let flag = arguments.firstIndex(of: "--snapshot"), flag + 1 < arguments.count else { return nil }
@@ -639,6 +673,8 @@ struct SnapshotRequest {
         shortcuts = arguments.contains("--shortcuts")
         withAgent = arguments.contains("--agent")
         browserURL = value("--browser")
+        select = value("--select").flatMap(Selection.init(rawValue:))
+        tidy = arguments.contains("--tidy")
     }
 }
 
@@ -668,37 +704,29 @@ enum Snapshot {
             return
         }
 
-        // Bring an orchestrator up first when one was asked for; its terminal
-        // is the centre of a documentation shot.
+        // Before the camera is placed, so the board is framed with it on, and
+        // before the orchestrator, so the page has the agent's whole run to
+        // load.
+        if let url = request.browserURL {
+            // Point the node the last shot left behind at this URL rather than
+            // stacking a second browser beside it.
+            if let existing = store.activeWorkspace?.browsers.first {
+                store.navigateBrowser(existing.id, to: url)
+            } else {
+                store.openBrowser(url: url, reveal: false)
+            }
+        }
+
+        // Bring an orchestrator up when one was asked for; its terminal is the
+        // centre of a documentation shot.
         if let task = request.orchestratorTask, !store.isOrchestratorRunning {
             store.startOrchestrator()
-            settleOrchestrator(store: store, task: task, request: request, attempts: 120)
+            settleOrchestrator(store: store, task: task, request: request, attempts: 360)
             return
         }
 
-        // Before the camera is placed, so the board is framed with it on. A
-        // shot that asked for a browser wants to see the browser, so it also
-        // takes the selection — including when the board already had one, which
-        // it does the second time the same shot is taken.
-        if let url = request.browserURL {
-            let existing = store.activeWorkspace?.browsers.first
-            if let node = existing ?? store.openBrowser(url: url, reveal: false) {
-                store.select(.browser(node.id))
-            }
-        }
-
-        if store.selection == nil {
-            // Prefer a checkout with changes — that is what the panel is for.
-            let dirty = store.workspaceChanges.first
-            if let dirty {
-                store.select(.worktree(dirty.repo.worktreePath))
-                store.openDiff(repoPath: dirty.repo.worktreePath, change: dirty.files[0])
-            } else if let newest = store.graph.nodes
-                .filter({ if case .session = $0.kind { return true } else { return false } })
-                .max(by: { $0.sortDate < $1.sortDate }) {
-                store.select(newest.id)
-            }
-        }
+        if request.tidy { tidy(store: store) }
+        applySelection(store: store, request: request)
         if let zoom = request.zoom {
             store.viewport.scale = CGFloat(zoom)
             if let selected = store.selection, let node = store.graph.node(selected) {
@@ -715,7 +743,7 @@ enum Snapshot {
 
         guard request.withAgent else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-                MainActor.assumeIsolated { render(store: store, request: request) }
+                MainActor.assumeIsolated { shoot(store: store, request: request) }
             }
             return
         }
@@ -724,12 +752,48 @@ enum Snapshot {
         waitForAgent(store: store, request: request, attempts: 60)
     }
 
+    /// Drops the saved position of every free terminal and browser, which is
+    /// how the composer is told to place them itself. An agent spawned mid-run
+    /// takes the first gap it finds, so a shot of a delegated run frames
+    /// differently every time unless the board is handed back first.
+    private static func tidy(store: MeshvyStore) {
+        guard let workspace = store.activeWorkspace else { return }
+        for terminal in workspace.terminals { store.moveTerminal(terminal.id, to: .zero) }
+        for browser in workspace.browsers { store.moveBrowser(browser.id, to: .zero) }
+        store.commitTerminalMove()
+    }
+
+    /// Puts the inspector on whatever the shot is about: what `--select` asked
+    /// for, or the best guess from the rest of the request.
+    private static func applySelection(store: MeshvyStore, request: SnapshotRequest) {
+        let choice = request.select
+            ?? (request.orchestratorTask != nil ? .workspace
+                : request.browserURL != nil ? .browser : .repo)
+
+        switch choice {
+        case .workspace:
+            if let id = store.activeWorkspace?.id { store.select(.workspace(id)) }
+        case .browser:
+            if let node = store.activeWorkspace?.browsers.first { store.select(.browser(node.id)) }
+        case .repo:
+            // A checkout with changes in it — that is what the panel is for.
+            if let dirty = store.workspaceChanges.first {
+                store.select(.worktree(dirty.repo.worktreePath))
+                store.openDiff(repoPath: dirty.repo.worktreePath, change: dirty.files[0])
+            } else if let newest = store.graph.nodes
+                .filter({ if case .session = $0.kind { return true } else { return false } })
+                .max(by: { $0.sortDate < $1.sortDate }) {
+                store.select(newest.id)
+            }
+        }
+    }
+
     /// Holds the render until the orchestrator's hooks have said something, so
     /// `--agent` captures a board with live status on it rather than a blank card.
     private static func waitForAgent(store: MeshvyStore, request: SnapshotRequest, attempts: Int) {
         if !store.activity.isEmpty || attempts <= 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-                MainActor.assumeIsolated { render(store: store, request: request) }
+                MainActor.assumeIsolated { shoot(store: store, request: request) }
             }
             return
         }
@@ -740,8 +804,13 @@ enum Snapshot {
         }
     }
 
-    /// Clears Claude Code's first-run prompts, sends the task, and waits for a
-    /// reply to land on screen before handing back to the renderer.
+    /// Clears Claude Code's first-run prompts, sends the task, and waits for
+    /// the turn to end before handing back to the renderer.
+    ///
+    /// The end of the turn is taken from the agent's own hooks rather than from
+    /// what is on its screen: the CLI's spinner rotates its hint, so "esc to
+    /// interrupt" is missing from plenty of frames in which it is still very
+    /// much working, and a shot timed on that lands on a half-written answer.
     private static func settleOrchestrator(
         store: MeshvyStore, task: String, request: SnapshotRequest, attempts: Int
     ) {
@@ -761,11 +830,17 @@ enum Snapshot {
                     || screen.contains("? for shortcuts")
                     || screen.contains("for agents") {
             Self.sentTask = true
+            Self.sentAt = Date()
             session.send(task)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 MainActor.assumeIsolated { session.send("\r") }
             }
-        } else if Self.sentTask, attempts < 110, !screen.contains("esc to interrupt") {
+        } else if Self.sentTask,
+                  // Long enough for the first hook event to arrive; before it
+                  // does the agent still looks like one sitting at its prompt.
+                  Date().timeIntervalSince(Self.sentAt ?? .distantFuture) > 6,
+                  let sessionID = node.sessionID,
+                  store.activity[sessionID]?.state.isFinished == true {
             // It has answered; let the last frame paint, then shoot.
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 MainActor.assumeIsolated { finish(store: store, request: request) }
@@ -782,20 +857,70 @@ enum Snapshot {
     }
 
     private static var sentTask = false
+    private static var sentAt: Date?
 
     private static func finish(store: MeshvyStore, request: SnapshotRequest) {
+        if request.tidy { tidy(store: store) }
+        // Spawning an agent reveals it, so by the end of a delegated run the
+        // inspector is showing whichever one came last. Put it back on whatever
+        // the shot is about — by default the workspace's own panel: every
+        // repository the agents touched, in one list.
+        applySelection(store: store, request: request)
+        // Git is polled, and an agent that has just written a file would not be
+        // in the panel yet — the same ⌘R a person would reach for.
+        store.refreshGitStatus()
         if let zoom = request.zoom {
+            // On whatever the shot is about, as the camera does everywhere
+            // else; the workspace node only when nothing is selected.
             store.viewport.scale = CGFloat(zoom)
-            if let id = store.activeWorkspace?.id { store.viewport.center = store.graph.node(.workspace(id))?.frame.center ?? .zero }
+            let centre = store.selection.flatMap { store.graph.node($0) }
+                ?? store.activeWorkspace.flatMap { store.graph.node(.workspace($0.id)) }
+            store.viewport.center = centre?.frame.center ?? .zero
         } else if request.zoomToFit {
             store.fit()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            MainActor.assumeIsolated { render(store: store, request: request) }
+        awaitGit(store: store, request: request, attempts: 24)
+    }
+
+    /// A refresh empties each card's git state while it re-reads it, so a shot
+    /// taken during one is of three repositories with nothing to say.
+    private static func awaitGit(store: MeshvyStore, request: SnapshotRequest, attempts: Int) {
+        guard store.isLoadingGit, attempts > 0 else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                MainActor.assumeIsolated { shoot(store: store, request: request) }
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            MainActor.assumeIsolated {
+                awaitGit(store: store, request: request, attempts: attempts - 1)
+            }
+        }
+    }
+
+    /// Fills in every browser's still before the render, because the capture
+    /// needs a window and the `ImageRenderer` pass has none.
+    private static func shoot(store: MeshvyStore, request: SnapshotRequest) {
+        let nodes = store.activeWorkspace?.browsers ?? []
+        guard !nodes.isEmpty else { render(store: store, request: request); return }
+        Task { @MainActor in
+            for node in nodes {
+                guard let session = store.ensureBrowserRunning(node.id) else { continue }
+                // The card's body, not the card: the header and address bar
+                // are drawn by SwiftUI above the page.
+                await session.capturePoster(
+                    size: CGSize(width: node.size.width, height: max(120, node.size.height - 60))
+                )
+            }
+            render(store: store, request: request)
         }
     }
 
     private static func render(store: MeshvyStore, request: SnapshotRequest) {
+        // A documentation shot is of the whole app, panels and all, whatever
+        // the board was left in.
+        store.sidebarVisible = true
+        store.inspectorVisible = true
         let view = RootView(store: store)
             .frame(width: request.size.width, height: request.size.height)
             .environment(\.colorScheme, .dark)

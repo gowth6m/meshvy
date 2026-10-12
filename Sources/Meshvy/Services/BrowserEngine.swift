@@ -42,6 +42,10 @@ final class BrowserSession: NSObject, Identifiable {
     /// What the page has logged, newest last. Capped — a chatty app would
     /// otherwise grow this without bound for as long as the board is open.
     private(set) var console: [ConsoleEntry] = []
+    /// A still of the page, for the one place the live view cannot be drawn:
+    /// an `ImageRenderer` pass has no window, and `WKWebView` draws nothing
+    /// without one. Only `--snapshot` fills this in.
+    private(set) var poster: NSImage?
 
     /// Called when the URL or title changes, so the board can persist them.
     @ObservationIgnored var onPageChange: ((_ url: String, _ title: String?) -> Void)?
@@ -251,6 +255,32 @@ final class BrowserSession: NSObject, Identifiable {
               let png = bitmap.representation(using: .png, properties: [:])
         else { throw BrowserError.message("could not encode the screenshot") }
         return png
+    }
+
+    /// Takes the still the documentation renderer draws in place of the page.
+    ///
+    /// `takeSnapshot` returns an empty image for a view that is not in a
+    /// window, so the surface is parked in an offscreen one for the length of
+    /// the capture and handed straight back — the canvas may be showing it.
+    func capturePoster(size: CGSize) async {
+        let parent = surface.superview
+        let frame = surface.frame
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        window.contentView?.addSubview(surface)
+        surface.frame = CGRect(origin: .zero, size: size)
+        defer {
+            surface.removeFromSuperview()
+            if let parent { parent.addSubview(surface); surface.frame = frame }
+        }
+
+        // One runloop turn for the resize to lay out before the camera.
+        try? await Task.sleep(for: .milliseconds(400))
+        let configuration = WKSnapshotConfiguration()
+        configuration.afterScreenUpdates = true
+        poster = try? await view.takeSnapshot(configuration: configuration)
     }
 
     // MARK: - Internals

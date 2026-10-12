@@ -13,6 +13,11 @@ agent — with its own terminal — on each of them.
 
 ![The board](docs/board.png)
 
+One workspace across three repositories, the orchestrator delegating an agent
+to two of them, and the app they are all changing running on the board beside
+them. Every screenshot here is the app drawing itself — see
+[Shots](#shots).
+
 ## Install
 
 One command, if you have the [`gh` CLI](https://cli.github.com) signed in:
@@ -137,6 +142,13 @@ app next to the agent writing it. It keeps cookies between launches, so a dev
 server you have signed into stays signed in, and the node reopens where you
 left it.
 
+![A browser on the board](docs/browser.png)
+
+Selecting the node puts the page's console in the inspector, and the header
+carries a count of what it has thrown — above, two errors from a panel whose
+endpoint does not exist yet, which is what the agent on the right was asked to
+go and read.
+
 The point is that an agent can drive the same page. Every session Meshvy
 starts is given a `browser_*` tool set over MCP, with no setup from you:
 
@@ -156,17 +168,33 @@ web change works, and the errors a page throws come back attached to whatever
 action caused them.
 
 The engine is WebKit, the same one Safari uses, rather than Chromium — it is
-what macOS can host inside a node on the canvas. Selecting a browser node opens
-its console in the inspector, and the header shows the short id an agent
-addresses it by.
+what macOS can host inside a node on the canvas. The short id in the header is
+how an agent addresses that node.
 
 ## What's on the board
 
-**Session cards** come from `~/.claude/projects/…`: title, folder, branch,
-model, prompts sent, tool calls, context size at the last turn, last activity.
+Six kinds of node, with the edges saying how they relate: a repository is
+*owned* by its workspace, an agent was *dispatched* by it, a browser *watches*
+what they produce.
+
+**The workspace node** hosts the orchestrator's session in its own body and
+names every repository under it.
 
 **Worktree cards** come from `git worktree list`: branch, dirty and untracked
 counts, divergence from upstream, tip commit.
+
+**Terminal nodes** are the agents and the shells — each a real pty you can
+read, interrupt and type into.
+
+**Browser nodes** are the running application, purple so they are findable on a
+board of agents.
+
+**Session cards** come from `~/.claude/projects/…`: title, folder, branch,
+model, prompts sent, tool calls, context size at the last turn, last activity.
+A session already shown by a terminal does not get a second card.
+
+**Sub-agent cards** are whatever an agent dispatched that has no terminal of
+its own, read out of the parent's transcript.
 
 **Agent status** comes from the agent itself, not from reading its screen.
 Every session Meshvy starts is handed hooks that report what it is doing, so a
@@ -216,10 +244,15 @@ line it matched — the one thing the canvas cannot tell you.
 Pan by dragging empty canvas or scrolling; zoom with ⌘-scroll or a pinch.
 Resting the pointer on a terminal or a browser for half a second hands it the
 wheel, so a scrollback is reachable and a page can be scrolled — zoom stays the
-canvas's. Drag any node by its title
-bar, resize from the corner grip, and drag the side panels from their inner
-edge. Scrolling follows the system "natural scrolling" preference;
+canvas's. Drag any node by its title bar, resize from the corner grip,
+double-click one to centre it, and drag the side panels from their inner edge.
+Scrolling follows the system "natural scrolling" preference;
 **View → Invert Scroll Direction** if you want the opposite.
+
+Cards thin out as you zoom out rather than turning to mush: below 62% they keep
+a title and a status line, and below 30% they are a coloured block. A terminal
+and a browser stop drawing their contents at half scale and say where they are
+pointed instead — neither is interrupted, both come straight back.
 
 **Model, effort and permission mode** sit in one menu, on the pill in the
 toolbar and on every agent card. Whatever you pick is what the next agent
@@ -227,6 +260,9 @@ starts with, and it is remembered for next time. On a card it also retunes that
 session where the CLI allows it: `/model` and `/effort` take effect straight
 away, while the permission mode is fixed at launch — ⇧⇥ cycles it inside the
 session, or restart the agent from the same menu.
+
+A fresh install opens on this, and so does a board whose last workspace you
+archived:
 
 ![Empty state](docs/empty.png)
 
@@ -336,33 +372,69 @@ step.
 Sources/Meshvy/
   App/        entry point, menus, snapshot + test harnesses
   Core/       canvas geometry, Night Owl theme, persistence
-  Model/      workspaces, terminals, sub-agents, sessions, git, diffs
+  Model/      workspaces, terminals, browsers, sub-agents, sessions, git, diffs
   Services/   byte scanner, indexer, transcript loader, git, worktree builder,
-              terminal registry, agent bridge, agent hooks, model catalog,
-              updater, FSEvents
+              terminal registry, browser engine + bridge, agent bridge,
+              agent hooks, model catalog, updater, FSEvents
   Store/      app state, board composition
-  UI/         canvas, workspace node, cards, terminals, sidebar, inspector,
-              diff viewer, command palette, transcript reader
+  UI/         canvas, workspace node, cards, terminals, browsers, sidebar,
+              inspector, diff viewer, command palette, transcript reader
 ```
 
 ### Development harnesses
 
 ```sh
-Meshvy --snapshot out.png [--zoom 0.8] [--palette] [--shortcuts] [--orchestrator "task"]
-Meshvy --selftest <repoA> <repoB> [--keep]   # build a workspace, verify, tear down
+Meshvy --snapshot out.png                    # see Shots below for the flags
+Meshvy --selftest <repoA> <repoB> [--keep] [--name N] [--branch B]
 Meshvy --bridgetest <repo>                   # spawn an agent through the bridge, no LLM
+Meshvy --browsertest [--keep]                # a real page, the MCP server, and the app
+Meshvy --hooktest [--keep]                   # the hook events a session reports
 Meshvy --launchtest                          # live orchestrator that delegates
 Meshvy --zoomtest                            # terminal magnifies without reflowing
 Meshvy --difftest <worktree>                 # change list and a parsed diff
+Meshvy --formattest                          # an older board still decodes
+Meshvy --chrometest [--shots <dir>]          # the toolbar's traffic-light gutter
+Meshvy --chromeprobe <dir>                   # the same, in real full screen
 Meshvy --updatetest [--install]              # the updater against the real release
 Meshvy --perftest                            # transcript loading on your largest session
 ```
 
-`--snapshot` renders the real view tree against your real data with no window —
-every screenshot here was made that way. `ImageRenderer` cannot draw
-`ScrollView` content, AppKit controls or an embedded terminal, so those have
-static twins behind the `meshvySnapshotMode` environment flag; a terminal draws
-its real screen buffer as text.
+`--chromeprobe` has to be launched through LaunchServices
+(`open -a Meshvy --args --chromeprobe /tmp/probe`): macOS will not keep a
+window full screen for an app that is not frontmost.
+
+### Shots
+
+```sh
+./scripts/make-shots.sh                      # every image in docs/
+./scripts/make-shots.sh board browser        # or just these
+```
+
+`--snapshot` renders the real view tree with no window, so the app can draw
+itself from a terminal. `ImageRenderer` cannot draw `ScrollView` content,
+AppKit controls, an embedded terminal or a `WKWebView`, so each of those has a
+static twin behind the `meshvySnapshotMode` environment flag: a terminal draws
+its real screen buffer as text, and a browser draws a still of its real page,
+captured in an offscreen window just before the render.
+
+| | |
+|---|---|
+| `--width` · `--height` | the window to render, in points; the PNG is 2× |
+| `--zoom 0.8` | fixed scale on the selection, instead of fitting the board |
+| `--browser <url>` | put a browser node on the board, pointed there |
+| `--orchestrator "<task>"` | start an agent, give it this, and wait for the turn to end |
+| `--select workspace\|browser\|repo` | what the inspector should be showing |
+| `--tidy` | hand the free terminals and browsers back to the layout first |
+| `--palette` · `--shortcuts` | the overlays that only exist on a keystroke |
+| `--agent` | wait for the first hook event before rendering |
+| `--wait 6` · `--no-fit` | how long to let the board settle · leave the camera alone |
+
+`make-shots.sh` builds the board the images are taken against rather than using
+whatever is on your machine: three throwaway repositories from `docs/demo/`,
+one workspace cut across them, a dev server for the web one, and a real
+orchestrator run that delegates an agent to two of them. It puts everything
+back afterwards — the worktrees, the scratch repos, and its own entry in your
+board. The agents are real, so a full run costs what the agents cost.
 
 ## What Meshvy does not do
 

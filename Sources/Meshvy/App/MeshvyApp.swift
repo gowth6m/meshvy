@@ -182,7 +182,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if arguments.contains("--launchtest") {
             LaunchTest.run()
         } else if let repos = SelfTest.repoPaths(arguments: arguments) {
-            SelfTest.run(repoPaths: repos, keep: arguments.contains("--keep"))
+            SelfTest.run(
+                repoPaths: repos,
+                keep: arguments.contains("--keep"),
+                name: SelfTest.value("--name", in: arguments),
+                branch: SelfTest.value("--branch", in: arguments)
+            )
         } else if let request = SnapshotRequest(arguments: arguments) {
             Snapshot.run(request)
         }

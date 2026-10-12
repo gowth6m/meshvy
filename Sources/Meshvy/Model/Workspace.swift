@@ -14,7 +14,7 @@ struct Workspace: Identifiable, Codable, Hashable {
     var branch: String
     /// What the branch was cut from. Nil means each repo's own default branch.
     var baseRef: String?
-    /// `~/.forge/<slug>` — contains one subdirectory per repository.
+    /// `~/.meshvy/<slug>` — contains one subdirectory per repository.
     var root: String
     var repos: [WorkspaceRepo] = []
     /// The Claude Code session that sits on top of the whole workspace. It is

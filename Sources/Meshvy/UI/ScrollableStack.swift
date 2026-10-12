@@ -18,12 +18,21 @@ struct ScrollableStack<Content: View>: View {
                 VStack(alignment: alignment, spacing: 0) {
                     content
                 }
-                .frame(width: proxy.size.width, alignment: .top)
+                // Content wider than the panel — a diff, which does not wrap —
+                // has to keep its leading edge, or the clip takes the gutter
+                // off the left and the line numbers with it.
+                .frame(width: proxy.size.width, alignment: frameAlignment)
             }
             .clipped()
         } else {
             ScrollView { content }
         }
+    }
+
+    private var frameAlignment: Alignment {
+        if alignment == .leading { return .topLeading }
+        if alignment == .trailing { return .topTrailing }
+        return .top
     }
 }
 

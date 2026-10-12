@@ -1,0 +1,10 @@
+{
+  "name": "@ledger/api",
+  "version": "2.4.1",
+  "private": true,
+  "description": "Payments API — charges, refunds, payouts",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  }
+}

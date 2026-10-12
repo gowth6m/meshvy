@@ -274,7 +274,7 @@ struct NewWorkspaceSheet: View {
     var body: some View {
         SheetFrame(
             title: "New workspace",
-            subtitle: "Pick the repositories you work on together. Meshvy cuts one branch across all of them and checks each one out side by side under ~/.forge."
+            subtitle: "Pick the repositories you work on together. Meshvy cuts one branch across all of them and checks each one out side by side under ~/.meshvy."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 FormField(label: "Name") {
@@ -315,7 +315,7 @@ struct NewWorkspaceSheet: View {
                                     .font(Theme.ui(9))
                                     .foregroundStyle(Theme.worktree)
                                 Text(repo.name).font(Theme.ui(11.5, .medium)).foregroundStyle(Theme.textPrimary)
-                                Text("~/.forge/\(Workspace.slug(name.isEmpty ? "workspace" : name))/\(repo.name)")
+                                Text("~/.meshvy/\(Workspace.slug(name.isEmpty ? "workspace" : name))/\(repo.name)")
                                     .font(Theme.mono(10))
                                     .foregroundStyle(Theme.textTertiary)
                                     .lineLimit(1)

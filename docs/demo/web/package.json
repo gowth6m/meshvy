@@ -1,0 +1,10 @@
+{
+  "name": "@ledger/web",
+  "version": "2.4.1",
+  "private": true,
+  "description": "The payments dashboard",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  }
+}
