@@ -20,6 +20,8 @@ struct InspectorView: View {
                     workspaceInspector(workspace)
                 case .subAgent(let agent):
                     subAgentInspector(agent)
+                case .browser(let browser):
+                    browserInspector(browser)
                 }
             } else {
                 emptyState
@@ -293,6 +295,106 @@ struct InspectorView: View {
                 }
             }
             .padding(14)
+        }
+    }
+
+    // MARK: - Browser
+
+    /// What the page is, and what it has logged.
+    ///
+    /// The console is the point. A browser node on its own is a nice way to
+    /// watch your app, but the reason it earns a panel is that the errors a page
+    /// throws are the ones you otherwise only find by opening devtools — and an
+    /// agent reads exactly this list through `browser_console`.
+    private func browserInspector(_ node: BrowserNode) -> some View {
+        let session = store.browsers.session(for: node.id)
+        let lines = session?.console ?? []
+        return ScrollableStack(alignment: .leading) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 7) {
+                    Image(systemName: "globe").foregroundStyle(Theme.branch)
+                    Text(node.pageTitle ?? node.title)
+                        .font(Theme.ui(15, .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    Text(session?.isLoading == true ? "loading" : (session == nil ? "idle" : "loaded"))
+                        .font(Theme.ui(10, .heavy))
+                        .foregroundStyle(session?.isLoading == true ? Theme.busy : Theme.textTertiary)
+                }
+
+                FieldGrid(rows: [
+                    .init(label: "URL", value: node.url, mono: true, copyable: node.url),
+                    .init(
+                        label: "Agent handle", value: node.shortID, mono: true,
+                        tint: Theme.branch, copyable: node.shortID
+                    ),
+                    .init(label: "Opened", value: Format.absolute(node.createdAt))
+                ])
+
+                HStack(spacing: 6) {
+                    ChromeButton(icon: "arrow.clockwise", label: "Reload") { store.reloadBrowser(node.id) }
+                    ChromeButton(icon: "arrow.up.forward.app", label: "Open in browser") {
+                        store.openInBrowser(node.url)
+                    }
+                    Spacer(minLength: 0)
+                    if !lines.isEmpty {
+                        ChromeButton(icon: "trash") { session?.clearConsole() }
+                            .help("Clear the console")
+                    }
+                }
+
+                if let error = session?.loadError {
+                    Text(error)
+                        .font(Theme.mono(10.5))
+                        .foregroundStyle(Theme.dirty)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: 6) {
+                    Text("CONSOLE")
+                        .font(Theme.ui(9.5, .heavy)).tracking(0.7).foregroundStyle(Theme.textTertiary)
+                    Text(lines.isEmpty ? "nothing logged" : "\(lines.count) lines")
+                        .font(Theme.ui(9.5)).foregroundStyle(Theme.textTertiary)
+                }
+                .padding(.top, 4)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    // Newest first: the line that matters is the one that just
+                    // appeared, and this panel is read top-down.
+                    ForEach(lines.reversed().prefix(200)) { line in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(line.level.rawValue.uppercased())
+                                .font(Theme.mono(8.5, .heavy))
+                                .foregroundStyle(tint(line.level))
+                                .frame(width: 34, alignment: .leading)
+                            Text(line.text)
+                                .font(Theme.mono(10.5))
+                                .foregroundStyle(line.level.isProblem ? Theme.textPrimary : Theme.textSecondary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(line.level.isProblem ? tint(line.level).opacity(0.1) : Theme.surface)
+                        )
+                    }
+                }
+            }
+            .padding(14)
+        }
+    }
+
+    private func tint(_ level: ConsoleEntry.Level) -> Color {
+        switch level {
+        case .error: return Theme.danger
+        case .warn: return Theme.dirty
+        case .info: return Theme.info
+        case .log: return Theme.textTertiary
         }
     }
 

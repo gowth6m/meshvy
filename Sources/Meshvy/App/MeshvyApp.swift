@@ -44,10 +44,19 @@ struct MeshvyCommands: Commands {
                 NotificationCenter.default.post(name: .meshvyOpenShell, object: nil)
             }
             .keyboardShortcut("t", modifiers: .command)
+            Button("Open Browser") {
+                NotificationCenter.default.post(name: .meshvyOpenBrowser, object: nil)
+            }
+            .keyboardShortcut("b", modifiers: .command)
             Button("Add Repositories…") {
                 NotificationCenter.default.post(name: .meshvyAddRepos, object: nil)
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
+            Divider()
+            Button("Archive Workspace") {
+                NotificationCenter.default.post(name: .meshvyArchiveWorkspace, object: nil)
+            }
+            .keyboardShortcut("a", modifiers: [.command, .option])
         }
 
         CommandMenu("Agents") {
@@ -62,10 +71,26 @@ struct MeshvyCommands: Commands {
             Divider()
             Picker("Permission Mode", selection: Binding(
                 get: { store.permissionMode },
-                set: { store.permissionMode = $0 }
+                set: { store.selectPermissionMode($0) }
             )) {
                 ForEach(PermissionMode.allCases) { mode in
                     Text(mode.label).tag(mode)
+                }
+            }
+            Picker("Effort", selection: Binding(
+                get: { store.agentEffort },
+                set: { store.selectEffort($0) }
+            )) {
+                ForEach(AgentEffort.allCases) { effort in
+                    Text(effort.label).tag(effort)
+                }
+            }
+            Picker("Model", selection: Binding(
+                get: { store.models.selectedModelID ?? "" },
+                set: { store.selectModel($0.isEmpty ? nil : $0) }
+            )) {
+                ForEach(store.models.models, id: \.key) { model in
+                    Text(model.displayName).tag(model.id ?? "")
                 }
             }
             Toggle("Notify Me When An Agent Needs Me", isOn: Binding(
@@ -142,6 +167,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DiffTest.run(path: path)
         } else if arguments.contains("--perftest") {
             PerfTest.run()
+        } else if let directory = ChromeTest.probeDirectory(arguments: arguments) {
+            // Deliberately does not take over from the scene: this one measures
+            // the window SwiftUI makes, so the app has to come up normally.
+            ChromeTest.probeRealWindow(writingTo: directory)
+        } else if arguments.contains("--formattest") {
+            FormatTest.run()
+        } else if arguments.contains("--chrometest") {
+            ChromeTest.run(shots: ChromeTest.shotsDirectory(arguments: arguments))
+        } else if arguments.contains("--browsertest") {
+            BrowserTest.run(keep: arguments.contains("--keep"))
         } else if arguments.contains("--hooktest") {
             HookTest.run(keep: arguments.contains("--keep"))
         } else if arguments.contains("--launchtest") {

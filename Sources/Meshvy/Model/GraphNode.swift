@@ -9,6 +9,7 @@ enum NodeID: Hashable, Codable {
     case terminal(UUID)
     case workspace(UUID)
     case subAgent(String)
+    case browser(UUID)
 
     var storageKey: String {
         switch self {
@@ -17,6 +18,7 @@ enum NodeID: Hashable, Codable {
         case .terminal(let id): return "t:" + id.uuidString
         case .workspace(let id): return "k:" + id.uuidString
         case .subAgent(let id): return "a:" + id
+        case .browser(let id): return "b:" + id.uuidString
         }
     }
 
@@ -29,6 +31,8 @@ enum NodeID: Hashable, Codable {
             self = .workspace(id)
         } else if storageKey.hasPrefix("a:") {
             self = .subAgent(String(storageKey.dropFirst(2)))
+        } else if storageKey.hasPrefix("b:"), let id = UUID(uuidString: String(storageKey.dropFirst(2))) {
+            self = .browser(id)
         } else { return nil }
     }
 }
@@ -41,6 +45,8 @@ enum NodeKind {
     case workspace(Workspace)
     /// A sub-agent the orchestrator dispatched with the Agent tool.
     case subAgent(SubAgent)
+    /// A browser showing the running application, drivable by an agent.
+    case browser(BrowserNode)
 }
 
 struct CanvasNode: Identifiable {
@@ -71,6 +77,8 @@ struct CanvasNode: Identifiable {
             return ([w.name, w.branch] + w.repos.map(\.name)).joined(separator: " ").lowercased()
         case .subAgent(let a):
             return [a.title, a.kind, a.prompt].joined(separator: " ").lowercased()
+        case .browser(let b):
+            return [b.title, b.url, b.pageTitle].compactMap { $0 }.joined(separator: " ").lowercased()
         }
     }
 
@@ -81,6 +89,7 @@ struct CanvasNode: Identifiable {
         case .terminal(let t): return t.createdAt
         case .workspace(let w): return w.createdAt
         case .subAgent(let a): return a.startedAt ?? .distantPast
+        case .browser(let b): return b.createdAt
         }
     }
 }
@@ -94,6 +103,8 @@ struct CanvasEdge: Identifiable {
         case owns
         /// The orchestrator dispatched this sub-agent.
         case dispatched
+        /// A browser is pointed at what this checkout is running.
+        case watches
     }
 
     var from: NodeID

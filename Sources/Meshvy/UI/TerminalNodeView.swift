@@ -94,6 +94,12 @@ struct TerminalNodeView: View {
 
             Spacer(minLength: 0)
 
+            // Only for a running agent: a plain shell has no model, no effort
+            // and no permission mode, and an exited one cannot be retuned.
+            if node.sessionID != nil, isRunning {
+                NodeAgentSettingsButton(store: store, node: node, zoom: zoom)
+            }
+
             if !isRunning {
                 Text("exited")
                     .font(zoom.font(9.5, .medium))

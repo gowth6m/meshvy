@@ -27,6 +27,13 @@ final class MeshvyStore {
 
     var hasWorkspace: Bool { activeWorkspace != nil }
 
+    /// Workspaces on the board and in the switcher.
+    var liveWorkspaces: [Workspace] { workspaces.filter { !$0.isArchived } }
+    /// Put away, newest first. Their worktrees are untouched on disk.
+    var archivedWorkspaces: [Workspace] {
+        workspaces.filter(\.isArchived).sorted { ($0.archivedAt ?? .distantPast) > ($1.archivedAt ?? .distantPast) }
+    }
+
     // MARK: Data
     private(set) var allSessions: [SessionSummary] = []
     /// Live git state for the active workspace's checkouts, keyed by path.
@@ -67,6 +74,9 @@ final class MeshvyStore {
     /// Permission mode new agents start in. Only the starting mode — ⇧⇥ still
     /// cycles it live inside the session, exactly as it does in Claude Code.
     var permissionMode = PermissionMode.acceptEdits { didSet { persistLayout() } }
+    /// Effort new agents start with. Unlike the permission mode this one *can*
+    /// be retuned in a running session, with `/effort`.
+    var agentEffort = AgentEffort.inherit { didSet { persistLayout() } }
 
     /// Terminal the pointer is over, and the one it has dwelled on long enough
     /// to be handed the scroll wheel. Nil means the canvas keeps panning.
@@ -100,6 +110,7 @@ final class MeshvyStore {
 
     // MARK: Collaborators
     let terminals = TerminalRegistry()
+    let browsers = BrowserRegistry()
     let models = ModelCatalog()
     let updates = UpdateService()
     let notifier = Notifier()
@@ -118,6 +129,7 @@ final class MeshvyStore {
     private var watchers: [DirectoryWatcher] = []
     private var bridgeWatcher: DirectoryWatcher?
     private var hookWatcher: DirectoryWatcher?
+    private var browserWatcher: DirectoryWatcher?
     private var liveTimer: Timer?
     private var gitTimer: Timer?
     private var hasFitInitially = false
@@ -141,6 +153,9 @@ final class MeshvyStore {
             return copy
         }
         activeWorkspaceID = document.activeWorkspaceID ?? document.workspaces.first?.id
+        // An archived workspace is not on the board, so it cannot be the one
+        // open — including when the archive happened in an older version.
+        if activeWorkspace?.isArchived ?? false { activeWorkspaceID = liveWorkspaces.first?.id }
         if workspaces != document.workspaces { persistWorkspaces() }
 
         refreshLive(rebuildGraph: false)
@@ -166,6 +181,10 @@ final class MeshvyStore {
         sidebarWidth = min(max(stored.sidebarWidth, 200), 520)
         inspectorWidth = min(max(stored.inspectorWidth, 320), 900)
         permissionMode = PermissionMode(rawValue: stored.permissionMode) ?? .acceptEdits
+        agentEffort = stored.effort.flatMap(AgentEffort.init(rawValue:)) ?? .inherit
+        // Only once the user has actually chosen: nil doubles as "inherit the
+        // CLI default", so an absent choice must not read as one.
+        if stored.hasModelChoice == true { models.selectedModelID = stored.modelID }
         notifier.isEnabled = stored.notificationsEnabled
         viewport.center = CGPoint(x: stored.cameraX, y: stored.cameraY)
         viewport.scale = max(Viewport.minScale, min(Viewport.maxScale, stored.scale))
@@ -296,6 +315,12 @@ final class MeshvyStore {
 
     func activate(_ id: UUID) {
         guard id != activeWorkspaceID else { return }
+        // Opening an archived workspace is how you un-archive it; there is no
+        // sense in a board you can look at but which is still filed away.
+        if workspaces.first(where: { $0.id == id })?.isArchived ?? false {
+            unarchiveWorkspace(id)
+            return
+        }
         activeWorkspaceID = id
         selection = nil
         transcript = nil
@@ -309,10 +334,73 @@ final class MeshvyStore {
         loadActiveWorkspace()
     }
 
+    /// Puts a workspace away without touching a thing on disk.
+    ///
+    /// The destructive paths already exist — close, delete worktrees, delete and
+    /// discard — and all three ask you to think. Most of the time what you want
+    /// is neither: the branch is merged, you are done with it, and you would
+    /// like it out of the switcher without being asked whether you are sure.
+    /// That is this. Every worktree stays registered in its repository, and
+    /// restoring is one click in the same menu.
+    func archiveWorkspace(_ id: UUID) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        let name = workspaces[index].name
+        // The processes do not belong to an archived board; the nodes do, and
+        // they come back untouched when it is restored.
+        for terminal in workspaces[index].allTerminals { terminals.discard(terminal.id) }
+        for browser in workspaces[index].browsers { browsers.discard(browser.id) }
+        workspaces[index].orchestrator = nil
+        workspaces[index].terminals = []
+        workspaces[index].archivedAt = Date()
+
+        let wasOpen = activeWorkspaceID == id
+        if wasOpen {
+            activeWorkspaceID = liveWorkspaces.first?.id
+            selection = nil
+            transcript = nil
+            transcriptSessionID = nil
+            worktrees = [:]
+            changes = [:]
+            activity = [:]
+            subAgents = []
+            unread = []
+            notifier.badge(0)
+            hasFitInitially = false
+        }
+        persistWorkspaces()
+        // Archiving a workspace you were not looking at should not cost you a
+        // re-index of the one you were.
+        if wasOpen {
+            if hasWorkspace { loadActiveWorkspace() } else { graph = CanvasGraph() }
+            statusLine = hasWorkspace ? summaryLine() : "No workspace — create one to get started"
+        } else {
+            rebuild()
+        }
+        show(.init(
+            kind: .success,
+            title: "Archived “\(name)”",
+            detail: "The worktrees are untouched. Restore it from the workspace menu."
+        ))
+    }
+
+    /// Brings one back and opens it.
+    func unarchiveWorkspace(_ id: UUID) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        workspaces[index].archivedAt = nil
+        let restored = workspaces[index].id
+        persistWorkspaces()
+        guard restored != activeWorkspaceID else { rebuild(); return }
+        activeWorkspaceID = restored
+        selection = nil
+        hasFitInitially = false
+        loadActiveWorkspace()
+    }
+
     /// Forgets the workspace. `removeWorktrees` also tears the checkouts off disk.
     func deleteWorkspace(_ id: UUID, removeWorktrees: Bool, force: Bool) {
         guard let workspace = workspaces.first(where: { $0.id == id }) else { return }
         for terminal in workspace.allTerminals { terminals.discard(terminal.id) }
+        for browser in workspace.browsers { browsers.discard(browser.id) }
 
         guard removeWorktrees else {
             forget(id)
@@ -344,7 +432,7 @@ final class MeshvyStore {
     private func forget(_ id: UUID) {
         workspaces.removeAll { $0.id == id }
         if activeWorkspaceID == id {
-            activeWorkspaceID = workspaces.first?.id
+            activeWorkspaceID = liveWorkspaces.first?.id
             worktrees = [:]
             hasFitInitially = false
         }
@@ -383,6 +471,8 @@ final class MeshvyStore {
     private func startBridge(for workspace: Workspace) {
         AgentBridge.install(for: workspace)
         AgentHooks.install(for: workspace)
+        BrowserBridge.install(for: workspace)
+        BrowserBridge.sweepStaleResponses(for: workspace)
         bridgeWatcher = DirectoryWatcher(
             paths: [AgentBridge.requestsDirectory(for: workspace)],
             debounce: 0.2
@@ -397,7 +487,16 @@ final class MeshvyStore {
         ) { [weak self] in
             Task { @MainActor in self?.drainHooks() }
         }
+        // A tool call is a question an agent is sitting and waiting on, so this
+        // one is as close to immediate as FSEvents will give.
+        browserWatcher = DirectoryWatcher(
+            paths: [BrowserBridge.requestsDirectory(for: workspace)],
+            debounce: 0.05
+        ) { [weak self] in
+            Task { @MainActor in self?.drainBrowserBridge() }
+        }
         drainBridge()
+        drainBrowserBridge()
     }
 
     /// Handles everything the helper has asked for since the last pass.
@@ -572,8 +671,10 @@ final class MeshvyStore {
     // MARK: - The hover guard
     //
     // The wheel pans the canvas, which is right almost everywhere — but it also
-    // means a terminal can never be scrolled back through. Resting the pointer
-    // on one hands it the wheel until the pointer leaves.
+    // means a terminal can never be scrolled back through, and a page can never
+    // be scrolled down. Resting the pointer on one hands it the wheel until the
+    // pointer leaves. Terminals and browsers share this, since node ids are
+    // unique across both.
 
     func hoverTerminal(_ id: UUID?) {
         guard hoveredTerminal != id else { return }
@@ -651,13 +752,12 @@ final class MeshvyStore {
         )
         node.size = CGSize(width: workspace.boardWidth, height: workspace.boardHeight)
         node.permissionMode = permissionMode
+        node.model = models.selectedModelID
+        node.effort = agentEffort
 
         AgentBridge.install(for: workspace)
-        let options = AgentCommand.Options(
-            model: models.selectedModelID,
-            permissionMode: permissionMode,
-            settingsPath: AgentHooks.settingsPath(for: workspace)
-        )
+        BrowserBridge.install(for: workspace)
+        let options = agentOptions(for: workspace)
         terminals.start(
             node: node,
             command: AgentCommand.orchestrator(
@@ -689,11 +789,113 @@ final class MeshvyStore {
         return terminals.isRunning(node.id)
     }
 
-    /// Opens a terminal for one repository, or a plain shell.
+    /// What every session Meshvy starts is launched with. One place, so the
+    /// orchestrator and the agents it spawns can never drift apart.
+    private func agentOptions(for workspace: Workspace) -> AgentCommand.Options {
+        AgentCommand.Options(
+            model: models.selectedModelID,
+            permissionMode: permissionMode,
+            effort: agentEffort,
+            settingsPath: AgentHooks.settingsPath(for: workspace),
+            mcpConfigPath: BrowserBridge.configPath(for: workspace)
+        )
+    }
+
+    // MARK: - Retuning a session
+    //
+    // All three settings are chosen per board and remembered for the next
+    // agent. Two of them can also be changed inside a session that is already
+    // running, because the CLI has a command for them; the permission mode
+    // cannot, so that one says so rather than pretending.
+
+    /// Model for the next agent, and for this one if it is still running.
+    func selectModel(_ id: String?, applyingTo node: TerminalNode? = nil) {
+        models.selectedModelID = id
+        persistLayout()
+        guard let node else { return }
+        guard let id else {
+            show(.init(
+                kind: .info,
+                title: "New agents will use the CLI's own model",
+                detail: "A running session keeps the model it started with."
+            ))
+            return
+        }
+        // Recorded on the node only if the session took it, so a card never
+        // claims a model its agent is not on.
+        if send("/model \(id)", to: node, saying: "switch to \(models.displayName(for: id))") {
+            updateTerminal(node.id) { $0.model = id }
+        }
+    }
+
+    /// Effort for the next agent, and for this one if it is still running.
+    func selectEffort(_ effort: AgentEffort, applyingTo node: TerminalNode? = nil) {
+        agentEffort = effort
+        guard let node else { return }
+        guard let level = effort.flag else {
+            show(.init(
+                kind: .info,
+                title: "New agents will use the CLI's own effort level",
+                detail: "A running session keeps the level it started with."
+            ))
+            return
+        }
+        if send("/effort \(level)", to: node, saying: "think with \(effort.label.lowercased()) effort") {
+            updateTerminal(node.id) { $0.effort = effort }
+        }
+    }
+
+    /// Permission mode for the next agent. A running session's mode is not
+    /// something the CLI exposes, so this says how to change it instead of
+    /// quietly doing nothing.
+    func selectPermissionMode(_ mode: PermissionMode, notifyingAbout node: TerminalNode? = nil) {
+        permissionMode = mode
+        guard let node, terminals.isRunning(node.id) else { return }
+        show(.init(
+            kind: .info,
+            title: "New agents will start in “\(mode.label)”",
+            detail: "⇧⇥ cycles the mode inside \(node.title), or restart it to launch in this one."
+        ))
+    }
+
+    /// Types a slash command into a running session, the way you would yourself.
+    ///
+    /// Returns false when there was no session to type into. An agent that is
+    /// mid-turn still takes it — Claude Code queues what you type and runs it
+    /// when the turn ends — but that is worth saying rather than leaving you to
+    /// wonder why nothing changed.
+    @discardableResult
+    private func send(_ command: String, to node: TerminalNode, saying what: String) -> Bool {
+        guard let session = terminals.session(for: node.id), session.isRunning else { return false }
+        session.send(command + "\r")
+        let isBusy = activity(for: node)?.state == .working
+        show(.init(
+            kind: .info,
+            title: "Asked \(node.title) to \(what)",
+            detail: isBusy ? "It is mid-turn, so this runs when the turn ends." : nil
+        ))
+        return true
+    }
+
+    /// Edits one terminal in place, wherever it lives on the workspace.
+    private func updateTerminal(_ id: UUID, _ edit: (inout TerminalNode) -> Void) {
+        guard var workspace = activeWorkspace else { return }
+        if var node = workspace.orchestrator, node.id == id {
+            edit(&node)
+            workspace.orchestrator = node
+        } else if let index = workspace.terminals.firstIndex(where: { $0.id == id }) {
+            edit(&workspace.terminals[index])
+        } else {
+            return
+        }
+        update(workspace)
+    }
+
     private func currentPath() -> String {
         ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
     }
 
+    /// Opens a terminal for one repository, or a plain shell.
     @discardableResult
     func openTerminal(
         role: TerminalNode.Role,
@@ -725,6 +927,8 @@ final class MeshvyStore {
         node.bridgeID = bridgeID
         node.openingTask = openingTask
         node.permissionMode = permissionMode
+        node.model = models.selectedModelID
+        node.effort = agentEffort
 
         let command: [String]
         if role == .shell {
@@ -734,11 +938,7 @@ final class MeshvyStore {
             command = AgentCommand.repoAgent(
                 workspace: workspace, repo: repo, sessionID: sessionID!, name: name,
                 task: openingTask,
-                options: AgentCommand.Options(
-                    model: models.selectedModelID,
-                    permissionMode: permissionMode,
-                    settingsPath: AgentHooks.settingsPath(for: workspace)
-                )
+                options: agentOptions(for: workspace)
             )
         }
 
@@ -748,6 +948,326 @@ final class MeshvyStore {
         selection = .terminal(node.id)
         reveal(.terminal(node.id))
         return node
+    }
+
+    // MARK: - Browsers
+    //
+    // A workspace is repositories plus agents, but what the agents are building
+    // is a running application — and until there was a browser on the board, the
+    // only way to look at one was to leave Meshvy. A browser node is a real page
+    // on the canvas: the person watches it, and the agent drives it through the
+    // `browser_*` tools. See `BrowserBridge`.
+
+    /// Puts a browser on the board. Reuses one already pointed at the same host
+    /// and port rather than stacking a second node on top of it.
+    @discardableResult
+    func openBrowser(
+        url: String = "",
+        title: String? = nil,
+        repoID: String? = nil,
+        bridgeID: String? = nil,
+        reveal shouldReveal: Bool = true
+    ) -> BrowserNode? {
+        guard var workspace = activeWorkspace else { return nil }
+
+        // Empty is the menu item: a blank node whose address bar is the prompt.
+        // Every agent-driven path arrives here with a URL.
+        var target = ""
+        var origin: String?
+        if !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let normalized = BrowserNode.normalize(url) else {
+                show(.init(kind: .failure, title: "That is not a URL Meshvy can open", detail: url))
+                return nil
+            }
+            target = normalized
+            origin = URLComponents(string: normalized).flatMap { components -> String? in
+                guard let host = components.host else { return nil }
+                return host + (components.port.map { ":\($0)" } ?? "")
+            }
+        }
+        if let origin, let existing = workspace.browsers.first(where: { $0.origin == origin }) {
+            navigateBrowser(existing.id, to: target)
+            if shouldReveal { reveal(.browser(existing.id)) }
+            return activeWorkspace?.browsers.first { $0.id == existing.id }
+        }
+
+        var node = BrowserNode(
+            title: title ?? (origin ?? "Browser"),
+            url: target,
+            repoID: repoID,
+            bridgeID: bridgeID,
+            hasFixedTitle: title != nil
+        )
+        node.size = CGSize(width: 880, height: 600)
+        browsers.start(node: node)
+        bindBrowser(node.id)
+        workspace.browsers.append(node)
+        update(workspace)
+        if shouldReveal {
+            selection = .browser(node.id)
+            reveal(.browser(node.id))
+        }
+        return node
+    }
+
+    /// Mounts the engine for a node restored from a saved board, so an agent can
+    /// address it before anyone has looked at it.
+    func ensureBrowserRunning(_ id: UUID) -> BrowserSession? {
+        guard let node = activeWorkspace?.browsers.first(where: { $0.id == id }) else { return nil }
+        let session = browsers.session(for: id) ?? browsers.start(node: node)
+        bindBrowser(id)
+        return session
+    }
+
+    /// Writes the page's own URL and title back onto the node, so the board
+    /// reopens where it was left and the header says what the page says.
+    private func bindBrowser(_ id: UUID) {
+        guard let session = browsers.session(for: id), session.onPageChange == nil else { return }
+        session.onPageChange = { [weak self] url, pageTitle in
+            guard let self, var workspace = self.activeWorkspace,
+                  let index = workspace.browsers.firstIndex(where: { $0.id == id }) else { return }
+            let node = workspace.browsers[index]
+            guard node.url != url || node.pageTitle != pageTitle else { return }
+            workspace.browsers[index].url = url
+            workspace.browsers[index].pageTitle = pageTitle
+            if !node.hasFixedTitle, let pageTitle, !pageTitle.isEmpty {
+                workspace.browsers[index].title = pageTitle
+            }
+            self.update(workspace)
+        }
+    }
+
+    func navigateBrowser(_ id: UUID, to url: String) {
+        guard var workspace = activeWorkspace,
+              let index = workspace.browsers.firstIndex(where: { $0.id == id }),
+              let target = BrowserNode.normalize(url) else { return }
+        workspace.browsers[index].url = target
+        update(workspace)
+        _ = ensureBrowserRunning(id)?.load(target)
+    }
+
+    func reloadBrowser(_ id: UUID) { ensureBrowserRunning(id)?.reload() }
+
+    func closeBrowser(_ id: UUID) {
+        browsers.discard(id)
+        guard var workspace = activeWorkspace else { return }
+        workspace.browsers.removeAll { $0.id == id }
+        update(workspace)
+        if selection == .browser(id) { selection = nil }
+    }
+
+    func moveBrowser(_ id: UUID, to position: CGPoint, size: CGSize? = nil) {
+        guard var workspace = activeWorkspace,
+              let index = workspace.browsers.firstIndex(where: { $0.id == id }) else { return }
+        workspace.browsers[index].position = position
+        if let size { workspace.browsers[index].size = size }
+        workspaces[workspaces.firstIndex { $0.id == workspace.id }!] = workspace
+        if let node = graph.nodes.firstIndex(where: { $0.id == .browser(id) }) {
+            graph.nodes[node].position = position
+            if let size { graph.nodes[node].size = size }
+            graph.nodes[node].kind = .browser(workspace.browsers[index])
+        }
+    }
+
+    // MARK: - Browser tools
+    //
+    // Everything below answers a `browser_*` tool call. Each one is a file the
+    // MCP server dropped and is blocking on, so every path must write exactly
+    // one answer back — including the failures.
+
+    private func drainBrowserBridge() {
+        guard let workspace = activeWorkspace else { return }
+        for (url, request) in BrowserBridge.pendingRequests(for: workspace) {
+            // Removed first: a request that throws must not be retried forever.
+            try? FileManager.default.removeItem(at: url)
+            Task { @MainActor [weak self] in await self?.serve(request, in: workspace) }
+        }
+    }
+
+    private func serve(_ request: BrowserBridge.Request, in workspace: Workspace) async {
+        do {
+            let result = try await perform(request)
+            BrowserBridge.answer(
+                .init(id: request.id, ok: true, result: result, error: nil), in: workspace
+            )
+        } catch {
+            BrowserBridge.answer(
+                .init(id: request.id, ok: false, result: nil, error: error.localizedDescription),
+                in: workspace
+            )
+        }
+    }
+
+    private func perform(_ request: BrowserBridge.Request) async throws -> String {
+        guard let workspace = activeWorkspace else {
+            throw BrowserSession.BrowserError.message("no workspace is open in Meshvy")
+        }
+
+        switch request.op {
+        case "open":
+            guard let url = request.url else {
+                throw BrowserSession.BrowserError.message("browser_open needs a url")
+            }
+            guard let node = openBrowser(url: url, title: request.title, bridgeID: request.node) else {
+                throw BrowserSession.BrowserError.message("could not open \(url)")
+            }
+            return "Opened browser \(node.shortID) at \(node.url). "
+                + "Pass node: \"\(node.shortID)\" to the other browser tools, or omit it while this is the only one."
+
+        case "list":
+            guard !workspace.browsers.isEmpty else { return "No browser nodes on the board yet." }
+            return workspace.browsers.map { node in
+                let session = browsers.session(for: node.id)
+                let state = session?.isLoading == true ? "loading" : (session == nil ? "idle" : "loaded")
+                let problems = session?.console.filter { $0.level == .error }.count ?? 0
+                return "\(node.shortID)  \(state)  \(node.url)"
+                    + (node.pageTitle.map { "  — \($0)" } ?? "")
+                    + (problems > 0 ? "  [\(problems) console errors]" : "")
+            }.joined(separator: "\n")
+
+        case "close":
+            let node = try resolve(request.node, in: workspace)
+            closeBrowser(node.id)
+            return "Closed browser \(node.shortID)."
+
+        default:
+            break
+        }
+
+        let node = try resolve(request.node, in: workspace)
+        guard let session = ensureBrowserRunning(node.id) else {
+            throw BrowserSession.BrowserError.message("browser \(node.shortID) is not running")
+        }
+
+        // What the page logs from here on is this action's doing, and is worth
+        // handing back with the result rather than waiting to be asked.
+        let mark = session.console.count
+
+        switch request.op {
+        case "navigate":
+            guard let url = request.url else {
+                throw BrowserSession.BrowserError.message("browser_navigate needs a url")
+            }
+            navigateBrowser(node.id, to: url)
+            try await settle(session)
+            return "Loaded \(session.url)." + consoleTail(session, since: 0)
+
+        case "snapshot":
+            try await settle(session)
+            return try await session.snapshot().transcript
+
+        case "click":
+            guard let selector = request.selector else {
+                throw BrowserSession.BrowserError.message("browser_click needs a selector")
+            }
+            let outcome = try await session.click(selector: selector)
+            try await settle(session)
+            return outcome + consoleTail(session, since: mark)
+
+        case "type":
+            guard let selector = request.selector, let text = request.text else {
+                throw BrowserSession.BrowserError.message("browser_type needs a selector and text")
+            }
+            let outcome = try await session.type(
+                selector: selector, text: text, submit: request.submit ?? false
+            )
+            try await settle(session)
+            return outcome + consoleTail(session, since: mark)
+
+        case "eval":
+            guard let javaScript = request.js else {
+                throw BrowserSession.BrowserError.message("browser_eval needs js")
+            }
+            return try await session.evaluate(javaScript)
+
+        case "console":
+            let limit = max(1, min(request.limit ?? 40, 200))
+            let lines = session.console.suffix(limit)
+            guard !lines.isEmpty else { return "The page has logged nothing." }
+            return lines.map { "[\($0.level.rawValue)] \($0.text)" }.joined(separator: "\n")
+
+        case "screenshot":
+            let data = try await session.screenshot()
+            let directory = BrowserBridge.shotsDirectory(for: workspace)
+            try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            let path = directory + "/\(node.shortID)-\(Int(Date().timeIntervalSince1970)).png"
+            try data.write(to: URL(fileURLWithPath: path))
+            return "Wrote \(path) — read it with the Read tool."
+
+        case "wait":
+            let timeout = Double(max(500, min(request.timeoutMs ?? 10_000, 120_000))) / 1000
+            return try await session.waitFor(
+                text: request.text, selector: request.selector, timeout: timeout
+            )
+
+        case "reload":
+            session.reload()
+            try await settle(session)
+            return "Reloaded \(session.url)." + consoleTail(session, since: 0)
+
+        case "back":
+            guard session.canGoBack else {
+                throw BrowserSession.BrowserError.message("nothing to go back to")
+            }
+            session.goBack()
+            try await settle(session)
+            return "Back at \(session.url)."
+
+        default:
+            throw BrowserSession.BrowserError.message("unknown browser op “\(request.op)”")
+        }
+    }
+
+    /// Which browser a tool call means. One on the board needs no saying; more
+    /// than one and the answer lists them rather than guessing.
+    private func resolve(_ hint: String?, in workspace: Workspace) throws -> BrowserNode {
+        if let hint, !hint.isEmpty {
+            let needle = hint.lowercased()
+            if let match = workspace.browsers.first(where: {
+                $0.shortID == needle || $0.id.uuidString.lowercased() == needle
+                    || $0.bridgeID?.lowercased() == needle
+                    || $0.title.lowercased() == needle
+            }) { return match }
+            throw BrowserSession.BrowserError.message(
+                "no browser “\(hint)” on the board. Open one with browser_open, "
+                    + "or call browser_list to see them."
+            )
+        }
+        switch workspace.browsers.count {
+        case 0:
+            throw BrowserSession.BrowserError.message(
+                "there is no browser on the board — call browser_open with a url first"
+            )
+        case 1:
+            return workspace.browsers[0]
+        default:
+            let ids = workspace.browsers.map { "\($0.shortID) (\($0.url))" }.joined(separator: ", ")
+            throw BrowserSession.BrowserError.message(
+                "there are \(workspace.browsers.count) browsers on the board — pass node: one of \(ids)"
+            )
+        }
+    }
+
+    /// Gives a navigation a moment to land, so a snapshot taken straight after a
+    /// click reads the page that click produced rather than the one before it.
+    private func settle(_ session: BrowserSession, within seconds: Double = 8) async throws {
+        try? await Task.sleep(for: .milliseconds(120))
+        let deadline = Date().addingTimeInterval(seconds)
+        while session.isLoading, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(120))
+        }
+    }
+
+    /// Errors the page threw while we were acting on it, counted from `since`
+    /// so a click is not blamed for what the page logged on load. Attached to
+    /// the result because that is the moment they matter, and an agent that has
+    /// to ask twice usually does not ask at all. A navigation passes 0: it
+    /// cleared the console's relevance anyway.
+    private func consoleTail(_ session: BrowserSession, since mark: Int, limit: Int = 10) -> String {
+        let problems = session.console.dropFirst(mark).filter { $0.level.isProblem }.suffix(limit)
+        guard !problems.isEmpty else { return "" }
+        return "\n\nThe page logged:\n"
+            + problems.map { "[\($0.level.rawValue)] \($0.text)" }.joined(separator: "\n")
     }
 
     // MARK: - Sub-agents
@@ -1015,6 +1535,7 @@ final class MeshvyStore {
                 // FSEvents is the fast path for hook payloads; this is the
                 // backstop for the ones it coalesces away.
                 self?.drainHooks()
+                self?.drainBrowserBridge()
             }
         }
         gitTimer = Timer.scheduledTimer(withTimeInterval: 90, repeats: true) { [weak self] _ in
@@ -1104,6 +1625,10 @@ final class MeshvyStore {
             moveTerminal(terminalID, to: position)
             return
         }
+        if case .browser(let browserID) = id {
+            moveBrowser(browserID, to: position)
+            return
+        }
         guard let index = graph.nodes.firstIndex(where: { $0.id == id }) else { return }
         graph.nodes[index].position = position
         graph.nodes[index].isPinned = true
@@ -1116,6 +1641,7 @@ final class MeshvyStore {
         pinned.removeAll()
         if var workspace = activeWorkspace {
             for index in workspace.terminals.indices { workspace.terminals[index].position = .zero }
+            for index in workspace.browsers.indices { workspace.browsers[index].position = .zero }
             update(workspace)
         }
         rebuild()
@@ -1134,6 +1660,9 @@ final class MeshvyStore {
         saved.inspectorWidth = inspectorWidth
         saved.permissionMode = permissionMode.rawValue
         saved.notificationsEnabled = notifier.isEnabled
+        saved.effort = agentEffort.rawValue
+        saved.hasModelChoice = true
+        saved.modelID = models.selectedModelID
         layoutStore.save(saved)
     }
 
@@ -1210,6 +1739,13 @@ final class MeshvyStore {
 
     func revealInFinder(_ path: String) {
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+    }
+
+    /// Hands a page to the user's real browser — for the moment a canvas node
+    /// is not the right place to be, like signing in or opening devtools.
+    func openInBrowser(_ url: String) {
+        guard let normalized = BrowserNode.normalize(url), let target = URL(string: normalized) else { return }
+        NSWorkspace.shared.open(target)
     }
 
     func openInEditor(_ path: String) {

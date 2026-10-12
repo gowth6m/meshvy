@@ -22,13 +22,20 @@ struct Workspace: Identifiable, Codable, Hashable {
     var orchestrator: TerminalNode?
     /// Per-repo agents and plain shells, placed freely on the board.
     var terminals: [TerminalNode] = []
+    /// Browser nodes on the board — a page you can watch and an agent can drive.
+    var browsers: [BrowserNode] = []
     /// Size of the workspace node on the board.
     var boardWidth: Double = 780
     var boardHeight: Double = 520
     var createdAt: Date = Date()
     var notes: String?
+    /// Set when the workspace has been archived: the worktrees stay exactly
+    /// where they are, it just leaves the board and the switcher. Decoded as
+    /// nil for boards saved before archiving existed, which read as active.
+    var archivedAt: Date?
 
     var readyRepos: [WorkspaceRepo] { repos.filter(\.isReady) }
+    var isArchived: Bool { archivedAt != nil }
     /// Every terminal on the board, orchestrator included.
     var allTerminals: [TerminalNode] { (orchestrator.map { [$0] } ?? []) + terminals }
     /// Height the node collapses to when no orchestrator is running.
@@ -52,6 +59,37 @@ struct Workspace: Identifiable, Codable, Hashable {
             .joined(separator: "-")
         return collapsed.isEmpty ? "workspace" : collapsed
     }
+
+    init(
+        id: UUID = UUID(), name: String, branch: String, baseRef: String? = nil, root: String
+    ) {
+        self.id = id
+        self.name = name
+        self.branch = branch
+        self.baseRef = baseRef
+        self.root = root
+    }
+
+    /// Reads a board saved by any version of Meshvy. Only `name` and `root` are
+    /// load-bearing; everything else fills in, so adding a field here never
+    /// costs anyone the workspaces they already had.
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        id = fields.value(.id, or: UUID())
+        name = fields.value(.name, or: "Workspace")
+        branch = fields.value(.branch, or: "main")
+        baseRef = fields.optional(String.self, .baseRef)
+        root = fields.value(.root, or: Workspace.meshvyHome + "/workspace")
+        repos = fields.value(.repos, or: [])
+        orchestrator = fields.optional(TerminalNode.self, .orchestrator)
+        terminals = fields.value(.terminals, or: [])
+        browsers = fields.value(.browsers, or: [])
+        boardWidth = fields.value(.boardWidth, or: 780)
+        boardHeight = fields.value(.boardHeight, or: 520)
+        createdAt = fields.value(.createdAt, or: Date())
+        notes = fields.optional(String.self, .notes)
+        archivedAt = fields.optional(Date.self, .archivedAt)
+    }
 }
 
 /// One repository's checkout inside a workspace.
@@ -67,6 +105,23 @@ struct WorkspaceRepo: Identifiable, Codable, Hashable {
     var failure: String?
 
     var isReady: Bool { failure == nil }
+
+    init(id: String, name: String, originPath: String, worktreePath: String, failure: String? = nil) {
+        self.id = id
+        self.name = name
+        self.originPath = originPath
+        self.worktreePath = worktreePath
+        self.failure = failure
+    }
+
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        id = fields.value(.id, or: "")
+        name = fields.value(.name, or: "repo")
+        originPath = fields.value(.originPath, or: "")
+        worktreePath = fields.value(.worktreePath, or: "")
+        failure = fields.optional(String.self, .failure)
+    }
 }
 
 /// How much an agent asks before it acts.
@@ -75,9 +130,10 @@ struct WorkspaceRepo: Identifiable, Codable, Hashable {
 /// session. The raw values are the ones `claude --permission-mode` accepts.
 enum PermissionMode: String, Codable, CaseIterable, Identifiable {
     case `default`
-    case auto
-    case acceptEdits
     case plan
+    case acceptEdits
+    case auto
+    case dontAsk
     case bypassPermissions
 
     var id: String { rawValue }
@@ -88,6 +144,7 @@ enum PermissionMode: String, Codable, CaseIterable, Identifiable {
         case .auto: return "Auto"
         case .acceptEdits: return "Accept edits"
         case .plan: return "Plan first"
+        case .dontAsk: return "Don't ask"
         case .bypassPermissions: return "Bypass permissions"
         }
     }
@@ -98,6 +155,7 @@ enum PermissionMode: String, Codable, CaseIterable, Identifiable {
         case .auto: return "Decides for itself which actions need you."
         case .acceptEdits: return "Writes files without asking; still asks for commands."
         case .plan: return "Plans first, acts once you approve."
+        case .dontAsk: return "Never asks — anything not pre-approved is refused."
         case .bypassPermissions: return "Acts without asking. Use with care."
         }
     }
@@ -108,12 +166,74 @@ enum PermissionMode: String, Codable, CaseIterable, Identifiable {
         case .auto: return "wand.and.stars"
         case .acceptEdits: return "square.and.pencil"
         case .plan: return "list.bullet.rectangle"
+        case .dontAsk: return "nosign"
         case .bypassPermissions: return "bolt.fill"
         }
     }
 
     /// Worth a warning in the menu: nothing will stop the agent.
     var isRisky: Bool { self == .bypassPermissions }
+}
+
+/// How hard a model thinks before it answers.
+///
+/// `claude --effort` takes one of five levels; `inherit` passes no flag at all,
+/// leaving whatever the CLI is configured with. Unlike the permission mode this
+/// *can* be retuned inside a running session, with `/effort <level>`.
+enum AgentEffort: String, Codable, CaseIterable, Identifiable {
+    case inherit
+    case low
+    case medium
+    case high
+    case xhigh
+    case max
+
+    var id: String { rawValue }
+
+    /// What to pass to `--effort`, or nil to leave the flag off.
+    var flag: String? { self == .inherit ? nil : rawValue }
+
+    var label: String {
+        switch self {
+        case .inherit: return "Inherit CLI default"
+        case .low: return "Low"
+        case .medium: return "Medium"
+        case .high: return "High"
+        case .xhigh: return "Extra high"
+        case .max: return "Max"
+        }
+    }
+
+    /// Short enough for a node header.
+    var shortLabel: String {
+        switch self {
+        case .inherit: return "default"
+        case .xhigh: return "xhigh"
+        default: return rawValue
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .inherit: return "Whatever the CLI is set to."
+        case .low: return "Fastest, least thorough."
+        case .medium: return "Balanced."
+        case .high: return "Thinks longer before acting."
+        case .xhigh: return "Slower still, for work that needs it."
+        case .max: return "Everything it has. Slowest and dearest."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .inherit: return "circle.dashed"
+        case .low: return "gauge.low"
+        case .medium: return "gauge.medium"
+        case .high: return "gauge.high"
+        case .xhigh: return "speedometer"
+        case .max: return "flame"
+        }
+    }
 }
 
 /// A terminal placed on the canvas.
@@ -163,6 +283,10 @@ struct TerminalNode: Identifiable, Codable, Hashable {
     /// Mode this session was launched in. Decoded as nil for boards saved before
     /// the setting existed, which read as the app default.
     var permissionMode: PermissionMode?
+    /// Model it was launched with. Nil means the CLI's own default.
+    var model: String?
+    /// Effort it was launched with, and what `/effort` has since set it to.
+    var effort: AgentEffort?
     var x: Double = 0
     var y: Double = 0
     var width: Double = 620
@@ -177,6 +301,39 @@ struct TerminalNode: Identifiable, Codable, Hashable {
     var size: CGSize {
         get { CGSize(width: width, height: height) }
         set { width = newValue.width; height = newValue.height }
+    }
+
+    init(
+        id: UUID = UUID(), role: Role, title: String, cwd: String,
+        repoID: String? = nil, sessionID: String? = nil
+    ) {
+        self.id = id
+        self.role = role
+        self.title = title
+        self.cwd = cwd
+        self.repoID = repoID
+        self.sessionID = sessionID
+    }
+
+    /// Lenient for the same reason as `Workspace`.
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        id = fields.value(.id, or: UUID())
+        role = fields.value(.role, or: .shell)
+        title = fields.value(.title, or: "Terminal")
+        cwd = fields.value(.cwd, or: NSHomeDirectory())
+        repoID = fields.optional(String.self, .repoID)
+        sessionID = fields.optional(String.self, .sessionID)
+        bridgeID = fields.optional(String.self, .bridgeID)
+        openingTask = fields.optional(String.self, .openingTask)
+        permissionMode = fields.optional(PermissionMode.self, .permissionMode)
+        model = fields.optional(String.self, .model)
+        effort = fields.optional(AgentEffort.self, .effort)
+        x = fields.value(.x, or: 0)
+        y = fields.value(.y, or: 0)
+        width = fields.value(.width, or: 620)
+        height = fields.value(.height, or: 380)
+        createdAt = fields.value(.createdAt, or: Date())
     }
 }
 

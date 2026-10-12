@@ -95,6 +95,10 @@ struct RootView: View {
         }
         .onReceive(of: .meshvyOpenOrchestrator) { if store.hasWorkspace { store.startOrchestrator() } }
         .onReceive(of: .meshvyOpenShell) { if store.hasWorkspace { store.openTerminal(role: .shell) } }
+        .onReceive(of: .meshvyOpenBrowser) { if store.hasWorkspace { store.openBrowser() } }
+        .onReceive(of: .meshvyArchiveWorkspace) {
+            if let active = store.activeWorkspace { store.archiveWorkspace(active.id) }
+        }
     }
 }
 
@@ -131,27 +135,36 @@ struct EmptyStateView: View {
 
                 PrimaryButton(title: "New workspace") { sheet = .newWorkspace }
 
-                if !store.workspaces.isEmpty {
-                    VStack(spacing: 5) {
-                        Text("OR OPEN")
-                            .font(Theme.ui(9, .heavy))
-                            .tracking(0.8)
-                            .foregroundStyle(Theme.textTertiary)
-                        ForEach(store.workspaces) { workspace in
-                            Button { store.activate(workspace.id) } label: {
-                                Text(workspace.name)
-                                    .font(Theme.ui(12, .medium))
-                                    .foregroundStyle(Theme.textSecondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.top, 6)
+                if !store.liveWorkspaces.isEmpty {
+                    workspaceList("OR OPEN", store.liveWorkspaces)
+                }
+                // Archiving when it was the last one open lands you here, so
+                // the way back has to be on this screen too.
+                if !store.archivedWorkspaces.isEmpty {
+                    workspaceList("ARCHIVED", store.archivedWorkspaces)
                 }
             }
             .padding(40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func workspaceList(_ title: String, _ workspaces: [Workspace]) -> some View {
+        VStack(spacing: 5) {
+            Text(title)
+                .font(Theme.ui(9, .heavy))
+                .tracking(0.8)
+                .foregroundStyle(Theme.textTertiary)
+            ForEach(workspaces) { workspace in
+                Button { store.activate(workspace.id) } label: {
+                    Text(workspace.name)
+                        .font(Theme.ui(12, .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 6)
     }
 }
 
@@ -160,14 +173,18 @@ struct EmptyStateView: View {
 private struct TopBar: View {
     @Bindable var store: MeshvyStore
     @Binding var sheet: MeshvySheet?
-    @State private var trafficLights = true
+    @State private var confirmingArchive = false
+
+    /// Read on every render rather than held in `@State`, so the bar cannot be
+    /// left holding a stale answer — see `WindowChrome`.
+    private var chrome: WindowChrome { WindowChrome.shared }
 
     static let height: CGFloat = 48
 
     /// The traffic lights run to x=69, so the first control sits just past them
     /// and the panel toggles read as the two ends of the bar. In full screen
     /// the lights go away and the gutter with them.
-    private var leadingInset: CGFloat { trafficLights ? 78 : 12 }
+    private var leadingInset: CGFloat { chrome.trafficLightsVisible ? 78 : 12 }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -180,7 +197,7 @@ private struct TopBar: View {
         .frame(height: Self.height)
         .background(Theme.chrome)
         .background(
-            TrafficLightLayout(barHeight: Self.height) { trafficLights = $0 }
+            TrafficLightLayout(barHeight: Self.height)
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
         )
@@ -206,6 +223,7 @@ private struct TopBar: View {
             workspaceMenu
 
             if store.hasWorkspace {
+                archiveButton
                 AccentButton(
                     icon: store.isOrchestratorRunning ? "point.3.connected.trianglepath.dotted" : "play.fill",
                     label: store.isOrchestratorRunning ? "Go to orchestrator" : "Start Claude Code"
@@ -219,7 +237,34 @@ private struct TopBar: View {
                 .help("Claude Code runs on the workspace node, with every repo beneath it")
                 .padding(.leading, 3)
 
-                PermissionModePicker(store: store)
+                AgentSettingsPicker(store: store)
+            }
+        }
+    }
+
+    /// Archiving is one click, because nothing it does needs thinking about:
+    /// the worktrees stay, the branch stays, and the way back is in the
+    /// workspace menu. The one case worth a question is archiving a board with
+    /// agents still running on it, since that does stop them.
+    @ViewBuilder
+    private var archiveButton: some View {
+        if let active = store.activeWorkspace {
+            let running = active.allTerminals.filter { store.terminals.isRunning($0.id) }.count
+            ChromeButton(icon: "archivebox") {
+                if running > 0 { confirmingArchive = true } else { store.archiveWorkspace(active.id) }
+            }
+            .help("Archive “\(active.name)” — keeps every worktree (⌥⌘A)")
+            .confirmationDialog(
+                "Archive “\(active.name)”?",
+                isPresented: $confirmingArchive,
+                titleVisibility: .visible
+            ) {
+                Button("Archive and stop \(running) \(running == 1 ? "agent" : "agents")") {
+                    store.archiveWorkspace(active.id)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The worktrees and the branch are untouched. Restore it from the workspace menu.")
             }
         }
     }
@@ -314,7 +359,7 @@ private struct TopBar: View {
 
     private var workspaceMenu: some View {
         SnapshotSafeMenu {
-            ForEach(store.workspaces) { workspace in
+            ForEach(store.liveWorkspaces) { workspace in
                 Button {
                     store.activate(workspace.id)
                 } label: {
@@ -324,12 +369,28 @@ private struct TopBar: View {
                     )
                 }
             }
-            if !store.workspaces.isEmpty { Divider() }
+            if !store.liveWorkspaces.isEmpty { Divider() }
             Button("New workspace…") { sheet = .newWorkspace }
             if let active = store.activeWorkspace {
                 Button("Add repositories…") { sheet = .addRepos }
+                Button("New browser…") { store.openBrowser() }
                 Divider()
                 Button("Reveal folder in Finder") { store.revealInFinder(active.root) }
+                Divider()
+                Button("Archive “\(active.name)”") { store.archiveWorkspace(active.id) }
+            }
+            if !store.archivedWorkspaces.isEmpty {
+                Menu("Archived") {
+                    ForEach(store.archivedWorkspaces) { workspace in
+                        Button {
+                            store.unarchiveWorkspace(workspace.id)
+                        } label: {
+                            Label(workspace.name, systemImage: "tray.and.arrow.up")
+                        }
+                    }
+                }
+            }
+            if let active = store.activeWorkspace {
                 Divider()
                 Button("Close (keep worktrees)") {
                     store.deleteWorkspace(active.id, removeWorktrees: false, force: false)
@@ -559,6 +620,8 @@ extension Notification.Name {
     static let meshvyUninstall = Notification.Name("meshvy.uninstall")
     static let meshvyOpenOrchestrator = Notification.Name("meshvy.openOrchestrator")
     static let meshvyOpenShell = Notification.Name("meshvy.openShell")
+    static let meshvyOpenBrowser = Notification.Name("meshvy.openBrowser")
+    static let meshvyArchiveWorkspace = Notification.Name("meshvy.archiveWorkspace")
     static let meshvyPalette = Notification.Name("meshvy.palette")
     static let meshvyShortcuts = Notification.Name("meshvy.shortcuts")
     static let meshvyNextAgent = Notification.Name("meshvy.nextAgent")

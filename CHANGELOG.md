@@ -1,5 +1,67 @@
 # Changelog
 
+## Unreleased
+
+- **A browser on the board.** A workspace gives you the repositories and the
+  agents; what they are building is a running application, and until now the
+  only way to look at one was to leave Meshvy. A browser node is a real page on
+  the canvas — ⌘B, or right-click a repository — pointed at your dev server,
+  sitting next to the agent writing it. It keeps cookies between launches and
+  reopens where you left it.
+- **Agents can drive it.** Every session Meshvy starts is given a `browser_*`
+  tool set over MCP with no setup: `browser_snapshot` returns the page's text
+  and every control with a CSS selector, and `browser_click`, `browser_type`,
+  `browser_eval`, `browser_wait_for`, `browser_console` and
+  `browser_screenshot` act on what it hands back. Typing fires the `input` and
+  `change` events a framework listens for, so React and Vue forms see it.
+  Agents are told to read the console before claiming a web change works, and
+  the errors a page throws come back attached to the action that caused them.
+  Tools rather than a shell helper, because driving a page is dozens of calls
+  each with a structured result — which is what tools are for. The engine is
+  WebKit rather than Chromium: it is what macOS can host inside a canvas node.
+- **Model, effort and permission mode in one menu**, on the toolbar pill and on
+  every agent card, and remembered for the next agent you open. On a card it
+  retunes that session where the CLI allows it — `/model` and `/effort` take
+  effect straight away; the permission mode is fixed at launch, so that one
+  says to use ⇧⇥ or restart rather than pretending. `--effort` and the
+  `dontAsk` permission mode are both new to the CLI and both now offered.
+- **Archiving.** The three destructive paths — close, delete worktrees, delete
+  and discard — all ask you to think. Most of the time what you want is
+  neither: the branch is merged and you would like it out of the switcher.
+  ⌥⌘A, or the box in the toolbar. Nothing on disk is touched; restore it from
+  the workspace menu or the foot of the sidebar.
+- **The top bar's traffic-light gutter.** In full screen the lights are parked
+  in a title bar that slides over the content, so the 78pt the bar keeps clear
+  for them is a gap in the corner with nothing in it. The bar used to hold its
+  own copy of whether the lights were there, pushed to it once per change by a
+  probe view — which had two ways to go wrong and no way to recover from
+  either: the probe registered its observers on a delayed hop and gave up
+  silently if its view had no window yet, and the push was de-duplicated at the
+  sending end, so a copy that ever disagreed would never be told again. The
+  state now lives in one shared `WindowChrome` the bar reads on every render,
+  with observers registered for every window at first access rather than for
+  one window once it exists. It cannot hold a stale answer, and any resize, app
+  switch or key change re-syncs it.
+  The gutter also has to survive a sheet: while **New workspace…** is up the key
+  window is the sheet, which has no traffic lights of its own, and asking it
+  would slide the bar under the real window's buttons.
+- A browser node's address bar follows the canvas zoom like everything else on
+  a card, and both it and the page give way to the header below half scale.
+- **Adding a field no longer empties your board.** Swift's synthesised
+  `Codable` ignores a property's default and insists on the key, so shipping
+  one new field would have made every existing `workspaces.json` unreadable and
+  the board would have come up blank. Workspaces, terminals and browsers now
+  decode leniently, and `--formattest` reads a 0.9.0 board to prove it.
+- `--browsertest` drives a real page in a real engine, speaks JSON-RPC to the
+  generated MCP server as Claude Code does, and serves its own tool calls
+  through the app. `--chrometest` measures the toolbar's gutter off the
+  rendered window, sheet and all. `--chromeprobe <dir>` does the same against
+  the window the app itself makes, in real full screen — it has to be launched
+  through LaunchServices (`open -a Meshvy --args --chromeprobe /tmp/probe`),
+  since macOS will not keep a window full screen for an app that is not
+  frontmost, and it writes a report and corner crops rather than printing.
+  `--snapshot --browser <url>` puts a browser on a docs shot.
+
 ## [0.9.0] - 2026-10-11
 
 - **Install and uninstall in one command.** `scripts/install.sh` fetches the

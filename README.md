@@ -112,6 +112,50 @@ is invisible.
 **Terminals** come in three kinds — the workspace orchestrator, a per-repo
 agent, and a plain shell. Right-click a repository card for the last two.
 
+**Browser nodes** put the running application on the board next to the agents
+building it — see [The browser](#the-browser).
+
+**Archiving** a workspace (⌥⌘A, or the box in the toolbar) takes it off the
+board and out of the switcher without touching a thing on disk: the worktrees
+stay registered in their repositories and the branch stays where it is.
+Restore it from **Archived** in the workspace menu or at the foot of the
+sidebar. Deleting worktrees is still there, still separate, and still asks.
+
+## The browser
+
+A workspace gives you the repositories and the agents. What those agents are
+building is a *running application*, and until there was a browser node the
+only way to look at one was to leave Meshvy.
+
+A browser node is a real page on the canvas — **⌘B**, or right-click a
+repository and **Open a browser here**. Type `localhost:3000` and watch your
+app next to the agent writing it. It keeps cookies between launches, so a dev
+server you have signed into stays signed in, and the node reopens where you
+left it.
+
+The point is that an agent can drive the same page. Every session Meshvy
+starts is given a `browser_*` tool set over MCP, with no setup from you:
+
+| | |
+|---|---|
+| `browser_open` | point a node at a URL, opening one if there is not one |
+| `browser_snapshot` | the page's text, plus every control with a CSS selector |
+| `browser_click` · `browser_type` | act on a selector the snapshot handed back |
+| `browser_console` | what the page logged and what it threw |
+| `browser_screenshot` | a PNG it can read with the Read tool |
+| `browser_eval` · `browser_wait_for` | run JavaScript · wait for text or an element |
+| `browser_list` · `browser_navigate` · `browser_reload` · `browser_back` · `browser_close` | |
+
+Typing fires the `input` and `change` events a framework listens for, so React
+and Vue forms see it. Agents are told to check the console before claiming a
+web change works, and the errors a page throws come back attached to whatever
+action caused them.
+
+The engine is WebKit, the same one Safari uses, rather than Chromium — it is
+what macOS can host inside a node on the canvas. Selecting a browser node opens
+its console in the inspector, and the header shows the short id an agent
+addresses it by.
+
 ## What's on the board
 
 **Session cards** come from `~/.claude/projects/…`: title, folder, branch,
@@ -156,6 +200,8 @@ line it matched — the one thing the canvas cannot tell you.
 | Add repositories | ⇧⌘O |
 | Start / focus orchestrator | ⇧⌘T |
 | Shell at the workspace root | ⌘T |
+| New browser | ⌘B |
+| Archive the workspace | ⌥⌘A |
 | Next agent waiting on you | ⌥⌘N |
 | Find | ⌘F · frame the hits ⇧⌘F |
 | Fit to content | ⌘0 · actual size ⌘1 · zoom ⌘+ / ⌘− |
@@ -164,15 +210,19 @@ line it matched — the one thing the canvas cannot tell you.
 | Keyboard shortcuts | ⌘/ |
 
 Pan by dragging empty canvas or scrolling; zoom with ⌘-scroll or a pinch.
-Resting the pointer on a terminal for half a second hands it the wheel so its
-scrollback is reachable — zoom stays the canvas's. Drag any node by its title
+Resting the pointer on a terminal or a browser for half a second hands it the
+wheel, so a scrollback is reachable and a page can be scrolled — zoom stays the
+canvas's. Drag any node by its title
 bar, resize from the corner grip, and drag the side panels from their inner
 edge. Scrolling follows the system "natural scrolling" preference;
 **View → Invert Scroll Direction** if you want the opposite.
 
-New agents start in the permission mode shown in the toolbar — ask every time,
-auto, accept edits, plan, or bypass. It sets the starting mode only; ⇧⇥ still
-cycles it inside a running session.
+**Model, effort and permission mode** sit in one menu, on the pill in the
+toolbar and on every agent card. Whatever you pick is what the next agent
+starts with, and it is remembered for next time. On a card it also retunes that
+session where the CLI allows it: `/model` and `/effort` take effect straight
+away, while the permission mode is fixed at launch — ⇧⇥ cycles it inside the
+session, or restart the agent from the same menu.
 
 ![Empty state](docs/empty.png)
 

@@ -77,8 +77,9 @@ enum LaunchTest {
         let store = MeshvyStore.shared
         store.bootstrap()
         guard let workspace = store.activeWorkspace else { print("no workspace"); exit(1) }
-        // A harness that fans out three sessions should not do it on the
-        // most expensive model available.
+        // A harness that fans out three sessions should not do it on the most
+        // expensive model available. Set on the catalogue rather than through
+        // `selectModel`, so a test run does not rewrite the user's choice.
         store.models.selectedModelID = "claude-haiku-4-5-20251001"
 
         print("root: \(workspace.root)")
@@ -614,6 +615,9 @@ struct SnapshotRequest {
     /// Start the orchestrator and wait for it to report, so the status chrome
     /// has something to show.
     var withAgent: Bool
+    /// Open a browser node at this URL before rendering, so a board shot has the
+    /// running application on it as well as the agents.
+    var browserURL: String?
 
     init?(arguments: [String]) {
         guard let flag = arguments.firstIndex(of: "--snapshot"), flag + 1 < arguments.count else { return nil }
@@ -634,6 +638,7 @@ struct SnapshotRequest {
         palette = arguments.contains("--palette")
         shortcuts = arguments.contains("--shortcuts")
         withAgent = arguments.contains("--agent")
+        browserURL = value("--browser")
     }
 }
 
@@ -669,6 +674,17 @@ enum Snapshot {
             store.startOrchestrator()
             settleOrchestrator(store: store, task: task, request: request, attempts: 120)
             return
+        }
+
+        // Before the camera is placed, so the board is framed with it on. A
+        // shot that asked for a browser wants to see the browser, so it also
+        // takes the selection — including when the board already had one, which
+        // it does the second time the same shot is taken.
+        if let url = request.browserURL {
+            let existing = store.activeWorkspace?.browsers.first
+            if let node = existing ?? store.openBrowser(url: url, reveal: false) {
+                store.select(.browser(node.id))
+            }
         }
 
         if store.selection == nil {

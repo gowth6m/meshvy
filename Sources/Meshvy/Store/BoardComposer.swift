@@ -141,6 +141,36 @@ struct BoardComposer {
             }
         }
 
+        // 5. Browsers, to the left of the parent: the running application the
+        // repositories add up to, facing the agents building it.
+        var browserY: CGFloat = 0
+        for browser in workspace.browsers {
+            var position = browser.position
+            if position == .zero {
+                position = CGPoint(x: -(browser.size.width + rowGap), y: browserY)
+                browserY += browser.size.height + gap
+            }
+            graph.nodes.append(CanvasNode(
+                id: .browser(browser.id),
+                kind: .browser(browser),
+                position: position,
+                size: browser.size,
+                repoID: browser.repoID
+            ))
+            if let repoID = browser.repoID,
+               let repo = workspace.repos.first(where: { $0.id == repoID }) {
+                graph.edges.append(CanvasEdge(
+                    from: .browser(browser.id), to: .worktree(repo.worktreePath),
+                    isLive: true, kind: .watches
+                ))
+            } else {
+                graph.edges.append(CanvasEdge(
+                    from: .browser(browser.id), to: .workspace(workspace.id),
+                    isLive: true, kind: .watches
+                ))
+            }
+        }
+
         applyPinned(&graph, pinned: input.pinned)
         return graph
     }
@@ -163,8 +193,9 @@ struct BoardComposer {
     private func applyPinned(_ graph: inout CanvasGraph, pinned: [String: CGPoint]) {
         guard !pinned.isEmpty else { return }
         for (offset, node) in graph.nodes.enumerated() {
-            // Terminals carry their own saved position on the model.
+            // Terminals and browsers carry their own saved position on the model.
             if case .terminal = node.kind { continue }
+            if case .browser = node.kind { continue }
             guard let position = pinned[node.id.storageKey] else { continue }
             graph.nodes[offset].position = position
             graph.nodes[offset].isPinned = true

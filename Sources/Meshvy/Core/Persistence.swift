@@ -43,6 +43,26 @@ struct FileStore<Value: Codable> {
     }
 }
 
+/// Decoding that tolerates a key that is not there.
+///
+/// Swift's synthesised `init(from:)` ignores a property's default value and
+/// insists on the key being present. For a file the app rewrites on every
+/// change that is fine — until a release adds a field, at which point every
+/// board saved before it existed fails to decode and the user opens Meshvy to
+/// find their workspaces gone. These let a model read an older file and fill in
+/// what was not written yet.
+extension KeyedDecodingContainer {
+    /// The stored value, or `fallback` when the key is absent or unreadable.
+    func value<T: Decodable>(_ key: Key, or fallback: T) -> T {
+        ((try? decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
+    }
+
+    /// The stored value of an optional field, or nil.
+    func optional<T: Decodable>(_ type: T.Type, _ key: Key) -> T? {
+        (try? decodeIfPresent(T.self, forKey: key)) ?? nil
+    }
+}
+
 /// Node positions the user has dragged, plus the camera, so the board reopens
 /// exactly as it was left.
 struct SavedLayout: Codable {
@@ -60,4 +80,11 @@ struct SavedLayout: Codable {
     var inspectorWidth: Double = 430
     var permissionMode: String = PermissionMode.acceptEdits.rawValue
     var notificationsEnabled: Bool = false
+    // What the last agent was launched with, so the next one matches. Optional
+    // so a layout saved before these existed still decodes.
+    var effort: String?
+    /// Nil is ambiguous for a model — it is also what "inherit the CLI default"
+    /// means — so the choice is stored as a flag and a value.
+    var hasModelChoice: Bool?
+    var modelID: String?
 }

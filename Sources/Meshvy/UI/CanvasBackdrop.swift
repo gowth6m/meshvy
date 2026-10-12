@@ -102,7 +102,7 @@ struct CanvasBackdrop: View {
             // they are drawn in the brand accent and stay visible even when the
             // far end is idle. Amber is reserved for an agent actually working.
             switch edge.kind {
-            case .owns, .dispatched: structural.addPath(path)
+            case .owns, .dispatched, .watches: structural.addPath(path)
             case .ranIn:
                 if edge.isLive { active.addPath(path) } else { idle.addPath(path) }
             }
@@ -133,6 +133,7 @@ struct CanvasBackdrop: View {
             // Workspace and terminal nodes always draw themselves.
             if case .workspace = node.kind { continue }
             if case .terminal = node.kind { continue }
+            if case .browser = node.kind { continue }
             let rect = viewport.project(node.frame)
             let corner = max(2, Theme.nodeCorner * viewport.scale)
             let path = Path(roundedRect: rect, cornerRadius: corner, style: .continuous)
@@ -154,6 +155,8 @@ struct CanvasBackdrop: View {
                     return (Theme.canvasDeep, Theme.accent)
                 case .subAgent(let agent):
                     return (Theme.surface, agent.state.isRunning ? Theme.busy : Theme.clean)
+                case .browser:
+                    return (Theme.canvasDeep, Theme.branch)
                 }
             }()
 

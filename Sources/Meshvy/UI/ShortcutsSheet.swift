@@ -28,6 +28,7 @@ struct ShortcutsSheet: View {
                 Row(keys: "⌘F", what: "Find on the board; ⇧⌘F frames the hits"),
                 Row(keys: "⇧⌘N", what: "New workspace"),
                 Row(keys: "⇧⌘O", what: "Add repositories"),
+                Row(keys: "⌥⌘A", what: "Archive the workspace — keeps every worktree"),
                 Row(keys: "⌘R", what: "Refresh everything; ⇧⌘R git only"),
                 Row(keys: "⌘/", what: "This list")
             ]),
@@ -35,7 +36,14 @@ struct ShortcutsSheet: View {
                 Row(keys: "⇧⌘T", what: "Start or focus the orchestrator"),
                 Row(keys: "⌘T", what: "New shell"),
                 Row(keys: "⇧⇥", what: "Cycle the permission mode inside a running session"),
-                Row(keys: "⌥⌘N", what: "Jump to the next agent that needs you")
+                Row(keys: "⌥⌘N", what: "Jump to the next agent that needs you"),
+                Row(keys: "the pill on a card", what: "Model, effort and permission mode — remembered for the next one")
+            ]),
+            Section(title: "Browsers", rows: [
+                Row(keys: "⌘B", what: "New browser on the board"),
+                Row(keys: "rest the pointer", what: "Hands the page the scroll wheel"),
+                Row(keys: "⏎ in the address bar", what: "Go — a bare localhost:3000 is enough"),
+                Row(keys: "browser_* tools", what: "What an agent drives it with; the id is in the header")
             ]),
             Section(title: "Canvas", rows: [
                 Row(keys: "drag · scroll", what: "Pan"),

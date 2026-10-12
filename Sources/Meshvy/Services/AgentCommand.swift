@@ -25,9 +25,14 @@ enum AgentCommand {
     struct Options {
         var model: String? = ModelDefaults.modelID
         var permissionMode: PermissionMode = .acceptEdits
+        /// How hard it thinks. `.inherit` leaves the flag off.
+        var effort: AgentEffort = .inherit
         /// Settings file holding the status hooks — see `AgentHooks`. An
         /// additional source, so the user's own settings still apply.
         var settingsPath: String?
+        /// MCP config giving the session its `browser_*` tools — see
+        /// `BrowserBridge`. An additional source, like the settings file.
+        var mcpConfigPath: String?
     }
 
     /// Argv for an orchestrator sitting at the workspace root, with every
@@ -59,10 +64,15 @@ enum AgentCommand {
         return arguments
     }
 
+    /// Tools Meshvy pre-approves for the sessions it starts.
+    ///
     /// Delegation runs through the `meshvy` helper, so that one command is
-    /// pre-approved. `acceptEdits` does not cover Bash, and an orchestrator
-    /// that stops to ask permission for every spawn never gets going.
-    static let allowedDelegationTools = "Bash(meshvy:*)"
+    /// pre-approved: `acceptEdits` does not cover Bash, and an orchestrator
+    /// that stops to ask permission for every spawn never gets going. The
+    /// browser server is on the same footing — these are Meshvy's own
+    /// surfaces, and an agent stopping to ask whether it may look at the page
+    /// it was told to check is noise, not safety.
+    static let allowedTools = ["Bash(meshvy:*)", BrowserBridge.toolPrefix].joined(separator: ",")
 
     private static func base(sessionID: String, name: String, options: Options) -> [String] {
         var arguments = [claudePath, "--session-id", sessionID, "--name", name]
@@ -70,11 +80,17 @@ enum AgentCommand {
             arguments.append(contentsOf: ["--model", model])
         }
         arguments.append(contentsOf: ["--permission-mode", options.permissionMode.rawValue])
-        arguments.append(contentsOf: ["--allowedTools", allowedDelegationTools])
+        if let effort = options.effort.flag {
+            arguments.append(contentsOf: ["--effort", effort])
+        }
+        arguments.append(contentsOf: ["--allowedTools", allowedTools])
         // Only when it is really there: a workspace whose folder has gone
         // would otherwise hand the CLI a path to nothing.
         if let settings = options.settingsPath, FileManager.default.fileExists(atPath: settings) {
             arguments.append(contentsOf: ["--settings", settings])
+        }
+        if let config = options.mcpConfigPath, FileManager.default.fileExists(atPath: config) {
+            arguments.append(contentsOf: ["--mcp-config", config])
         }
         return arguments
     }
@@ -138,6 +154,8 @@ enum AgentCommand {
         that spans repositories stays on the `\(workspace.branch)` branch in \
         each of them and should be committed together.
         """)
+        lines.append("")
+        lines.append(BrowserBridge.brief)
         return lines.joined(separator: "\n")
     }
 
@@ -157,6 +175,7 @@ enum AgentCommand {
             coordinates changes that span several.
             """
         }
+        text += "\n\n" + BrowserBridge.brief
         return text
     }
 

@@ -17,23 +17,25 @@ struct Sidebar: View {
             ScrollableStack(alignment: .leading) {
                 VStack(alignment: .leading, spacing: 2) {
                     runningSection
+                    browsersSection
                     SectionHeader(
                         title: "Workspaces",
-                        count: store.workspaces.count,
+                        count: store.liveWorkspaces.count,
                         tint: Theme.textTertiary,
                         trailing: store.isLoadingGit ? "scanning…" : nil,
                         action: ("plus", "New workspace", { sheet = .newWorkspace })
                     )
-                    ForEach(store.workspaces) { workspace in
+                    ForEach(store.liveWorkspaces) { workspace in
                         workspaceSection(workspace)
                     }
-                    if store.workspaces.isEmpty {
+                    if store.liveWorkspaces.isEmpty {
                         Text("No workspaces yet.")
                             .font(Theme.ui(10.5))
                             .foregroundStyle(Theme.textTertiary)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
                     }
+                    archivedSection
                 }
                 .padding(.vertical, 10)
                 .padding(.horizontal, 8)
@@ -132,6 +134,110 @@ struct Sidebar: View {
         }
     }
 
+    /// Browsers on the board, with whatever each page is throwing. The canvas
+    /// shows you the page; this tells you which one has gone wrong while you
+    /// were looking at something else.
+    @ViewBuilder
+    private var browsersSection: some View {
+        let nodes = store.activeWorkspace?.browsers ?? []
+        if !nodes.isEmpty {
+            SectionHeader(
+                title: "Browsers",
+                count: nodes.count,
+                tint: Theme.branch,
+                action: ("plus", "New browser", { store.openBrowser() })
+            )
+            ForEach(nodes) { node in
+                let problems = store.browsers.session(for: node.id)?
+                    .console.filter { $0.level == .error }.count ?? 0
+                SidebarRow(
+                    isSelected: store.selection == .browser(node.id),
+                    action: { store.reveal(.browser(node.id)) }
+                ) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "globe")
+                            .font(Theme.ui(9.5))
+                            .foregroundStyle(Theme.branch)
+                            .frame(width: 13)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(node.pageTitle ?? node.title)
+                                .font(Theme.ui(11.5, .medium))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                            Text(node.displayURL)
+                                .font(Theme.mono(9.5))
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer(minLength: 0)
+                        if problems > 0 {
+                            Text("\(problems)")
+                                .font(Theme.mono(9.5, .bold))
+                                .foregroundStyle(Theme.danger)
+                        }
+                    }
+                }
+                .contextMenu {
+                    Button("Reload") { store.reloadBrowser(node.id) }
+                    Button("Open in default browser") { store.openInBrowser(node.url) }
+                    Divider()
+                    Button("Copy URL") { store.copyToClipboard(node.url) }
+                    Button("Close browser", role: .destructive) { store.closeBrowser(node.id) }
+                }
+            }
+            Spacer().frame(height: 14)
+        }
+    }
+
+    /// Put away, not gone. Kept at the bottom and collapsed to one line each,
+    /// so a long history of finished branches costs nothing to carry.
+    @ViewBuilder
+    private var archivedSection: some View {
+        let archived = store.archivedWorkspaces
+        if !archived.isEmpty {
+            Spacer().frame(height: 14)
+            SectionHeader(title: "Archived", count: archived.count, tint: Theme.textTertiary, trailing: nil)
+            ForEach(archived) { workspace in
+                SidebarRow(isSelected: false, action: { store.unarchiveWorkspace(workspace.id) }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "archivebox")
+                            .font(Theme.ui(9))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 12)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(workspace.name)
+                                .font(Theme.ui(11.5))
+                                .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(1)
+                            Text(workspace.branch)
+                                .font(Theme.mono(9))
+                                .foregroundStyle(Theme.textTertiary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        Text(Format.relative(workspace.archivedAt ?? workspace.createdAt))
+                            .font(Theme.ui(9))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                }
+                .help("Restore “\(workspace.name)”")
+                .contextMenu {
+                    Button("Restore") { store.unarchiveWorkspace(workspace.id) }
+                    Divider()
+                    Button("Reveal folder in Finder") { store.revealInFinder(workspace.root) }
+                    Divider()
+                    Button("Delete worktrees") {
+                        store.deleteWorkspace(workspace.id, removeWorktrees: true, force: false)
+                    }
+                    Button("Delete and discard changes", role: .destructive) {
+                        store.deleteWorkspace(workspace.id, removeWorktrees: true, force: true)
+                    }
+                }
+            }
+        }
+    }
+
     private func workspaceSection(_ workspace: Workspace) -> some View {
         let isActive = workspace.id == store.activeWorkspaceID
         let isCollapsed = collapsed.contains(workspace.id)
@@ -188,6 +294,8 @@ struct Sidebar: View {
                 Divider()
                 Button("Reveal folder in Finder") { store.revealInFinder(workspace.root) }
                 Button("Copy branch name") { store.copyToClipboard(workspace.branch) }
+                Divider()
+                Button("Archive — keeps every worktree") { store.archiveWorkspace(workspace.id) }
                 Divider()
                 Button("Close (keep worktrees)") {
                     store.deleteWorkspace(workspace.id, removeWorktrees: false, force: false)
@@ -247,6 +355,7 @@ struct Sidebar: View {
         .contextMenu {
             Button("Open agent terminal here") { store.openTerminal(role: .repo, repoID: repo.id) }
             Button("Open shell here") { store.openTerminal(role: .shell, repoID: repo.id) }
+            Button("Open a browser here") { store.openBrowser(repoID: repo.id) }
             Divider()
             Button("Open in editor") { store.openInEditor(repo.worktreePath) }
             Button("Reveal in Finder") { store.revealInFinder(repo.worktreePath) }

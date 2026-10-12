@@ -79,6 +79,10 @@ struct WorkspaceNodeView: View {
 
             Spacer(minLength: 0)
 
+            if let orchestrator, isRunning {
+                NodeAgentSettingsButton(store: store, node: orchestrator, zoom: zoom)
+            }
+
             if isRunning {
                 if let state = activity?.state, state.badge != nil {
                     AgentBadge(state: state, zoom: zoom)

@@ -51,7 +51,7 @@ struct CanvasView: View {
                 case .active(let point):
                     cursorPoint = point
                     cursorInCanvas = true
-                    store.hoverTerminal(terminal(under: point))
+                    store.hoverTerminal(scrollable(under: point))
                 case .ended:
                     cursorInCanvas = false
                     store.hoverTerminal(nil)
@@ -71,11 +71,12 @@ struct CanvasView: View {
     }
 
     private var terminalLayer: some View {
-        // Workspace and terminal nodes host live AppKit views, so they are
-        // always mounted — unmounting would tear down the PTY.
+        // Workspace, terminal and browser nodes host live AppKit views, so they
+        // are always mounted — unmounting would tear down the PTY or reload the
+        // page.
         let terminals = store.graph.nodes.filter {
             switch $0.kind {
-            case .terminal, .workspace: return true
+            case .terminal, .workspace, .browser: return true
             default: return false
             }
         }
@@ -123,6 +124,28 @@ struct CanvasView: View {
                     Button("Copy folder path") { store.copyToClipboard(terminal.cwd) }
                     Divider()
                     Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
+                }
+            } else if case .browser(let browser) = node.kind {
+                BrowserNodeView(
+                    node: browser,
+                    store: store,
+                    zoom: zoom,
+                    isSelected: store.selection == node.id,
+                    isDimmed: store.isSearching && !store.matches(node.id),
+                    onResize: { store.moveBrowser(browser.id, to: node.position, size: $0) }
+                )
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+                .gesture(terminalDrag(node))
+                .onTapGesture { store.select(node.id) }
+                .contextMenu {
+                    Button("Reload") { store.reloadBrowser(browser.id) }
+                    Button("Open in default browser") { store.openInBrowser(browser.url) }
+                    Divider()
+                    Button("Copy URL") { store.copyToClipboard(browser.url) }
+                    Button("Copy node id for an agent") { store.copyToClipboard(browser.shortID) }
+                    Divider()
+                    Button("Close browser", role: .destructive) { store.closeBrowser(browser.id) }
                 }
             }
         }
@@ -190,7 +213,7 @@ struct CanvasView: View {
                 isHovered: hoveredNode == node.id,
                 isDimmed: dimmed
             )
-        case .terminal, .workspace:
+        case .terminal, .workspace, .browser:
             EmptyView()
         case .subAgent(let agent):
             SubAgentNodeView(
@@ -214,10 +237,11 @@ struct CanvasView: View {
         }
     }
 
-    /// Which terminal's *body* the cursor is over, if any. The header band is
-    /// excluded: that is the handle you drag the node by, and resting there
-    /// should not arm the terminal under it.
-    private func terminal(under point: CGPoint) -> UUID? {
+    /// Which node's *body* the cursor is over, of the ones that want the scroll
+    /// wheel — terminals for their scrollback, browsers for the page. The
+    /// header band is excluded: that is the handle you drag the node by, and
+    /// resting there should not arm what is underneath it.
+    private func scrollable(under point: CGPoint) -> UUID? {
         for node in store.graph.nodes.reversed() {
             var rect = store.viewport.project(node.frame)
             let id: UUID
@@ -235,6 +259,11 @@ struct CanvasView: View {
                 // Header plus the repository strip.
                 rect.origin.y += zoom.s(78)
                 rect.size.height -= zoom.s(78)
+            case .browser(let browser):
+                id = browser.id
+                // Header, the address bar, and the divider under each.
+                rect.origin.y += zoom.s(60)
+                rect.size.height -= zoom.s(60)
             default:
                 continue
             }
@@ -306,7 +335,7 @@ struct CanvasView: View {
         case .terminal(let terminal):
             Button("Restart") { store.restartTerminal(terminal.id) }
             Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
-        case .workspace:
+        case .workspace, .browser:
             EmptyView()
         case .subAgent(let agent):
             Button("Copy task") { store.copyToClipboard(agent.prompt) }
@@ -319,6 +348,9 @@ struct CanvasView: View {
             }
             Button("Open shell here") {
                 store.openTerminal(role: .shell, repoID: node.repoID)
+            }
+            Button("Open a browser here") {
+                store.openBrowser(repoID: node.repoID)
             }
             Divider()
             Button("Open in editor") { store.openInEditor(worktree.path) }

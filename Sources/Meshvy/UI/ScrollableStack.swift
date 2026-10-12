@@ -47,18 +47,22 @@ struct SnapshotSafeField: View {
     @Environment(\.meshvySnapshotMode) private var isSnapshot
     var placeholder: String
     @Binding var text: String
+    /// Panels are a fixed size; a field on a card has to follow the canvas zoom
+    /// like everything else on it, or it spills over the node at low zoom.
+    var font: Font = Theme.ui(12)
 
     var body: some View {
         if isSnapshot {
             Text(text.isEmpty ? placeholder : text)
-                .font(Theme.ui(12))
+                .font(font)
                 .foregroundStyle(text.isEmpty ? Theme.textTertiary : Theme.textPrimary)
                 .lineLimit(1)
+                .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(Theme.ui(12))
+                .font(font)
                 .foregroundStyle(Theme.textPrimary)
         }
     }

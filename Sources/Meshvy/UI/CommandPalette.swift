@@ -302,13 +302,26 @@ enum PaletteCommands {
             items.append(item(
                 "act:addRepos", "Add repositories…", "plus.rectangle.on.folder", keywords: "⇧⌘o open"
             ) { sheet.wrappedValue = .addRepos })
+            items.append(item(
+                "act:browser", "New browser on the board", "globe",
+                subtitle: "Watch the running app, and let an agent drive it",
+                keywords: "⌘b browser web page localhost chrome preview",
+                tint: Theme.branch
+            ) { store.openBrowser() })
+            if let active = store.activeWorkspace {
+                items.append(item(
+                    "act:archive", "Archive “\(active.name)”", "archivebox",
+                    subtitle: "Out of the way, worktrees untouched",
+                    keywords: "⌥⌘a archive put away hide done"
+                ) { store.archiveWorkspace(active.id) })
+            }
         }
 
         items.append(item(
             "act:newWorkspace", "New workspace…", "rectangle.3.group", keywords: "⇧⌘n create"
         ) { sheet.wrappedValue = .newWorkspace })
 
-        for workspace in store.workspaces where workspace.id != store.activeWorkspaceID {
+        for workspace in store.liveWorkspaces where workspace.id != store.activeWorkspaceID {
             items.append(item(
                 "act:switch:" + workspace.id.uuidString,
                 "Switch to “\(workspace.name)”", "arrow.left.arrow.right",
@@ -316,12 +329,28 @@ enum PaletteCommands {
             ) { store.activate(workspace.id) })
         }
 
+        for workspace in store.archivedWorkspaces {
+            items.append(item(
+                "act:restore:" + workspace.id.uuidString,
+                "Restore “\(workspace.name)”", "tray.and.arrow.up",
+                subtitle: "Archived " + Format.relative(workspace.archivedAt ?? workspace.createdAt),
+                keywords: "archived restore unarchive " + workspace.name
+            ) { store.unarchiveWorkspace(workspace.id) })
+        }
+
         for mode in PermissionMode.allCases where mode != store.permissionMode {
             items.append(item(
                 "act:mode:" + mode.rawValue, "Permission mode: \(mode.label)", mode.icon,
                 subtitle: mode.detail, keywords: "permission mode " + mode.rawValue,
                 tint: mode.isRisky ? Theme.dirty : Theme.textSecondary
-            ) { store.permissionMode = mode })
+            ) { store.selectPermissionMode(mode) })
+        }
+
+        for effort in AgentEffort.allCases where effort != store.agentEffort {
+            items.append(item(
+                "act:effort:" + effort.rawValue, "Effort: \(effort.label)", effort.icon,
+                subtitle: effort.detail, keywords: "effort thinking reasoning " + effort.rawValue
+            ) { store.selectEffort(effort) })
         }
 
         items.append(item(
@@ -382,6 +411,11 @@ enum PaletteCommands {
             return Described(
                 title: agent.title, subtitle: agent.kind,
                 icon: "person.2.fill", tint: Theme.sidechain
+            )
+        case .browser(let browser):
+            return Described(
+                title: browser.pageTitle ?? browser.title, subtitle: browser.displayURL,
+                icon: "globe", tint: Theme.branch
             )
         }
     }
