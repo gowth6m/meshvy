@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.10.1] - 2026-10-12
+
+- **Signed and notarised.** Releases carry a Developer ID signature and an
+  Apple notarisation ticket, so a download opens without *“Apple could not
+  verify Meshvy is free of malware”* and without anyone having to clear a
+  quarantine flag by hand. The install script and the in-app updater were
+  already free of the warning — quarantine is only attached by the app doing
+  the downloading — so this was the DMG's problem alone, and now it is nobody's.
+- `scripts/verify-release.sh` says what Apple makes of a build and why: whether
+  the signature verifies, whether it is a Developer ID or the ad-hoc one a
+  local build gets, whether the hardened runtime and secure timestamp Apple
+  requires are present, whether a ticket is stapled, and what Gatekeeper
+  actually answers. Run it against `dist/` or against an installed copy.
+- The release workflow takes the Gatekeeper warning in its notes from that
+  verdict rather than from whether a secret happens to be set, and stops
+  outright if credentials are present but the build came out unsigned. A
+  release that claims to be signed while macOS refuses it is worse than one
+  that admits it is not.
+- Three things in the signing path that would each have bitten the first time
+  a certificate was added: the app was signed with `--deep`, which Apple's own
+  guidance says is for verifying rather than signing; the disk image was never
+  signed, only the app inside it, though Gatekeeper judges the container
+  separately; and the zip's notarisation and the app's stapling were both
+  `|| true`, so a failure produced a half-notarised release that still shipped.
+- The Gatekeeper advice in the README and in every release body was telling
+  people to Control-click and choose **Open** — a bypass macOS 15 removed, so
+  the first thing a new user was told to try could not work.
+- `docs/signing.md` records where the key material lives, how to issue a new
+  certificate or notarisation key without Xcode, and what expires when.
+
 ## [0.10.0] - 2026-10-12
 
 - **A browser on the board.** A workspace gives you the repositories and the
