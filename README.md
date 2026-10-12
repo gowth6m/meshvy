@@ -2,8 +2,9 @@
 
 # Meshvy
 
-A native macOS app for running coding agents across several repositories at
-once, on an infinite canvas.
+**The infinite canvas for orchestrating AI agents.** One branch cut across
+every repository you pick, an agent with its own terminal on each, and the
+whole operation in front of you — in a native macOS app.
 
 Meshvy starts empty. You add the repositories you work on together as a
 **workspace**; it cuts one branch across all of them and checks each out side
@@ -20,10 +21,10 @@ them. Every screenshot here is the app drawing itself — see
 
 ## Install
 
-One command, if you have the [`gh` CLI](https://cli.github.com) signed in:
+One command, and nothing to sign in to:
 
 ```sh
-gh api repos/gowth6m/meshvy/contents/scripts/install.sh --jq .content | base64 -d | bash
+curl -fsSL https://raw.githubusercontent.com/gowth6m/meshvy/main/scripts/install.sh | bash
 ```
 
 It downloads the latest release, checks it against the published SHA-256,
@@ -281,10 +282,10 @@ appears in the toolbar; it shows the release notes and **Install and restart**,
 which downloads the zip, checks it against the published SHA-256, validates the
 bundle and swaps itself. Also **Meshvy → Check for Updates…**
 
-The repository is private, so both the listing and the asset download need a
-token. Meshvy asks the `gh` CLI you are already signed in to
-(`gh auth token`), or uses `GITHUB_TOKEN`. A public repository needs neither —
-same code path. Development builds never offer updates.
+The repository is public, so neither the listing nor the download needs a
+token. Were it ever made private again, Meshvy would ask the `gh` CLI you are
+already signed in to (`gh auth token`), or use `GITHUB_TOKEN` — the same code
+path either way. Development builds never offer updates.
 
 A running bundle cannot replace itself, so a detached helper waits for Meshvy
 to quit, swaps the two, clears the quarantine flag and relaunches. If the swap
