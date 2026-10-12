@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.10.0] - 2026-10-12
 
 - **A browser on the board.** A workspace gives you the repositories and the
   agents; what they are building is a running application, and until now the
