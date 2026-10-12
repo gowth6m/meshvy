@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.4] - 2026-10-13
 
 - **An orchestrator that exited left its workspace node with nothing to press.**
   The node chose between the terminal and the start prompt on whether a session
