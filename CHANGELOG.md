@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- **Installing no longer needs the `gh` CLI.** The repository is public, so the
+  one-liner fetches the script with `curl` and there is nothing to sign in to.
+  `install.sh` already preferred `gh` only when it was there; the README and the
+  script's own header said the opposite of what is now true, and now do not.
 - **New brand artwork, and mint `#64FFDA` as the primary colour.** The icon and
   the mark were still drawn in the old brand purple `#6E56F8` on cream, which
   had nothing to do with the Night Owl board behind them. Both are redrawn in
