@@ -12,7 +12,12 @@ jobs:
       - uses: actions/checkout@v4
       - run: swift --version
       - name: Build
-        run: swift build -c release 2>&1 | tee /tmp/build.log
+        run: |
+          # `set -o pipefail`, or the step's exit status is `tee`'s and a build
+          # that does not compile reports success. It did exactly that once:
+          # 0.10.0 went green here and then failed to build in the release job.
+          set -o pipefail
+          swift build -c release 2>&1 | tee /tmp/build.log
       - name: No warnings in our own sources
         run: |
           # Scoped to Sources/Meshvy: a dependency's warnings are not ours to

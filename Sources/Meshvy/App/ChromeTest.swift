@@ -345,11 +345,11 @@ enum ChromeTest {
     }
 
     private static func describe(_ visible: Bool?) -> String {
-        switch visible {
-        case true: return "lights shown "
-        case false: return "lights hidden"
-        case nil: return "nothing said "
-        }
+        // Unwrapped rather than switched over: matching `true`/`false`/`nil`
+        // against a `Bool?` only reads as exhaustive to a new enough compiler,
+        // and the one on the release runner is not it.
+        guard let visible else { return "nothing said " }
+        return visible ? "lights shown " : "lights hidden"
     }
 
     private static func settle(
