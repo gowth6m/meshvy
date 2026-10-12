@@ -34,6 +34,12 @@
   and all. The stand-in for a `ScrollView` was given `.top` alignment, which
   says nothing about the horizontal, so anything wider than its panel — a diff,
   which deliberately does not wrap — was centred and clipped at both ends.
+- Every screenshot opened with 78pt of nothing in the top left. The bar keeps
+  that much clear for the traffic lights, and `WindowChrome` can only answer
+  for a window — an `ImageRenderer` pass has none, so it kept saying the lights
+  were there and the gutter was held for buttons that could not be drawn. A
+  snapshot now takes the same 12pt inset the app uses in full screen, where
+  there are no lights either. Nothing changes in a window.
 - **The app still said `~/.forge` in three places** — the empty state, the New
   workspace sheet and the path preview under every repository you pick — four
   releases after the rename. Workspaces have been checked out under `~/.meshvy`
