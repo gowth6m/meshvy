@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.10.2] - 2026-10-12
+
+No change to the app itself — this one is about what surrounds it.
+
+- **Release pages carry the changelog.** They listed how to install and the
+  checksums, and said nothing about what had changed; the prose only ever
+  existed in `CHANGELOG.md`. The publish step now lifts the section for the
+  version being tagged, so the page and the repository cannot drift apart.
+- `scripts/release.sh` was advising that the branch and the tag be pushed in
+  one go, which is how 0.10.0 came to fail on the release runner after CI had
+  reported success: the tag starts the build, the sign, the notarisation and
+  the publish before anything has checked the commit. It now gives the order
+  and the reason.
+- The README no longer tells people releases are unsigned, since they are not.
+  The old advice survives as one line for anyone still on an earlier build —
+  those stay unsigned forever and will go on being refused.
+
 ## [0.10.1] - 2026-10-12
 
 - **Signed and notarised.** Releases carry a Developer ID signature and an
