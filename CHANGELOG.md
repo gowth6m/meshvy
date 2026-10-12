@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- **New brand artwork, and mint `#64FFDA` as the primary colour.** The icon and
+  the mark were still drawn in the old brand purple `#6E56F8` on cream, which
+  had nothing to do with the Night Owl board behind them. Both are redrawn in
+  the theme's own colours — `#011627` ground, `#D6DEEB` mark — with mint on the
+  lit node, and mint takes over from Night Owl's blue as the accent: selection,
+  primary actions, and the edges between a workspace and its repositories. The
+  toolbar mark now matches the shipped artwork exactly instead of substituting
+  purple for the lit node. Status colours stay independent, as before. There is
+  a new `app-icon-mint` variant, the inverse of the shipped icon.
 - **New screenshots, of the build that actually ships.** The old ones predated
   the browser, the agent settings on every card and archiving, and showed a
   board of two repositories with nothing running on it. The hero is now a real
