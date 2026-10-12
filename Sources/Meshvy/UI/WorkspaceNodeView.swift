@@ -23,6 +23,12 @@ struct WorkspaceNodeView: View {
         orchestrator.flatMap { store.terminals.session(for: $0.id) }
     }
     private var isRunning: Bool { session?.isRunning ?? false }
+    /// Only a live session draws a terminal here. An agent that exits on its
+    /// own — `/exit`, a crash, Ctrl-D — leaves its view behind in the registry,
+    /// and drawing that would strand the node on a frozen screen with no way to
+    /// start another: the board has already collapsed it to its idle height by
+    /// then, and the header has dropped the stop button with it.
+    private var liveSession: TerminalSession? { isRunning ? session : nil }
     private var activity: AgentActivity? { orchestrator.flatMap { store.activity(for: $0) } }
 
     var body: some View {
@@ -34,7 +40,7 @@ struct WorkspaceNodeView: View {
                 AgentStatusStrip(activity: activity, fallback: workspace.root, zoom: zoom)
                 Divider().overlay(Theme.hairline)
             }
-            body(for: session)
+            body(for: liveSession)
         }
         .background(
             RoundedRectangle(cornerRadius: zoom.s(14), style: .continuous)

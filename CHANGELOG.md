@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- **An orchestrator that exited left its workspace node with nothing to press.**
+  The node chose between the terminal and the start prompt on whether a session
+  existed, not on whether it was still running — and a session whose process
+  ends on its own (`/exit`, Ctrl-D, a crash) stays in the registry, so the last
+  screen of an agent remains readable. The board had meanwhile collapsed the
+  node to its idle height and the header had dropped its stop button, so what
+  was left was a blank panel: no terminal to read and no way to start another
+  agent from the node. It shows the start prompt again as soon as the process
+  ends.
 - **The board no longer pans behind the ⌘K palette.** The canvas takes the
   scroll wheel through an app-wide event monitor gated on a hover flag, and
   that flag only changes when the pointer moves — so a palette opened from the
