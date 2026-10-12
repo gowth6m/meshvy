@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **The board no longer pans behind the ⌘K palette.** The canvas takes the
+  scroll wheel through an app-wide event monitor gated on a hover flag, and
+  that flag only changes when the pointer moves — so a palette opened from the
+  keyboard, over a pointer that then stayed where it was, scrolled the board
+  underneath it and swallowed the wheel the palette's own result list wanted.
+  Anything drawn over the board — the palette, the shortcut list, a sheet —
+  now keeps the wheel while it is up.
 - **Installing no longer needs the `gh` CLI.** The repository is public, so the
   one-liner fetches the script with `curl` and there is nothing to sign in to.
   `install.sh` already preferred `gh` only when it was there; the README and the

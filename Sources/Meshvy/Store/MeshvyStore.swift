@@ -71,6 +71,12 @@ final class MeshvyStore {
     var paletteOpen = false
     var shortcutsOpen = false
 
+    /// Something is drawn over the board and owns the wheel while it is up.
+    /// The canvas reads this to stand its scroll monitor down: both of these
+    /// open on a keystroke, and a pointer that has not moved since is still
+    /// recorded as being over the canvas.
+    var isOverlayOpen: Bool { paletteOpen || shortcutsOpen }
+
     /// Permission mode new agents start in. Only the starting mode — ⇧⇥ still
     /// cycles it live inside the session, exactly as it does in Claude Code.
     var permissionMode = PermissionMode.acceptEdits { didSet { persistLayout() } }

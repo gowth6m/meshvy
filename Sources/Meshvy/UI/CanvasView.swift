@@ -373,6 +373,17 @@ struct CanvasView: View {
     private func installScrollMonitor() {
         guard scrollMonitor == nil else { return }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { event in
+            // Whatever is drawn over the board owns the wheel while it is up.
+            // The monitor is app-wide, and `cursorInCanvas` only changes when
+            // the pointer moves — so a palette opened with ⌘K, over a pointer
+            // that then stays put, would otherwise pan the board behind it.
+            guard !store.isOverlayOpen else { return event }
+            // A sheet is a window of its own, and takes the board out of play
+            // for the same reason: either the event belongs to the sheet, or
+            // it belongs to the window the sheet is attached to.
+            if let window = event.window, window.isSheet || window.attachedSheet != nil {
+                return event
+            }
             guard cursorInCanvas else { return event }
 
             if event.type == .magnify {
