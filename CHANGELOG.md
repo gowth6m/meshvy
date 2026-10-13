@@ -78,6 +78,90 @@
   "hold still", since "hold" read as press-and-hold. The shortcut list covers
   right-click and Esc, and no longer cuts "⏎ in the address bar" short.
 
+- **The app is nineteen library modules plus the app, instead of one target.**
+  Same code, same
+  behaviour, but `Packages/` now holds a module per feature and capability with
+  its dependencies declared, so `internal` finally means something smaller than
+  "all 16,700 lines" and the compiler is what stops the inspector reaching into
+  the canvas. The layout is organised by what a thing is for rather than by
+  what kind of thing it is — `CanvasUI` is the canvas, `AgentKit` is everything
+  about driving an agent — and every module has a README saying what it owns.
+  `Docs/Architecture/` records why, including what was deliberately
+  not done.
+- Splitting it surfaced a circular dependency the single target had hidden: the
+  agent command line advertised the browser's tools while the browser bridge
+  read the agent bridge's directory paths. Those four paths were never the
+  agent bridge's — they are a convention about where a workspace keeps its own
+  plumbing — so they moved onto `Workspace`, which owns the directory. Three
+  subsystems now share one definition instead of two of them agreeing by
+  coincidence.
+- `Notifier` no longer reaches for `MeshvyStore.shared` to act on a clicked
+  notification; the board hands it a callback. It was the one place a service
+  called back up into application state, and it made that half of the agent
+  plumbing impossible to test without the whole store.
+- `MeshvyStore` is eleven files instead of one of 1,930 lines, split along the
+  concerns it was already marked up with — no logic moved. It is still one
+  type, and still the app's one real bottleneck; the ADR says why splitting it
+  into per-feature stores is its own change rather than a free one.
+- **Tests, for the first time.** 141 assertions across eight modules, over the
+  parts that are pure functions of their inputs: the canvas camera, zoom
+  thresholds, formatting, node ids and slugs, the byte scanner, the process
+  runner, the layout store, prompt cleaning, agent argv, and git discovery
+  against real throwaway checkouts. Writing them turned up that `SavedLayout`
+  decodes strictly where everything else we persist decodes leniently, so a
+  file from an older build loses your camera and panel widths; that one is
+  documented rather than changed, because it is a behaviour change and this was
+  not.
+- `scripts/` and `docs/` are now `Scripts/` and `Docs/`, matching `Packages/`,
+  `Apps/`, `Tools/` and `Resources/`. The ADRs are `Docs/Architecture/`. Entries
+  under released versions below still say the old names, because that is what
+  they were called at the time. One thing to know: the install one-liner in the
+  README points at `main`, so it only resolves once this lands there.
+
+- CI now checks the module graph before it builds anything, runs the tests, and
+  runs the self-tests against the binary it just built. The warning gate was
+  scoped to `Sources/Meshvy`, a path that no longer exists — it would have
+  silently stopped checking anything.
+
+- **⌘-drag on empty board draws a new agent where you drew it.** The rectangle
+  is the node: where it sits and how big it is. One repository in the workspace
+  answers for itself, more than one asks which — an agent has to work
+  somewhere, and a rectangle cannot say where. Which of pan or draw a drag is
+  gets decided when it starts and held for the whole of it, so letting go of ⌘
+  halfway finishes the rectangle rather than lurching into a pan.
+- **Links you draw between nodes.** Selecting a node puts a handle on its right
+  edge; drag that onto another node and the two are linked. Every other edge on
+  the board is derived — a terminal owns the checkout it runs in, the
+  orchestrator dispatched the agent it spawned — so this is the one the board
+  cannot work out for itself, and it is stored on the workspace and drawn
+  dashed to say so.
+- A link hands the target what the source is: which folder it is working in and
+  what it was asked to do, typed into its session so two agents share a frame
+  of reference without being told about each other by hand. Only an agent is
+  told — a paragraph of prose at a bash prompt is just a failed command — and a
+  link whose far end is not running stays on the board as a note to you.
+- **All files, not only the changed ones.** The panel for a node with a
+  directory now opens on a tree of what that directory actually holds —
+  directories first, lazily, each one read the first time you open it, so a
+  `node_modules` or a `.build` costs nothing until it is asked for. Picking a
+  file reads it below, in the place the diff sits on the other tab. A changed
+  list can only ever answer "what has been touched", which is nothing at all
+  until an agent has done something; "what is this agent working on" is the
+  question you have before that.
+- **An agent's panel shows what it has changed.** Selecting a terminal node
+  gave you its role, its folder and its session id — everything about the
+  agent except the thing you actually want while watching one work, which is
+  what it has touched. It now carries the same file list and diff a repository
+  does, scoped to the directory the node was opened in: an agent working in a
+  repository shows that repository, and a shell at the workspace root shows
+  every repository beneath it, grouped under their names. Answering "what has
+  this one done" used to mean selecting the repository separately and
+  remembering which agent was in it.
+- `--snapshot --select terminal` frames a shot on an agent with its files
+  open, and `--shell <repo>` (or `--shell root`) puts one on the board to be
+  framed. The panel had no way to be photographed for the documentation
+  otherwise.
+
 ## [0.11.0] - 2026-10-13
 
 - **Repositories are no longer nodes on the board.** Every workspace hung a

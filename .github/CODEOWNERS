@@ -1,0 +1,60 @@
+# Who reviews what.
+#
+# A pattern here means "this person is asked for review on a change to these
+# files" — it is not a lock. GitHub applies the *last* matching pattern, so the
+# specific entries at the bottom win over the broad ones above.
+#
+# Everything is currently owned by one person, which is honest about where the
+# project is. The value of the file today is the shape: when a module gets a
+# regular contributor, one line here is what makes them its reviewer, and the
+# boundaries are already drawn to make that a sensible unit of ownership.
+# See Documentation/Architecture/0001-modular-monolith.md.
+
+# Fallback, so nothing lands unreviewed.
+*                                           @gowth6m
+
+# The manifest decides the module graph, and Tools/ enforces it. Changes here
+# can quietly undo a boundary, so they want a second look regardless of who
+# owns the module being wired up.
+/Package.swift                              @gowth6m
+/Tools/                                     @gowth6m
+/Documentation/Architecture/                @gowth6m
+
+# Release machinery and the signing path.
+/.github/workflows/                         @gowth6m
+/scripts/                                   @gowth6m
+/Resources/Info.plist                       @gowth6m
+
+# Foundation: changing these reaches the whole graph.
+/Packages/Foundation/                       @gowth6m
+
+# Platform.
+/Packages/Platform/ProcessKit/              @gowth6m
+/Packages/Platform/FileSystemKit/           @gowth6m
+/Packages/Platform/PersistenceKit/          @gowth6m
+/Packages/Platform/GitKit/                  @gowth6m
+/Packages/Platform/TerminalKit/             @gowth6m
+
+# Capabilities.
+/Packages/Features/AgentKit/                @gowth6m
+/Packages/Features/SessionKit/              @gowth6m
+/Packages/Features/BrowserKit/              @gowth6m
+/Packages/Features/WorkspaceKit/            @gowth6m
+/Packages/Features/UpdateKit/               @gowth6m
+
+# Design system: a change here shows up on every surface at once.
+/Packages/DesignSystem/                     @gowth6m
+
+# Feature UI.
+/Packages/Features/AgentsUI/                @gowth6m
+/Packages/Features/CanvasUI/                @gowth6m
+/Packages/Features/InspectorUI/             @gowth6m
+/Packages/Features/WorkspacesUI/            @gowth6m
+/Packages/AppShell/                         @gowth6m
+
+# Application state. Shared by every feature, so it is reviewed per concern
+# rather than as one file — that is why the store is split the way it is.
+/Packages/AppState/                         @gowth6m
+
+# The app itself, and the harnesses scripts/make-shots.sh drives.
+/Apps/macOS/                                @gowth6m
