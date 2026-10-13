@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.5] - 2026-10-13
 
 - **Nothing could be dragged above the workspace node, and which nodes would
   move at all depended on where they were sitting.** A terminal, browser or
