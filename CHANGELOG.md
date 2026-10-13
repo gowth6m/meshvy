@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+- **Repositories are no longer nodes on the board.** Every workspace hung a
+  small card per repository beneath its node, wired to it — a second copy of
+  the chips the node already carries, under a branch name the whole workspace
+  shares. The board is for what runs in them: agents, sessions and browsers.
+  A repository lives on its chip now. Click it for the changes and the diff,
+  exactly as the card did; right-click it to open an agent, a shell or a
+  browser there, or to open it in your editor. The sidebar row does the same,
+  and brings the workspace node into view.
+- Past sessions still sit in a row beneath the workspace node, a column per
+  repository that has any, and their edges run to the workspace itself — as do
+  a browser's and an agent's you opened by hand. Every edge on the board now
+  has the workspace node at one end.
+
 ## [0.10.5] - 2026-10-13
 
 - **Nothing could be dragged above the workspace node, and which nodes would

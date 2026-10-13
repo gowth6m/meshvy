@@ -4,14 +4,14 @@ import Foundation
 /// Lays out one workspace as a tree.
 ///
 /// The workspace itself is the parent node — it hosts the orchestrator's Claude
-/// Code session and names the repositories that belong to it. Its repositories
-/// sit in a row beneath it, and every sub-agent the orchestrator dispatches
-/// appears as its own node to the side, linked back to the parent.
+/// Code session and names the repositories that belong to it. A repository is a
+/// chip on the parent, not a node of its own: the board is for what runs in
+/// them. Past sessions sit in a row beneath the parent, a column for each
+/// repository they ran in, and every agent the orchestrator dispatches appears
+/// as its own node to the side, linked back to the parent.
 struct BoardComposer {
     struct Input {
         var workspace: Workspace
-        /// Live git state keyed by worktree path.
-        var worktrees: [String: Worktree]
         var sessions: [SessionSummary]
         var statuses: [String: SessionStatus]
         var live: [String: LiveSession]
@@ -30,6 +30,7 @@ struct BoardComposer {
     func compose(_ input: Input) -> CanvasGraph {
         var graph = CanvasGraph()
         let workspace = input.workspace
+        let parent = NodeID.workspace(workspace.id)
 
         // 1. The parent.
         let parentSize = CGSize(
@@ -37,18 +38,16 @@ struct BoardComposer {
             height: input.orchestratorRunning ? workspace.boardHeight : Workspace.idleHeight
         )
         graph.nodes.append(CanvasNode(
-            id: .workspace(workspace.id),
+            id: parent,
             kind: .workspace(workspace),
             position: .zero,
             size: parentSize
         ))
 
-        // 2. Repositories in a row beneath it, each linked to the parent.
-        let repoRowY = parentSize.height + rowGap
-        let repoWidth = Theme.worktreeNodeSize.width
-        let totalRepoWidth = CGFloat(workspace.repos.count) * (repoWidth + gap) - gap
-        var repoX = max(0, (parentSize.width - totalRepoWidth) / 2)
-
+        // 2. Past sessions in a row beneath it: a column for each repository
+        // that has any, in the order the parent's chips list them, each card
+        // linked to the parent. A repository with nothing to show leaves no
+        // gap — there is no card of its own holding its place.
         let index = PathIndex(paths: workspace.repos.map(\.worktreePath))
         var byRepo: [String: [SessionSummary]] = [:]
         for session in input.sessions {
@@ -59,37 +58,28 @@ struct BoardComposer {
             byRepo[path, default: []].append(session)
         }
 
-        for repo in workspace.repos {
-            let worktree = input.worktrees[repo.worktreePath] ?? placeholder(for: repo, workspace: workspace)
-            let nodeID = NodeID.worktree(repo.worktreePath)
-            graph.nodes.append(CanvasNode(
-                id: nodeID,
-                kind: .worktree(worktree),
-                position: CGPoint(x: repoX, y: repoRowY),
-                size: Theme.worktreeNodeSize,
-                repoID: repo.id
-            ))
-            graph.edges.append(CanvasEdge(
-                from: .workspace(workspace.id), to: nodeID,
-                isLive: input.orchestratorRunning, kind: .owns
-            ))
+        let columns = workspace.repos.filter { byRepo[$0.worktreePath] != nil }
+        let columnWidth = Theme.sessionNodeSize.width
+        let rowY = parentSize.height + rowGap
+        let totalWidth = CGFloat(columns.count) * (columnWidth + gap) - gap
+        var columnX = max(0, (parentSize.width - totalWidth) / 2)
 
-            // Past sessions for this repo stack under its card.
+        for repo in columns {
             let sessions = (byRepo[repo.worktreePath] ?? []).sorted { $0.lastActivityAt > $1.lastActivityAt }
-            var y = repoRowY + Theme.worktreeNodeSize.height + gap
+            var y = rowY
             for session in sessions.prefix(6) {
                 let status = input.statuses[session.id] ?? .ended
                 graph.nodes.append(CanvasNode(
                     id: .session(session.id),
                     kind: .session(session, status: status, live: input.live[session.id]),
-                    position: CGPoint(x: repoX, y: y),
+                    position: CGPoint(x: columnX, y: y),
                     size: Theme.sessionNodeSize,
                     repoID: repo.id
                 ))
-                graph.edges.append(CanvasEdge(from: .session(session.id), to: nodeID, isLive: status.isLive))
+                graph.edges.append(CanvasEdge(from: .session(session.id), to: parent, isLive: status.isLive))
                 y += Theme.sessionNodeSize.height + gap
             }
-            repoX += repoWidth + gap
+            columnX += columnWidth + gap
         }
 
         // 3. Sub-agents the orchestrator dispatched, to the right of the parent.
@@ -103,7 +93,7 @@ struct BoardComposer {
                 size: subAgentSize
             ))
             graph.edges.append(CanvasEdge(
-                from: .workspace(workspace.id), to: .subAgent(agent.id),
+                from: parent, to: .subAgent(agent.id),
                 isLive: agent.state.isRunning, kind: .dispatched
             ))
             agentY += subAgentSize.height + gap
@@ -124,19 +114,20 @@ struct BoardComposer {
                 size: terminal.size,
                 repoID: terminal.repoID
             ))
-            if let repoID = terminal.repoID,
-               let repo = workspace.repos.first(where: { $0.id == repoID }) {
-                graph.edges.append(CanvasEdge(
-                    from: .terminal(terminal.id), to: .worktree(repo.worktreePath),
-                    isLive: true, kind: .owns
-                ))
-            }
             // An agent the orchestrator spawned is its child; draw that so the
-            // delegation tree is visible, not just which repo it sits in.
+            // delegation tree is visible. One you opened in a repository yourself
+            // still belongs to the workspace, and the repository is a chip on
+            // the parent rather than a node, so its edge runs to the parent too.
             if terminal.bridgeID != nil {
                 graph.edges.append(CanvasEdge(
-                    from: .workspace(workspace.id), to: .terminal(terminal.id),
+                    from: parent, to: .terminal(terminal.id),
                     isLive: true, kind: .dispatched
+                ))
+            } else if let repoID = terminal.repoID,
+                      workspace.repos.contains(where: { $0.id == repoID }) {
+                graph.edges.append(CanvasEdge(
+                    from: .terminal(terminal.id), to: parent,
+                    isLive: true, kind: .owns
                 ))
             }
         }
@@ -157,37 +148,14 @@ struct BoardComposer {
                 size: browser.size,
                 repoID: browser.repoID
             ))
-            if let repoID = browser.repoID,
-               let repo = workspace.repos.first(where: { $0.id == repoID }) {
-                graph.edges.append(CanvasEdge(
-                    from: .browser(browser.id), to: .worktree(repo.worktreePath),
-                    isLive: true, kind: .watches
-                ))
-            } else {
-                graph.edges.append(CanvasEdge(
-                    from: .browser(browser.id), to: .workspace(workspace.id),
-                    isLive: true, kind: .watches
-                ))
-            }
+            graph.edges.append(CanvasEdge(
+                from: .browser(browser.id), to: parent,
+                isLive: true, kind: .watches
+            ))
         }
 
         applyPinned(&graph, pinned: input.pinned)
         return graph
-    }
-
-    private func placeholder(for repo: WorkspaceRepo, workspace: Workspace) -> Worktree {
-        Worktree(
-            path: repo.worktreePath,
-            branch: workspace.branch,
-            head: nil,
-            isMain: false,
-            isDetached: false,
-            isLocked: false,
-            isPrunable: repo.failure != nil,
-            isArchived: !FileManager.default.fileExists(atPath: repo.worktreePath),
-            displayName: repo.name,
-            failureReason: repo.failure
-        )
     }
 
     private func applyPinned(_ graph: inout CanvasGraph, pinned: [String: CGPoint]) {

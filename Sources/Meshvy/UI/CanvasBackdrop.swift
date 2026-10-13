@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Everything behind the interactive cards, drawn in one `Canvas` pass:
-/// the dot grid, repository containers, session→worktree edges, and — when
-/// zoomed far out — the cards themselves as plain blocks.
+/// the dot grid, the edges back to the workspace node, and — when zoomed far
+/// out — the cards themselves as plain blocks.
 ///
 /// Collapsing the zoomed-out case into drawing commands is what keeps a board of
 /// a few hundred nodes smooth; no SwiftUI view is created for a node you cannot
@@ -147,8 +147,6 @@ struct CanvasBackdrop: View {
                     case .idle: return (Theme.surfaceRaised, Theme.idle)
                     case .ended: return (Theme.surface, summary.isSidechain ? Theme.sidechain : Theme.ended)
                     }
-                case .worktree(let worktree):
-                    return (Theme.surfaceSunken, worktree.isDirty ? Theme.dirty : Theme.worktree)
                 case .terminal, .workspace:
                     // These keep their own live view at every zoom; the block
                     // layer never needs to stand in for one.
