@@ -256,7 +256,7 @@ public struct BrowserNodeView: View {
     @ViewBuilder
     private var scrollHint: some View {
         if store.hoveredTerminal == node.id, store.armedTerminal != node.id, zoom.scale > 0.5 {
-            Text("hold to scroll the page")
+            Text("hold still to scroll the page")
                 .font(zoom.font(8.5, .medium))
                 .foregroundStyle(Theme.textTertiary)
                 .padding(.horizontal, zoom.s(6))

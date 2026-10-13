@@ -1,6 +1,7 @@
 import BrowserKit
 import Foundation
 import MeshvyModels
+import ProcessKit
 
 /// Builds the `claude` invocation a terminal node runs.
 ///
@@ -23,6 +24,20 @@ public enum AgentCommand {
         // The terminal runs under a login shell, so a bare name resolves from PATH.
         return "claude"
     }()
+
+    /// Whether there is a `claude` to run at all. The candidates above are on
+    /// disk; failing those, the question goes to the same login shell every
+    /// terminal is started under, since its PATH is the one an agent actually
+    /// gets. Nil when the shell did not answer in time — which is not a no.
+    ///
+    /// Blocks on a shell, so never from the main thread.
+    public static func isInstalled() -> Bool? {
+        if claudePath != "claude" { return true }
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let result = Shell.run(shell, ["-l", "-c", "command -v claude"], cwd: nil, timeout: 10)
+        if result.timedOut { return nil }
+        return result.status == 0 && !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     public struct Options {
         public var model: String? = ModelDefaults.modelID

@@ -46,7 +46,12 @@ public enum Theme {
 
         public static let textPrimary = NightOwl.foreground
         public static let textSecondary = blend(NightOwl.muted, NightOwl.foreground, 0.5)
-        public static let textTertiary = NightOwl.muted
+        /// Night Owl's `muted`, lifted a fifth of the way to the foreground.
+        /// Verbatim it measured 3.9:1 on the canvas and 2.5:1 on the palette —
+        /// too faint for type this small, and this is the colour that carries
+        /// the timestamps, paths, field labels and hints. Lifted, it clears
+        /// 5:1 on the canvas and still sits well below `textSecondary`.
+        public static let textTertiary = blend(NightOwl.muted, NightOwl.foreground, 0.2)
 
         public static let accent = NightOwl.mint
         /// The accent is a light mint, so anything filled with `accent` has to

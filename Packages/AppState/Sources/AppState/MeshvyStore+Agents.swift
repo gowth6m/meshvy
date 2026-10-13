@@ -4,6 +4,7 @@ import BrowserKit
 import FileSystemKit
 import Foundation
 import MeshvyModels
+import TerminalKit
 
 // Terminals, the agent bridge, hook-driven status, and retuning a running session.
 extension MeshvyStore {
@@ -16,7 +17,7 @@ extension MeshvyStore {
     // helper, which drops a request here and gets a real agent back — its own
     // process, its own PTY, its own node on the canvas.
 
-    func startBridge(for workspace: Workspace) {
+    public func startBridge(for workspace: Workspace) {
         AgentBridge.install(for: workspace)
         AgentHooks.install(for: workspace)
         BrowserBridge.install(for: workspace)
@@ -48,7 +49,7 @@ extension MeshvyStore {
     }
 
     /// Handles everything the helper has asked for since the last pass.
-    func drainBridge() {
+    public func drainBridge() {
         guard let workspace = activeWorkspace else { return }
         for (url, request) in AgentBridge.pendingRequests(for: workspace) {
             // Remove first: a request that throws must not be retried forever.
@@ -61,7 +62,7 @@ extension MeshvyStore {
         }
     }
 
-    func handleSpawn(_ request: AgentBridge.Request, in workspace: Workspace) {
+    public func handleSpawn(_ request: AgentBridge.Request, in workspace: Workspace) {
         guard let repoName = request.repo,
               let repo = workspace.repos.first(where: { $0.name == repoName }) else {
             show(.init(kind: .failure, title: "Agent asked for an unknown repo", detail: request.repo))
@@ -88,7 +89,8 @@ extension MeshvyStore {
         show(.init(
             kind: .success,
             title: "Orchestrator started an agent in \(repo.name)",
-            detail: request.task
+            detail: request.task,
+            action: ("Show", { [weak self] in self?.reveal(.terminal(node.id)) })
         ))
     }
 
@@ -98,7 +100,7 @@ extension MeshvyStore {
     // what the agent is doing. Nothing here parses terminal output.
 
     /// Applies everything the hooks have reported since the last pass.
-    func drainHooks() {
+    public func drainHooks() {
         guard let workspace = activeWorkspace else { return }
         let before = activity
         checkStartupPrompts()
@@ -111,7 +113,7 @@ extension MeshvyStore {
     }
 
     /// What every agent is doing, in the shape `meshvy status` prints.
-    func statusRows() -> [AgentBridge.StatusRow] {
+    public func statusRows() -> [AgentBridge.StatusRow] {
         guard let workspace = activeWorkspace else { return [] }
         return workspace.allTerminals.compactMap { node in
             guard let record = activity(for: node) else { return nil }
@@ -125,7 +127,7 @@ extension MeshvyStore {
         }
     }
 
-    func apply(_ event: AgentHooks.Event) {
+    public func apply(_ event: AgentHooks.Event) {
         var record = activity[event.sessionID] ?? AgentActivity(sessionID: event.sessionID)
         let previous = record.state
 
@@ -157,7 +159,7 @@ extension MeshvyStore {
 
     /// A question appearing, or a turn ending, is the moment worth a nudge —
     /// and only if you are not already looking at that node.
-    func announce(_ record: AgentActivity, node: TerminalNode) {
+    public func announce(_ record: AgentActivity, node: TerminalNode) {
         let worthTelling = record.state == .blocked || record.state == .done
         let id = canvasID(for: node)
         guard worthTelling, selection != id else { return }
@@ -176,7 +178,7 @@ extension MeshvyStore {
     /// Flags an agent stopped on a dialog that runs before its session exists,
     /// which no hook can report. Only ever fills a gap: a session that has
     /// reported once is left to its hooks forever.
-    func checkStartupPrompts() {
+    public func checkStartupPrompts() {
         guard let workspace = activeWorkspace else { return }
         for node in workspace.allTerminals {
             guard let sessionID = node.sessionID,
@@ -192,7 +194,7 @@ extension MeshvyStore {
         }
     }
 
-    func terminalNode(forSession sessionID: String) -> TerminalNode? {
+    public func terminalNode(forSession sessionID: String) -> TerminalNode? {
         guard let workspace = activeWorkspace else { return nil }
         return workspace.allTerminals.first { $0.sessionID == sessionID }
     }
@@ -256,7 +258,7 @@ extension MeshvyStore {
         reveal(ids[next])
     }
 
-    func markRead(_ id: NodeID?) {
+    public func markRead(_ id: NodeID?) {
         let terminalID: UUID?
         switch id {
         case .terminal(let value): terminalID = value
@@ -268,7 +270,7 @@ extension MeshvyStore {
     }
 
     /// One agent typing into another's terminal.
-    func handleSend(_ request: AgentBridge.Request) {
+    public func handleSend(_ request: AgentBridge.Request) {
         guard let target = request.to, let message = request.message,
               let workspace = activeWorkspace else { return }
         let node = workspace.terminals.first { $0.bridgeID == target }
@@ -306,7 +308,7 @@ extension MeshvyStore {
         AgentBridge.install(for: workspace)
         BrowserBridge.install(for: workspace)
         let options = agentOptions(for: workspace)
-        terminals.start(
+        let session = terminals.start(
             node: node,
             command: AgentCommand.orchestrator(
                 workspace: workspace, sessionID: sessionID, name: name, options: options
@@ -314,6 +316,7 @@ extension MeshvyStore {
             // Puts `meshvy` on the orchestrator's PATH so it can delegate.
             environment: ["PATH": workspace.binDirectory + ":" + currentPath()]
         )
+        watchExit(of: node, session: session)
         workspace.orchestrator = node
         update(workspace)
         startBridge(for: workspace)
@@ -339,7 +342,7 @@ extension MeshvyStore {
 
     /// What every session Meshvy starts is launched with. One place, so the
     /// orchestrator and the agents it spawns can never drift apart.
-    func agentOptions(for workspace: Workspace) -> AgentCommand.Options {
+    public func agentOptions(for workspace: Workspace) -> AgentCommand.Options {
         AgentCommand.Options(
             model: models.selectedModelID,
             permissionMode: permissionMode,
@@ -413,7 +416,7 @@ extension MeshvyStore {
     /// when the turn ends — but that is worth saying rather than leaving you to
     /// wonder why nothing changed.
     @discardableResult
-    func send(_ command: String, to node: TerminalNode, saying what: String) -> Bool {
+    public func send(_ command: String, to node: TerminalNode, saying what: String) -> Bool {
         guard let session = terminals.session(for: node.id), session.isRunning else { return false }
         session.send(command + "\r")
         let isBusy = activity(for: node)?.state == .working
@@ -426,7 +429,7 @@ extension MeshvyStore {
     }
 
     /// Edits one terminal in place, wherever it lives on the workspace.
-    func updateTerminal(_ id: UUID, _ edit: (inout TerminalNode) -> Void) {
+    public func updateTerminal(_ id: UUID, _ edit: (inout TerminalNode) -> Void) {
         guard var workspace = activeWorkspace else { return }
         if var node = workspace.orchestrator, node.id == id {
             edit(&node)
@@ -490,11 +493,82 @@ extension MeshvyStore {
             )
         }
 
-        terminals.start(node: node, command: command)
+        watchExit(of: node, session: terminals.start(node: node, command: command))
         workspace.terminals.append(node)
         update(workspace)
         selection = .terminal(node.id)
         reveal(.terminal(node.id))
         return node
+    }
+
+    /// Hears about a terminal's process ending, which nothing else announces.
+    /// An agent that exits fires no hook to say so, and a session's
+    /// `isRunning` is not observed — so a dead terminal went on being drawn as
+    /// a live one until something unrelated happened to redraw the board.
+    func watchExit(of node: TerminalNode, session: TerminalSession) {
+        let started = Date()
+        session.onExit = { [weak self] code in
+            self?.terminalExited(node, code: code, after: Date().timeIntervalSince(started))
+        }
+    }
+
+    func terminalExited(_ node: TerminalNode, code: Int32?, after seconds: TimeInterval) {
+        // Closed or restarted from here: the node is gone, and so is the news.
+        guard activeWorkspace?.allTerminals.contains(where: { $0.id == node.id }) ?? false else { return }
+        rebuild()
+        statusLine = summaryLine()
+        notifier.badge(agentsNeedingYou.count)
+
+        // An agent gone within seconds of starting never got going — most
+        // often because `claude` is not on the PATH a login shell sees. The
+        // orchestrator's node folds back to its start prompt the moment its
+        // process ends, taking whatever the shell printed with it, so the
+        // reason is kept on a banner instead of vanishing with the terminal.
+        guard node.sessionID != nil, let code, code != 0, seconds < 15 else { return }
+        // 127 is the shell failing to find `claude` — as definite an answer
+        // as asking for it, so every Start prompt can say so too.
+        if code == 127 { claudeInstalled = false }
+        let lastLines = (terminals.session(for: node.id)?.screenText ?? "")
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .suffix(3)
+            .joined(separator: "\n")
+        show(.init(
+            kind: .failure,
+            title: code == 127
+                ? "Claude Code is not installed, or not on your PATH"
+                : "\(node.title) exited as it started (exit \(code))",
+            detail: lastLines.isEmpty ? nil : lastLines,
+            action: code == 127 ? ("Get Claude Code", { [weak self] in self?.openClaudeCodeInstallPage() }) : nil
+        ))
+    }
+
+    /// Where the `claude` CLI comes from. Meshvy drives it and does not ship it.
+    public func openClaudeCodeInstallPage() {
+        if let url = URL(string: "https://claude.com/claude-code") { NSWorkspace.shared.open(url) }
+    }
+
+    /// Asks the login shell whether `claude` is on its PATH, off the main
+    /// thread — a login shell can take a moment to read its profile.
+    public func checkClaudeInstalled() {
+        Task.detached(priority: .utility) {
+            let installed = AgentCommand.isInstalled()
+            await MainActor.run { [weak self] in self?.claudeInstalled = installed }
+        }
+    }
+
+    /// While the answer is no, asks again whenever Meshvy comes back to the
+    /// front — which is what happens after installing it in Terminal — so the
+    /// warning goes away without a relaunch.
+    func recheckClaudeOnActivation() {
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.claudeInstalled == false else { return }
+                self.checkClaudeInstalled()
+            }
+        }
     }
 }

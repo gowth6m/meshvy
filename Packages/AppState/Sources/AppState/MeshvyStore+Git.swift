@@ -98,6 +98,15 @@ extension MeshvyStore {
         workspaceChanges.reduce(0) { $0 + $1.files.count }
     }
 
+    /// Every changed file in the workspace, in the inspector — which is what
+    /// the workspace node's own panel is. Selected rather than revealed: the
+    /// list is the point, and moving the board under you would not be.
+    public func showWorkspaceChanges() {
+        guard let id = activeWorkspace?.id else { return }
+        inspectorVisible = true
+        select(.workspace(id))
+    }
+
     /// One repository's git state, or as much as is known before the first
     /// read of it lands.
     public func worktree(for repo: WorkspaceRepo) -> Worktree {

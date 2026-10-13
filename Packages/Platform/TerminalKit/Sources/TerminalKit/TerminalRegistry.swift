@@ -35,7 +35,15 @@ public final class TerminalSession: NSObject, Identifiable, LocalProcessTerminal
 
         // Run under a login shell so PATH, version managers and the user's
         // profile behave exactly as they would in Terminal.app.
-        let script = "cd \(Self.quote(cwd)) || exit 1; clear; " + command.map(Self.quote).joined(separator: " ")
+        //
+        // A plain shell has no command, and `-c` with nothing left to run is a
+        // shell that exits the moment it has cleared the screen — every New
+        // shell came up already marked "exited". It is replaced with an
+        // interactive login shell instead, in the same folder.
+        let run = command.isEmpty
+            ? "exec " + Self.quote(Self.loginShell) + " -l"
+            : command.map(Self.quote).joined(separator: " ")
+        let script = "cd \(Self.quote(cwd)) || exit 1; clear; " + run
         var env = Terminal.getEnvironmentVariables(termName: "xterm-256color")
         for (key, value) in environment { env.append("\(key)=\(value)") }
 
@@ -77,11 +85,22 @@ public final class TerminalSession: NSObject, Identifiable, LocalProcessTerminal
     }
 
     public nonisolated func processTerminated(source: TerminalView, exitCode code: Int32?) {
+        // SwiftTerm hands over the raw `waitpid` status, not the exit code: a
+        // shell that could not find its command reports 32512, which is 127 a
+        // byte up. Decoded here, so nothing downstream has to know.
+        let decoded = code.map(Self.exitStatus)
         Task { @MainActor in
             isRunning = false
-            exitCode = code
-            onExit?(code)
+            exitCode = decoded
+            onExit?(decoded)
         }
+    }
+
+    /// What a shell would print as `$?` for a wait status: the exit code, or
+    /// 128 plus the signal for a process that was killed.
+    public nonisolated static func exitStatus(_ status: Int32) -> Int32 {
+        let signal = status & 0x7F
+        return signal == 0 ? (status >> 8) & 0xFF : 128 + signal
     }
 
     public nonisolated func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}

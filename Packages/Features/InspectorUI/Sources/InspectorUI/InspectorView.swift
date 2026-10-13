@@ -56,23 +56,48 @@ public struct InspectorView: View {
         }
         .frame(width: store.inspectorWidth)
         .background(Theme.chrome)
+        .environment(\.chromeButtonsBordered, true)
     }
 
+    /// What each kind of selection shows here, so the panel teaches the board
+    /// rather than waiting for a click. It used to name sessions and
+    /// repositories only — not the workspace or its agents, which are what
+    /// matter most once an orchestrator has run.
     private var emptyState: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             Image(systemName: "square.on.square.dashed")
                 .font(.system(size: 26, weight: .light))
                 .foregroundStyle(Theme.textTertiary)
-            Text("Select a card")
+            Text("Nothing selected")
                 .font(Theme.ui(12.5, .medium))
                 .foregroundStyle(Theme.textSecondary)
-            Text("Click a session to read its transcript, or a repository to see its git state.")
-                .font(Theme.ui(11))
+            VStack(alignment: .leading, spacing: 7) {
+                hint("rectangle.3.group.fill", Theme.accent, "The workspace", "every change, across every repo")
+                hint("square.on.square", Theme.worktree, "A repository", "its changed files and their diffs")
+                hint("hammer.fill", Theme.busy, "An agent", "what it is doing, and its settings")
+                hint("globe", Theme.branch, "A browser", "what the page has logged")
+            }
+            .padding(.vertical, 2)
+            Text("Click one on the board, or press ⌘K to find it by name.")
+                .font(Theme.ui(10.5))
                 .foregroundStyle(Theme.textTertiary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 240)
         }
+        .frame(maxWidth: 280)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func hint(_ icon: String, _ tint: Color, _ what: String, _ shows: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: icon)
+                .font(Theme.ui(10))
+                .foregroundStyle(tint)
+                .frame(width: 14)
+            (Text(what).foregroundStyle(Theme.textPrimary)
+                + Text(" — " + shows).foregroundStyle(Theme.textTertiary))
+                .font(Theme.ui(11))
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - Session
@@ -109,12 +134,17 @@ public struct InspectorView: View {
                 FieldGrid(rows: sessionFields(summary, live: live))
 
                 HStack(spacing: 6) {
-                    ChromeButton(icon: "chevron.left.forwardslash.chevron.right", label: "Editor") {
+                    ChromeButton(
+                        icon: "chevron.left.forwardslash.chevron.right", label: "Editor",
+                        help: "Open the session's folder in your editor"
+                    ) {
                         store.openInEditor(summary.resolvedPath)
                     }
-                    ChromeButton(icon: "doc.text.magnifyingglass") { store.revealTranscriptFile(summary) }
+                    ChromeButton(icon: "doc.text.magnifyingglass", help: "Reveal the transcript file in Finder") {
+                        store.revealTranscriptFile(summary)
+                    }
                     Spacer(minLength: 0)
-                    ChromeButton(icon: "arrow.clockwise") { store.reloadTranscript() }
+                    ChromeButton(icon: "arrow.clockwise", help: "Reload the transcript") { store.reloadTranscript() }
                 }
 
                 if let transcript = store.transcript, transcript.sessionId == summary.id {
@@ -216,13 +246,25 @@ public struct InspectorView: View {
 
                 HStack(spacing: 6) {
                     if store.isOrchestratorRunning {
-                        ChromeButton(icon: "stop.circle", label: "Stop") { store.stopOrchestrator() }
+                        ChromeButton(icon: "stop.circle", label: "Stop", help: "Stop the orchestrator") {
+                            store.requestStopOrchestrator()
+                        }
                     } else {
-                        ChromeButton(icon: "play.fill", label: "Start Claude Code") { store.startOrchestrator() }
+                        ChromeButton(
+                            icon: "play.fill", label: "Start Claude Code",
+                            help: "Start the orchestrator at the workspace root (⇧⌘T)"
+                        ) {
+                            store.startOrchestrator()
+                        }
                     }
-                    ChromeButton(icon: "plus", label: "Repos") { sheet = .addRepos }
+                    ChromeButton(icon: "plus", label: "Repos", help: "Add repositories (⇧⌘O)") { sheet = .addRepos }
+                    ChromeButton(icon: "globe", label: "Browser", help: "Put a browser on the board (⌘B)") {
+                        store.openBrowser()
+                    }
                     Spacer(minLength: 0)
-                    ChromeButton(icon: "folder") { store.revealInFinder(workspace.root) }
+                    ChromeButton(icon: "folder", help: "Reveal the workspace folder in Finder") {
+                        store.revealInFinder(workspace.root)
+                    }
                 }
 
                 let grouped = store.workspaceChanges
@@ -360,14 +402,18 @@ public struct InspectorView: View {
                 ])
 
                 HStack(spacing: 6) {
-                    ChromeButton(icon: "arrow.clockwise", label: "Reload") { store.reloadBrowser(node.id) }
-                    ChromeButton(icon: "arrow.up.forward.app", label: "Open in browser") {
+                    ChromeButton(icon: "arrow.clockwise", label: "Reload", help: "Reload the page") {
+                        store.reloadBrowser(node.id)
+                    }
+                    ChromeButton(
+                        icon: "arrow.up.forward.app", label: "Open in browser",
+                        help: "Open this page in your default browser"
+                    ) {
                         store.openInBrowser(node.url)
                     }
                     Spacer(minLength: 0)
                     if !lines.isEmpty {
-                        ChromeButton(icon: "trash") { session?.clearConsole() }
-                            .help("Clear the console")
+                        ChromeButton(icon: "trash", help: "Clear the console") { session?.clearConsole() }
                     }
                 }
 
@@ -511,13 +557,25 @@ public struct InspectorView: View {
                 .init(label: "Session ID", value: terminal.sessionID ?? "—", mono: true, copyable: terminal.sessionID)
             ])
             HStack(spacing: 6) {
-                ChromeButton(icon: "arrow.clockwise", label: "Restart") { store.restartTerminal(terminal.id) }
-                ChromeButton(icon: "chevron.left.forwardslash.chevron.right", label: "Editor") {
+                ChromeButton(
+                    icon: "arrow.clockwise", label: "Restart",
+                    help: "Close this terminal and open a fresh one in the same folder"
+                ) {
+                    store.restartTerminal(terminal.id)
+                }
+                ChromeButton(
+                    icon: "chevron.left.forwardslash.chevron.right", label: "Editor",
+                    help: "Open the folder in your editor"
+                ) {
                     store.openInEditor(terminal.cwd)
                 }
-                ChromeButton(icon: "folder") { store.revealInFinder(terminal.cwd) }
+                ChromeButton(icon: "folder", help: "Reveal the folder in Finder") { store.revealInFinder(terminal.cwd) }
                 Spacer(minLength: 0)
-                ChromeButton(icon: "xmark") { store.closeTerminal(terminal.id) }
+                // Labelled: an unexplained cross that ends an agent mid-task
+                // is the last button that should be a guess.
+                ChromeButton(icon: "xmark", label: "Close", help: "Close the terminal") {
+                    store.requestClose(terminal.id)
+                }
             }
         }
         .padding(14)
@@ -579,18 +637,18 @@ public struct InspectorView: View {
                 }
 
                 HStack(spacing: 6) {
-                    ChromeButton(icon: "hammer.fill", label: "Agent") {
+                    ChromeButton(icon: "hammer.fill", label: "Agent", help: "Start a Claude Code agent in this repository") {
                         store.openTerminal(role: .repo, repoID: repoID)
                     }
-                    ChromeButton(icon: "terminal", label: "Shell") {
+                    ChromeButton(icon: "terminal", label: "Shell", help: "Open a shell in this repository") {
                         store.openTerminal(role: .shell, repoID: repoID)
                     }
-                    ChromeButton(icon: "chevron.left.forwardslash.chevron.right") {
+                    ChromeButton(icon: "chevron.left.forwardslash.chevron.right", help: "Open in your editor") {
                         store.openInEditor(worktree.path)
                     }
-                    ChromeButton(icon: "folder") { store.revealInFinder(worktree.path) }
+                    ChromeButton(icon: "folder", help: "Reveal in Finder") { store.revealInFinder(worktree.path) }
                     Spacer(minLength: 0)
-                    ChromeButton(icon: "arrow.clockwise") { store.refreshGitStatus() }
+                    ChromeButton(icon: "arrow.clockwise", help: "Refresh git status (⇧⌘R)") { store.refreshGitStatus() }
                 }
 
                 summary(worktree, files: files)

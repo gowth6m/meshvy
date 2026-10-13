@@ -7,9 +7,7 @@ public struct Zoom {
     /// How much the canvas is magnified. Geometry follows this exactly.
     public let scale: CGFloat
 
-    public init(
-        scale: CGFloat
-    ) {
+    public init(scale: CGFloat) {
         self.scale = scale
     }
 

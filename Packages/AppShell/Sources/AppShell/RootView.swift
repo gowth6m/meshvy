@@ -10,13 +10,11 @@ import WorkspacesUI
 
 public struct RootView: View {
     @Bindable public var store: MeshvyStore
+    @State private var sheet: MeshvySheet?
 
-    public init(
-        store: MeshvyStore
-    ) {
+    public init(store: MeshvyStore) {
         self.store = store
     }
-    @State private var sheet: MeshvySheet?
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -92,13 +90,37 @@ public struct RootView: View {
             case .update: UpdateSheet(store: store)
             }
         }
+        // Every "are you sure?" in the app, asked from one place — see
+        // `MeshvyStore.Confirmation`. Presented here rather than beside each
+        // button, so a context menu that has already closed can still ask.
+        .confirmationDialog(
+            store.confirmation?.title ?? "",
+            isPresented: Binding(
+                get: { store.confirmation != nil },
+                set: { if !$0 { store.confirmation = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: store.confirmation
+        ) { confirmation in
+            Button(confirmation.action, role: .destructive) { confirmation.run() }
+            if let alternative = confirmation.alternative {
+                Button(alternative.label) { alternative.run() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { confirmation in
+            Text(confirmation.message)
+        }
         .onAppear { store.bootstrap() }
         .onReceive(of: .meshvyPalette) { store.paletteOpen.toggle() }
         .onReceive(of: .meshvyShortcuts) { store.shortcutsOpen.toggle() }
         .onReceive(of: .meshvyNextAgent) { if store.hasWorkspace { store.revealNextNeedingYou() } }
         .onReceive(of: .meshvyToggleSidebar) { store.sidebarVisible.toggle() }
         .onReceive(of: .meshvyToggleInspector) { store.inspectorVisible.toggle() }
-        .onReceive(of: .meshvyFocusSearch) { store.sidebarVisible = true }
+        .onReceive(of: .meshvyFocusSearch) {
+            guard store.hasWorkspace else { return }
+            store.sidebarVisible = true
+            store.searchFocusRequested = true
+        }
         .onReceive(of: .meshvyNewWorkspace) { sheet = .newWorkspace }
         .onReceive(of: .meshvyAddRepos) { if store.hasWorkspace { sheet = .addRepos } }
         .onReceive(of: .meshvyUninstall) { store.runUninstaller() }
@@ -110,7 +132,7 @@ public struct RootView: View {
         .onReceive(of: .meshvyOpenShell) { if store.hasWorkspace { store.openTerminal(role: .shell) } }
         .onReceive(of: .meshvyOpenBrowser) { if store.hasWorkspace { store.openBrowser() } }
         .onReceive(of: .meshvyArchiveWorkspace) {
-            if let active = store.activeWorkspace { store.archiveWorkspace(active.id) }
+            if let active = store.activeWorkspace { store.requestArchive(active.id) }
         }
     }
 }
@@ -121,40 +143,52 @@ public struct EmptyStateView: View {
     @Bindable public var store: MeshvyStore
     @Binding public var sheet: MeshvySheet?
 
-    public init(
-        store: MeshvyStore,
-        sheet: Binding<MeshvySheet?>
-    ) {
-        self.store = store
-        self._sheet = sheet
-    }
-
     public var body: some View {
         ZStack {
             Theme.canvas
-            VStack(spacing: 18) {
-                Image(systemName: "square.link.3d.up")
-                    .font(.system(size: 38, weight: .thin))
-                    .foregroundStyle(Theme.accent.opacity(0.75))
+            VStack(spacing: 22) {
+                // `square.link.3d.up` stood here, and is not an SF Symbol: the
+                // first thing a new install showed was a gap above its title.
+                BrandMark(size: 44)
 
                 VStack(spacing: 7) {
                     Text("No workspace yet")
                         .font(Theme.ui(19, .bold))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("""
-                    A workspace is the repositories you work on together, each \
-                    checked out on one shared branch under ~/.meshvy. Open an \
-                    orchestrator terminal at its root and it can put a real \
-                    agent, with its own terminal, on every repo at once.
-                    """)
+                    Text("Put the repositories you work on together on one board, and run an agent in each of them at once.")
                         .font(Theme.ui(12))
                         .foregroundStyle(Theme.textSecondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 420)
+                        .frame(maxWidth: 400)
                 }
 
-                PrimaryButton(title: "New workspace") { sheet = .newWorkspace }
+                // What happens, in the order it happens — the paragraph this
+                // replaces said all of it in one breath.
+                VStack(alignment: .leading, spacing: 12) {
+                    step(1, "Pick the repositories", "Folders on disk, or a GitHub URL to clone.")
+                    step(
+                        2, "Meshvy cuts one branch across them",
+                        "Each is checked out side by side under ~/.meshvy. Your own clones are left alone."
+                    )
+                    step(
+                        3, "Start the orchestrator",
+                        "Claude Code at the workspace root, handing work to an agent in each repository."
+                    )
+                }
+                .frame(maxWidth: 400, alignment: .leading)
+
+                if store.claudeInstalled == false {
+                    ClaudeMissingNotice(store: store)
+                        .frame(maxWidth: 400)
+                }
+
+                VStack(spacing: 7) {
+                    PrimaryButton(title: "New workspace") { sheet = .newWorkspace }
+                    Text("⇧⌘N")
+                        .font(Theme.mono(10, .medium))
+                        .foregroundStyle(Theme.textTertiary)
+                }
 
                 if !store.liveWorkspaces.isEmpty {
                     workspaceList("OR OPEN", store.liveWorkspaces)
@@ -187,6 +221,66 @@ public struct EmptyStateView: View {
         }
         .padding(.top, 6)
     }
+
+    private func step(_ number: Int, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 11) {
+            Text("\(number)")
+                .font(Theme.mono(10.5, .bold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Theme.accent.opacity(0.12)))
+                .overlay(Circle().stroke(Theme.accent.opacity(0.35), lineWidth: 1))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Theme.ui(12.5, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(detail)
+                    .font(Theme.ui(11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// Said wherever an agent would otherwise be started from nothing: Meshvy
+/// drives the `claude` CLI and does not ship it, and without it every Start
+/// button opens a terminal that fails on its first line.
+struct ClaudeMissingNotice: View {
+    @Bindable var store: MeshvyStore
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(Theme.ui(12, .semibold))
+                .foregroundStyle(Theme.dirty)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Claude Code is not installed")
+                    .font(Theme.ui(12, .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Meshvy runs the claude CLI rather than the API, and a login shell here cannot find it. Install it and sign in once, then come back.")
+                    .font(Theme.ui(11))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { store.openClaudeCodeInstallPage() } label: {
+                    HStack(spacing: 4) {
+                        Text("Get Claude Code")
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .font(Theme.ui(11, .semibold))
+                    .foregroundStyle(Theme.dirty)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.dirty.opacity(0.08)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.dirty.opacity(0.35), lineWidth: 1)
+        )
+    }
 }
 
 // MARK: - Top bar
@@ -195,7 +289,6 @@ private struct TopBar: View {
     @Environment(\.meshvySnapshotMode) private var isSnapshot
     @Bindable public var store: MeshvyStore
     @Binding public var sheet: MeshvySheet?
-    @State private var confirmingArchive = false
 
     /// Read on every render rather than held in `@State`, so the bar cannot be
     /// left holding a stale answer — see `WindowChrome`.
@@ -216,7 +309,11 @@ private struct TopBar: View {
         HStack(spacing: 0) {
             leadingCluster
             Spacer(minLength: 12)
-            if store.hasWorkspace { trailingCluster }
+            if store.hasWorkspace {
+                trailingCluster
+            } else if store.updates.availableRelease != nil {
+                UpdatePill(store: store, sheet: $sheet)
+            }
         }
         .padding(.leading, leadingInset)
         .padding(.trailing, 12)
@@ -232,10 +329,9 @@ private struct TopBar: View {
     /// Panel toggle, identity, then the one action worth filling with accent.
     private var leadingCluster: some View {
         HStack(spacing: 7) {
-            ChromeButton(icon: "sidebar.leading", isActive: store.sidebarVisible) {
+            ChromeButton(icon: "sidebar.leading", help: "Toggle sidebar (⌥⌘S)", isActive: store.sidebarVisible) {
                 store.sidebarVisible.toggle()
             }
-            .help("Toggle sidebar (⌥⌘S)")
             .disabled(!store.hasWorkspace)
             // Dimmed rather than dropped, so the identity block does not shift
             // sideways when a workspace opens.
@@ -269,28 +365,18 @@ private struct TopBar: View {
     }
 
     /// Archiving is one click, because nothing it does needs thinking about:
-    /// the worktrees stay, the branch stays, and the way back is in the
-    /// workspace menu. The one case worth a question is archiving a board with
-    /// agents still running on it, since that does stop them.
+    /// the worktrees stay, the branch stays, and the banner it leaves offers
+    /// to undo it. The one case worth a question is archiving a board with
+    /// agents still running on it, since that does stop them — which the store
+    /// asks about, so ⌥⌘A and the menus ask too.
     @ViewBuilder
     private var archiveButton: some View {
         if let active = store.activeWorkspace {
-            let running = active.allTerminals.filter { store.terminals.isRunning($0.id) }.count
-            ChromeButton(icon: "archivebox") {
-                if running > 0 { confirmingArchive = true } else { store.archiveWorkspace(active.id) }
-            }
-            .help("Archive “\(active.name)” — keeps every worktree (⌥⌘A)")
-            .confirmationDialog(
-                "Archive “\(active.name)”?",
-                isPresented: $confirmingArchive,
-                titleVisibility: .visible
+            ChromeButton(
+                icon: "archivebox",
+                help: "Archive “\(active.name)” — keeps every worktree (⌥⌘A)"
             ) {
-                Button("Archive and stop \(running) \(running == 1 ? "agent" : "agents")") {
-                    store.archiveWorkspace(active.id)
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The worktrees and the branch are untouched. Restore it from the workspace menu.")
+                store.requestArchive(active.id)
             }
         }
     }
@@ -298,24 +384,27 @@ private struct TopBar: View {
     /// View controls, then the inspector toggle mirroring the sidebar one.
     private var trailingCluster: some View {
         HStack(spacing: 7) {
+            // It was written, styled and never placed, so a new release only
+            // reached anyone who thought to open Check for Updates… themselves.
+            if store.updates.availableRelease != nil {
+                UpdatePill(store: store, sheet: $sheet)
+            }
+
             needsYouPill
 
-            ChromeButton(icon: "magnifyingglass") { store.paletteOpen = true }
-                .help("Command palette (⌘K)")
+            ChromeButton(icon: "magnifyingglass", help: "Command palette (⌘K)") { store.paletteOpen = true }
 
             barDivider
 
             zoomCluster
 
-            ChromeButton(icon: "arrow.clockwise") { store.refreshAll() }
-                .help("Refresh everything (⌘R)")
+            ChromeButton(icon: "arrow.clockwise", help: "Refresh everything (⌘R)") { store.refreshAll() }
 
             barDivider
 
-            ChromeButton(icon: "sidebar.trailing", isActive: store.inspectorVisible) {
+            ChromeButton(icon: "sidebar.trailing", help: "Toggle inspector (⌥⌘I)", isActive: store.inspectorVisible) {
                 store.inspectorVisible.toggle()
             }
-            .help("Toggle inspector (⌥⌘I)")
         }
     }
 
@@ -403,7 +492,7 @@ private struct TopBar: View {
                 Divider()
                 Button("Reveal folder in Finder") { store.revealInFinder(active.root) }
                 Divider()
-                Button("Archive “\(active.name)”") { store.archiveWorkspace(active.id) }
+                Button("Archive “\(active.name)”") { store.requestArchive(active.id) }
             }
             if !store.archivedWorkspaces.isEmpty {
                 Menu("Archived") {
@@ -418,11 +507,11 @@ private struct TopBar: View {
             }
             if let active = store.activeWorkspace {
                 Divider()
-                Button("Close (keep worktrees)") {
-                    store.deleteWorkspace(active.id, removeWorktrees: false, force: false)
+                Button("Close (keep worktrees)…") {
+                    store.requestDelete(active.id, removeWorktrees: false, force: false)
                 }
-                Button("Delete worktrees") {
-                    store.deleteWorkspace(active.id, removeWorktrees: true, force: false)
+                Button("Delete worktrees…") {
+                    store.requestDelete(active.id, removeWorktrees: true, force: false)
                 }
             }
         } label: {
@@ -463,7 +552,7 @@ private struct UpdatePill: View {
             Button { sheet = .update } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.down.circle.fill").font(Theme.ui(10.5, .semibold))
-                    Text(release.version).font(Theme.ui(11, .semibold))
+                    Text("Update to \(release.version)").font(Theme.ui(11, .semibold))
                 }
                 .foregroundStyle(Theme.clean)
                 .padding(.horizontal, 8)
@@ -485,16 +574,6 @@ public struct AccentButton: View {
     public var icon: String
     public var label: String
     public var action: () -> Void
-
-    public init(
-        icon: String,
-        label: String,
-        action: @escaping () -> Void
-    ) {
-        self.icon = icon
-        self.label = label
-        self.action = action
-    }
     @State private var hovering = false
 
     public var body: some View {
@@ -536,10 +615,15 @@ private struct StatusBar: View {
                 .font(Theme.ui(10.5))
                 .foregroundStyle(Theme.textTertiary)
             Spacer(minLength: 0)
+            // Drawn in the accent like a link, so it had better act like one.
             if store.hasWorkspace, store.totalChangedFiles > 0 {
-                Text("\(store.totalChangedFiles) changed")
-                    .font(Theme.ui(10.5, .medium))
-                    .foregroundStyle(Theme.accent)
+                Button { store.showWorkspaceChanges() } label: {
+                    Text("\(store.totalChangedFiles) changed")
+                        .font(Theme.ui(10.5, .medium))
+                        .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .help("Show every changed file, across every repository")
             }
         }
         .padding(.horizontal, 14)
@@ -570,6 +654,25 @@ private struct BannerView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
+                }
+                if let action = banner.action {
+                    Spacer(minLength: 8)
+                    Button {
+                        store.dismissBanner()
+                        action.run()
+                    } label: {
+                        Text(action.label)
+                            .font(Theme.ui(11.5, .semibold))
+                            .foregroundStyle(tint(banner.kind))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(tint(banner.kind).opacity(0.14))
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
                 Button { store.dismissBanner() } label: {
                     Image(systemName: "xmark").font(Theme.ui(9, .bold)).foregroundStyle(Theme.textTertiary)

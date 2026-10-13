@@ -139,7 +139,7 @@ public struct CanvasView: View {
                 .contextMenu {
                     if store.isOrchestratorRunning {
                         Button("Restart Claude Code") { store.restartTerminal(workspace.orchestrator!.id) }
-                        Button("Stop Claude Code") { store.stopOrchestrator() }
+                        Button("Stop Claude Code") { store.requestStopOrchestrator() }
                     } else {
                         Button("Start Claude Code") { store.startOrchestrator() }
                     }
@@ -166,7 +166,7 @@ public struct CanvasView: View {
                     Button("Reveal folder in Finder") { store.revealInFinder(terminal.cwd) }
                     Button("Copy folder path") { store.copyToClipboard(terminal.cwd) }
                     Divider()
-                    Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
+                    Button("Close terminal", role: .destructive) { store.requestClose(terminal.id) }
                 }
             } else if case .browser(let browser) = node.kind {
                 BrowserNodeView(
@@ -569,7 +569,7 @@ public struct CanvasView: View {
             Button("Copy path") { store.copyToClipboard(summary.resolvedPath) }
         case .terminal(let terminal):
             Button("Restart") { store.restartTerminal(terminal.id) }
-            Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
+            Button("Close terminal", role: .destructive) { store.requestClose(terminal.id) }
         case .workspace, .browser:
             EmptyView()
         case .subAgent(let agent):

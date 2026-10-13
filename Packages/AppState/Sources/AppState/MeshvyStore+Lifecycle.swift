@@ -13,9 +13,6 @@ extension MeshvyStore {
         hasBootstrapped = true
 
         loadSavedLayout()
-        // AgentKit knows how to post a notification but not what a click should
-        // do with it, so the board hands it back the one thing it needs.
-        notifier.onReveal = { [weak self] id in self?.reveal(id) }
         let document = workspaceStore.load()
         // A terminal's process does not survive a quit, and an empty shell of
         // one is just clutter — start each launch with a clean board.
@@ -35,6 +32,8 @@ extension MeshvyStore {
         startWatching()
         startTimers()
         models.refresh()
+        checkClaudeInstalled()
+        recheckClaudeOnActivation()
         // Quietly, on launch: only speaks up when there is something to take.
         updates.check()
 
@@ -45,7 +44,7 @@ extension MeshvyStore {
         loadActiveWorkspace()
     }
 
-    func loadSavedLayout() {
+    public func loadSavedLayout() {
         guard let stored = layoutStore.load() else { return }
         saved = stored
         pinned = stored.pinned.mapValues { CGPoint(x: $0.x, y: $0.y) }
@@ -64,7 +63,7 @@ extension MeshvyStore {
         hasFitInitially = stored.scale > 0
     }
 
-    func loadActiveWorkspace() {
+    public func loadActiveWorkspace() {
         guard let workspace = activeWorkspace else { return }
         let files = indexer.transcriptFiles()
         allSessions = indexer.quickSummaries(files: files).sorted { $0.lastActivityAt > $1.lastActivityAt }

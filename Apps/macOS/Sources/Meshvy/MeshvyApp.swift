@@ -114,9 +114,17 @@ struct MeshvyCommands: Commands {
             Button("Actual Size") { store.zoomToActualSize() }
                 .keyboardShortcut("1", modifiers: .command)
             Divider()
-            Button("Show Ended Sessions") { store.showEndedSessions.toggle() }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
-            Button("Invert Scroll Direction") { store.invertScroll.toggle() }
+            // Toggles rather than buttons, so the menu says which way each one
+            // is set instead of leaving you to flip it and look.
+            Toggle("Show Ended Sessions", isOn: Binding(
+                get: { store.showEndedSessions },
+                set: { store.showEndedSessions = $0 }
+            ))
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            Toggle("Invert Scroll Direction", isOn: Binding(
+                get: { store.invertScroll },
+                set: { store.invertScroll = $0 }
+            ))
             Divider()
             Button("Toggle Sidebar") {
                 NotificationCenter.default.post(name: .meshvyToggleSidebar, object: nil)

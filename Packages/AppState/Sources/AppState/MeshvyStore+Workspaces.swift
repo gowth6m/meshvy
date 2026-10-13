@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import MeshvyModels
+import WorkspaceKit
 
 // Creating, activating, archiving and deleting workspaces.
 extension MeshvyStore {
@@ -29,17 +30,46 @@ extension MeshvyStore {
 
     /// Creates the workspace and its worktrees in one step: every repository
     /// gets a checkout of the same new branch under `~/.meshvy/<slug>/`.
-    public func createWorkspace(name: String, repos: [WorkspaceRepo], baseRef: String?, branch: String?) {
+    ///
+    /// Remotes are cloned first and built in with the rest. The two used to
+    /// run side by side, and whichever finished first decided where a clone
+    /// went — one that beat the new workspace into existence was added to
+    /// whichever workspace had been open before it. A workspace of nothing but
+    /// URLs could not be created at all.
+    public func createWorkspace(
+        name: String, repos: [WorkspaceRepo], cloning remotes: [String] = [],
+        baseRef: String?, branch: String?
+    ) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = trimmed.isEmpty ? "Workspace" : trimmed
         let branchName = (branch?.isEmpty == false ? branch! : Workspace.slug(resolved))
         let builder = self.builder
 
         isWorking = true
-        show(.init(kind: .info, title: "Creating worktrees in \(repos.count) repos…", detail: nil))
+        show(.init(
+            kind: .info,
+            title: remotes.isEmpty
+                ? "Creating worktrees in \(repos.count) repos…"
+                : "Cloning \(remotes.count), then creating worktrees…",
+            detail: nil
+        ))
 
         Task.detached(priority: .userInitiated) {
-            let workspace = builder.build(name: resolved, branch: branchName, baseRef: baseRef, repos: repos)
+            let clones = MeshvyStore.clone(remotes, with: builder)
+            let all = repos + clones.repos.filter { clone in !repos.contains { $0.id == clone.id } }
+            // Every clone failed and there was nothing else: no workspace,
+            // rather than an empty one named after what could not be fetched.
+            guard remotes.isEmpty || !all.isEmpty else {
+                await MainActor.run { [weak self] in
+                    self?.isWorking = false
+                    self?.show(.init(
+                        kind: .failure, title: "Nothing to create — the clone failed",
+                        detail: clones.failures.joined(separator: "\n")
+                    ))
+                }
+                return
+            }
+            let workspace = builder.build(name: resolved, branch: branchName, baseRef: baseRef, repos: all)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isWorking = false
@@ -49,7 +79,7 @@ extension MeshvyStore {
                 self.hasFitInitially = false
                 self.loadActiveWorkspace()
 
-                let failures = workspace.repos.compactMap { repo in
+                let failures = clones.failures + workspace.repos.compactMap { repo in
                     repo.failure.map { "\(repo.name): \($0)" }
                 }
                 if failures.isEmpty {
@@ -61,7 +91,7 @@ extension MeshvyStore {
                 } else {
                     self.show(.init(
                         kind: .failure,
-                        title: "\(workspace.readyRepos.count) of \(workspace.repos.count) worktrees created",
+                        title: "\(workspace.readyRepos.count) of \(workspace.repos.count + clones.failures.count) worktrees created",
                         detail: failures.joined(separator: "\n")
                     ))
                 }
@@ -69,45 +99,56 @@ extension MeshvyStore {
         }
     }
 
-    public func addRepos(_ repos: [WorkspaceRepo]) {
+    /// Adds repositories to the open workspace, cloning any remotes first.
+    public func addRepos(_ repos: [WorkspaceRepo], cloning remotes: [String] = []) {
         guard let workspace = activeWorkspace else { return }
         let builder = self.builder
         isWorking = true
+        if !remotes.isEmpty { show(.init(kind: .info, title: "Cloning \(remotes.count)…", detail: nil)) }
 
         Task.detached(priority: .userInitiated) {
-            let updated = builder.extend(workspace, with: repos)
+            let clones = MeshvyStore.clone(remotes, with: builder)
+            let incoming = repos + clones.repos.filter { clone in !repos.contains { $0.id == clone.id } }
+            let extended = builder.extend(workspace, with: incoming)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isWorking = false
-                self.update(updated)
+                // Onto the workspace as it is now, not as it was when this
+                // began: two adds in flight at once each wrote back their own
+                // starting copy, and the later one dropped what the other had
+                // just added.
+                guard var current = self.workspaces.first(where: { $0.id == workspace.id }) else { return }
+                let added = extended.repos.filter { repo in !current.repos.contains { $0.id == repo.id } }
+                current.repos += added
+                self.update(current)
                 self.refreshGitStatus()
-                self.show(.init(kind: .success, title: "Added \(repos.count) to “\(workspace.name)”", detail: nil))
+                if clones.failures.isEmpty {
+                    self.show(.init(kind: .success, title: "Added \(added.count) to “\(workspace.name)”", detail: nil))
+                } else {
+                    self.show(.init(
+                        kind: .failure,
+                        title: "Added \(added.count) to “\(workspace.name)” — \(clones.failures.count) could not be cloned",
+                        detail: clones.failures.joined(separator: "\n")
+                    ))
+                }
             }
         }
     }
 
-    public func cloneRepos(_ references: [String], thenAddToActive: Bool) {
-        let builder = self.builder
-        isWorking = true
-        show(.init(kind: .info, title: "Cloning \(references.count)…", detail: nil))
-
-        Task.detached(priority: .userInitiated) {
-            let outcomes = references.map { ($0, builder.clone($0)) }
-            let cloned: [WorkspaceRepo] = outcomes.compactMap {
-                if case .cloned(let repo) = $0.1 { return repo } else { return nil }
-            }
-            let failures: [String] = outcomes.compactMap {
-                if case .failed(let message) = $0.1 { return "\($0.0): \(message)" } else { return nil }
-            }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.isWorking = false
-                if !cloned.isEmpty, thenAddToActive { self.addRepos(cloned) }
-                if !failures.isEmpty {
-                    self.show(.init(kind: .failure, title: "Clone failed", detail: failures.joined(separator: "\n")))
-                }
+    /// Clones each remote, sorting what came back into repositories and the
+    /// reasons the rest did not.
+    private nonisolated static func clone(
+        _ remotes: [String], with builder: WorkspaceBuilder
+    ) -> (repos: [WorkspaceRepo], failures: [String]) {
+        var repos: [WorkspaceRepo] = []
+        var failures: [String] = []
+        for remote in remotes {
+            switch builder.clone(remote) {
+            case .cloned(let repo): repos.append(repo)
+            case .failed(let message): failures.append("\(remote): \(message)")
             }
         }
+        return (repos, failures)
     }
 
     public func activate(_ id: UUID) {
@@ -176,7 +217,8 @@ extension MeshvyStore {
         show(.init(
             kind: .success,
             title: "Archived “\(name)”",
-            detail: "The worktrees are untouched. Restore it from the workspace menu."
+            detail: "The worktrees are untouched. Restore it from the workspace menu.",
+            action: ("Undo", { [weak self] in self?.unarchiveWorkspace(id) })
         ))
     }
 
@@ -239,20 +281,38 @@ extension MeshvyStore {
     }
 
     public func removeRepo(_ repoID: String) {
-        guard var workspace = activeWorkspace else { return }
-        workspace.repos.removeAll { $0.id == repoID }
+        guard var workspace = activeWorkspace,
+              let position = workspace.repos.firstIndex(where: { $0.id == repoID }) else { return }
+        let repo = workspace.repos[position]
+        // Its terminals go with it, and so must their processes. Dropping the
+        // nodes alone left their agents running with nothing on the board to
+        // show for them, still editing a checkout you had just taken away.
+        for terminal in workspace.terminals where terminal.repoID == repoID {
+            terminals.discard(terminal.id)
+            unread.remove(terminal.id)
+            if let sessionID = terminal.sessionID { activity[sessionID] = nil }
+        }
+        workspace.repos.remove(at: position)
         workspace.terminals.removeAll { $0.repoID == repoID }
         update(workspace)
+        notifier.badge(agentsNeedingYou.count)
+
+        let workspaceID = workspace.id
+        show(.init(
+            kind: .success,
+            title: "Removed “\(repo.name)” from “\(workspace.name)”",
+            detail: "Its checkout is still at \(repo.worktreePath.replacingOccurrences(of: NSHomeDirectory(), with: "~")).",
+            action: ("Undo", { [weak self] in self?.restoreRepo(repo, at: position, in: workspaceID) })
+        ))
     }
 
-    func update(_ workspace: Workspace) {
-        guard let position = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
-        workspaces[position] = workspace
-        persistWorkspaces()
-        rebuild()
-    }
-
-    func persistWorkspaces() {
-        workspaceStore.save(.init(workspaces: workspaces, activeWorkspaceID: activeWorkspaceID))
+    /// Puts a removed repository back where it was. The checkout never left
+    /// the disk, so this is only the board remembering it again.
+    func restoreRepo(_ repo: WorkspaceRepo, at position: Int, in workspaceID: UUID) {
+        guard var workspace = activeWorkspace, workspace.id == workspaceID,
+              !workspace.repos.contains(where: { $0.id == repo.id }) else { return }
+        workspace.repos.insert(repo, at: min(position, workspace.repos.count))
+        update(workspace)
+        refreshGitStatus()
     }
 }

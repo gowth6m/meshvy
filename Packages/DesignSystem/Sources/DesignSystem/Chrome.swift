@@ -8,12 +8,7 @@ public struct Pill: View {
     public var tint: Color = Theme.textSecondary
     public var zoom: Zoom
 
-    public init(
-        text: String,
-        icon: String? = nil,
-        tint: Color = Theme.textSecondary,
-        zoom: Zoom
-    ) {
+    public init(text: String, icon: String? = nil, tint: Color = Theme.textSecondary, zoom: Zoom) {
         self.text = text
         self.icon = icon
         self.tint = tint
@@ -51,10 +46,7 @@ public struct StatusDot: View {
     public var status: SessionStatus
     public var zoom: Zoom
 
-    public init(
-        status: SessionStatus,
-        zoom: Zoom
-    ) {
+    public init(status: SessionStatus, zoom: Zoom) {
         self.status = status
         self.zoom = zoom
     }
@@ -97,12 +89,7 @@ public struct MetaStat: View {
     public var tint: Color = Theme.textTertiary
     public var zoom: Zoom
 
-    public init(
-        icon: String,
-        value: String,
-        tint: Color = Theme.textTertiary,
-        zoom: Zoom
-    ) {
+    public init(icon: String, value: String, tint: Color = Theme.textTertiary, zoom: Zoom) {
         self.icon = icon
         self.value = value
         self.tint = tint
@@ -119,23 +106,33 @@ public struct MetaStat: View {
 }
 
 /// Toolbar-style button that matches the dark chrome.
+///
+/// `help` is the tooltip, and for a button that is only an icon it is the
+/// accessibility label too. It is a parameter rather than a `.help` at the call
+/// site because the button used to set its own, from the SF Symbol's name —
+/// which is how the inspector came to explain its buttons as "xmark",
+/// "folder" and "arrow.clockwise", and VoiceOver to read them out that way.
 public struct ChromeButton: View {
     public var icon: String
     public var label: String?
+    public var help: String?
     public var isActive: Bool = false
     public var action: () -> Void
 
     public init(
         icon: String,
         label: String? = nil,
+        help: String? = nil,
         isActive: Bool = false,
         action: @escaping () -> Void
     ) {
         self.icon = icon
         self.label = label
+        self.help = help
         self.isActive = isActive
         self.action = action
     }
+    @Environment(\.chromeButtonsBordered) private var bordered
     @State private var hovering = false
 
     public var body: some View {
@@ -149,15 +146,35 @@ public struct ChromeButton: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isActive ? Theme.accent.opacity(0.14) : (hovering ? Theme.fill : .clear))
+                    .fill(isActive ? Theme.accent.opacity(0.14) : (hovering ? Theme.fill : restingFill))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(isActive ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1)
+                    .stroke(isActive ? Theme.accent.opacity(0.35) : restingStroke, lineWidth: 1)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(label ?? icon)
+        .help(help ?? label ?? "")
+        .accessibilityLabel(Text(label ?? help ?? icon))
+    }
+
+    /// A toolbar button is found by where it sits; one in a panel, among text
+    /// and values, has to look like something you can press before anyone
+    /// hovers it.
+    private var restingFill: Color { bordered ? Theme.fillSubtle : .clear }
+    private var restingStroke: Color { bordered ? Theme.hairline : .clear }
+}
+
+private struct ChromeButtonsBorderedKey: EnvironmentKey {
+    public static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Set on a panel so its `ChromeButton`s draw their outline at rest.
+    public var chromeButtonsBordered: Bool {
+        get { self[ChromeButtonsBorderedKey.self] }
+        set { self[ChromeButtonsBorderedKey.self] = newValue }
     }
 }

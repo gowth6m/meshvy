@@ -41,7 +41,7 @@ extension MeshvyStore {
             show(.init(
                 kind: .failure,
                 title: "No uninstaller in this build",
-                detail: "Run Scripts/uninstall.sh from the repository instead."
+                detail: "Run scripts/uninstall.sh from the repository instead."
             ))
             return
         }

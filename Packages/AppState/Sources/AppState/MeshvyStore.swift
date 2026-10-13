@@ -21,8 +21,6 @@ import WorkspaceKit
 @MainActor
 @Observable
 public final class MeshvyStore {
-    public init() {}
-
     /// One store per process. The SwiftUI scene and the headless harnesses both
     /// reach for this — two instances would mean two sets of timers, two
     /// filesystem watchers, and two readers racing for the same agent-bridge
@@ -72,6 +70,10 @@ public final class MeshvyStore {
     public var selection: NodeID?
     public var searchQuery = "" { didSet { recomputeMatches() } }
     public internal(set) var matchingNodes: Set<String> = []
+    /// ⌘F asks for the sidebar's search field. A flag the sidebar clears once
+    /// it has taken focus, rather than an event, because the sidebar may only
+    /// be coming into existence on the same keystroke.
+    public var searchFocusRequested = false
 
     public var showEndedSessions = true { didSet { rebuild(); persistLayout() } }
     public var invertScroll = false { didSet { persistLayout() } }
@@ -101,16 +103,21 @@ public final class MeshvyStore {
     /// to be handed the scroll wheel. Nil means the canvas keeps panning.
     public internal(set) var hoveredTerminal: UUID?
     public internal(set) var armedTerminal: UUID?
-    var armTask: Task<Void, Never>?
+    public var armTask: Task<Void, Never>?
 
     /// How long the pointer has to rest on a terminal before it takes the
     /// wheel. Long enough that flicking across the board never scrolls one by
     /// accident, short enough not to feel like waiting.
-    static let armDelay = Duration.milliseconds(500)
+    public static let armDelay = Duration.milliseconds(500)
 
     public internal(set) var isIndexing = false
     public internal(set) var isLoadingGit = false
     public internal(set) var isWorking = false
+    /// Whether the `claude` CLI is there to be run — nil until the shell has
+    /// answered, or when it could not. Meshvy drives the CLI and does not ship
+    /// it, and without it every Start button opens a terminal that fails on
+    /// its first line; only a definite no is worth saying anything about.
+    public internal(set) var claudeInstalled: Bool?
     public internal(set) var statusLine = "No workspace"
     public internal(set) var banner: Banner?
 
@@ -120,18 +127,42 @@ public final class MeshvyStore {
         public var kind: Kind
         public var title: String
         public var detail: String?
+        /// One thing to do about it — undo what just happened, or go and look
+        /// at what it was about. A banner is gone in seconds, so the way back
+        /// has to be on the banner itself rather than buried in a menu.
+        public var action: (label: String, run: () -> Void)?
 
         public init(
             id: UUID = UUID(),
             kind: Kind,
             title: String,
-            detail: String? = nil
+            detail: String? = nil,
+            action: (label: String, run: () -> Void)? = nil
         ) {
             self.id = id
             self.kind = kind
             self.title = title
             self.detail = detail
+            self.action = action
         }
+    }
+
+    /// A question waiting to be answered before something that cannot be taken
+    /// back: an agent stopped mid-task, a checkout torn off disk. Raised here
+    /// and asked once, by `RootView`, so every path to the same action — a
+    /// header button, a context menu, a keystroke — asks the same question.
+    public var confirmation: Confirmation?
+
+    public struct Confirmation: Identifiable {
+        public var id = UUID()
+        public var title: String
+        public var message: String
+        /// The button that goes ahead, which says what it does.
+        public var action: String
+        public var run: () -> Void
+        /// A safer way to the same end, offered alongside — archiving instead
+        /// of forgetting, say.
+        public var alternative: (label: String, run: () -> Void)?
     }
 
     // MARK: Transcript reader
@@ -145,25 +176,26 @@ public final class MeshvyStore {
     public let models = ModelCatalog()
     public let updates = UpdateService()
     public let notifier = Notifier()
-    let indexer = SessionIndexer()
-    let liveMonitor = LiveSessionMonitor()
-    let git = GitService()
-    let builder = WorkspaceBuilder()
-    let composer = BoardComposer()
-    let subAgentTracker = SubAgentTracker()
-    let workspaceStore = WorkspaceStore()
-    let layoutStore = FileStore<SavedLayout>(filename: "layout.json")
-    let transcriptLoader = TranscriptLoader()
+    public let indexer = SessionIndexer()
+    public let liveMonitor = LiveSessionMonitor()
+    public let git = GitService()
+    public let builder = WorkspaceBuilder()
+    public let composer = BoardComposer()
+    public let subAgentTracker = SubAgentTracker()
+    public let workspaceStore = WorkspaceStore()
+    public let layoutStore = FileStore<SavedLayout>(filename: "layout.json")
+    public let transcriptLoader = TranscriptLoader()
 
-    var saved = SavedLayout()
-    var pinned: [String: CGPoint] = [:]
-    var watchers: [DirectoryWatcher] = []
-    var bridgeWatcher: DirectoryWatcher?
-    var hookWatcher: DirectoryWatcher?
-    var browserWatcher: DirectoryWatcher?
-    var liveTimer: Timer?
-    var gitTimer: Timer?
-    var hasFitInitially = false
-    var sessionIndexByID: [String: Int] = [:]
-    var hasBootstrapped = false
+    public var saved = SavedLayout()
+    public var pinned: [String: CGPoint] = [:]
+    public var watchers: [DirectoryWatcher] = []
+    public var bridgeWatcher: DirectoryWatcher?
+    public var hookWatcher: DirectoryWatcher?
+    public var browserWatcher: DirectoryWatcher?
+    public var liveTimer: Timer?
+    public var gitTimer: Timer?
+    public var activationObserver: NSObjectProtocol?
+    public var hasFitInitially = false
+    public var sessionIndexByID: [String: Int] = [:]
+    public var hasBootstrapped = false
 }

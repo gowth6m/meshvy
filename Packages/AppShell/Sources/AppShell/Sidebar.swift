@@ -14,15 +14,8 @@ import SwiftUI
 public struct Sidebar: View {
     @Bindable public var store: MeshvyStore
     @Binding public var sheet: MeshvySheet?
-
-    public init(
-        store: MeshvyStore,
-        sheet: Binding<MeshvySheet?>
-    ) {
-        self.store = store
-        self._sheet = sheet
-    }
     @State private var collapsed: Set<UUID> = []
+    @FocusState private var searchFocused: Bool
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -63,26 +56,60 @@ public struct Sidebar: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(Theme.ui(11, .medium))
-                .foregroundStyle(Theme.textTertiary)
+                .foregroundStyle(searchFocused ? Theme.accent : Theme.textTertiary)
             SnapshotSafeField(
                 placeholder: "Search sessions, paths, branches",
                 text: $store.searchQuery
             )
+            .focused($searchFocused)
             .onSubmit { store.focusMatches() }
+            // Esc hands the board back: the filter goes, and the cursor with it.
+            .onKeyPress(.escape) {
+                store.searchQuery = ""
+                searchFocused = false
+                return .handled
+            }
             if store.isSearching {
-                Text("\(store.matchingNodes.count)")
-                    .font(Theme.mono(10, .semibold))
-                    .foregroundStyle(Theme.accent)
+                Button { store.focusMatches() } label: {
+                    Text("\(store.matchingNodes.count)")
+                        .font(Theme.mono(10, .semibold))
+                        .foregroundStyle(store.matchingNodes.isEmpty ? Theme.textTertiary : Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .help("Frame the matches on the board (⏎)")
                 Button { store.searchQuery = "" } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(Theme.ui(11))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .help("Clear the search (esc)")
+            } else if !searchFocused {
+                Text("⌘F")
+                    .font(Theme.mono(9.5, .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1.5)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Theme.fill))
             }
         }
         .padding(.horizontal, 12)
         .frame(height: 38)
+        .onAppear(perform: takeFocusIfAsked)
+        .onChange(of: store.searchFocusRequested) { _, asked in
+            if asked { takeFocusIfAsked() }
+        }
+    }
+
+    /// ⌘F used to show the sidebar and stop there, so with the sidebar already
+    /// open it did nothing you could see, and the field still had to be
+    /// clicked before anything could be typed into it.
+    private func takeFocusIfAsked() {
+        guard store.searchFocusRequested else { return }
+        store.searchFocusRequested = false
+        // A field only now being laid out cannot take focus in the same pass
+        // that creates it.
+        DispatchQueue.main.async { searchFocused = true }
     }
 
     /// Every live terminal, orchestrator included, ordered by how much it wants
@@ -144,6 +171,19 @@ public struct Sidebar: View {
                 } else {
                     Circle().fill(tint).frame(width: 5, height: 5)
                 }
+            }
+        }
+        // The same verbs the node itself offers, so stopping an agent does not
+        // mean finding it on the board first.
+        .contextMenu {
+            Button("Restart") { store.restartTerminal(terminal.id) }
+            Button("Reveal folder in Finder") { store.revealInFinder(terminal.cwd) }
+            Button("Copy folder path") { store.copyToClipboard(terminal.cwd) }
+            Divider()
+            if terminal.role == .orchestrator {
+                Button("Stop the orchestrator", role: .destructive) { store.requestStopOrchestrator() }
+            } else {
+                Button("Close terminal", role: .destructive) { store.requestClose(terminal.id) }
             }
         }
     }
@@ -241,11 +281,11 @@ public struct Sidebar: View {
                     Divider()
                     Button("Reveal folder in Finder") { store.revealInFinder(workspace.root) }
                     Divider()
-                    Button("Delete worktrees") {
-                        store.deleteWorkspace(workspace.id, removeWorktrees: true, force: false)
+                    Button("Delete worktrees…") {
+                        store.requestDelete(workspace.id, removeWorktrees: true, force: false)
                     }
-                    Button("Delete and discard changes", role: .destructive) {
-                        store.deleteWorkspace(workspace.id, removeWorktrees: true, force: true)
+                    Button("Delete and discard changes…", role: .destructive) {
+                        store.requestDelete(workspace.id, removeWorktrees: true, force: true)
                     }
                 }
             }
@@ -309,16 +349,16 @@ public struct Sidebar: View {
                 Button("Reveal folder in Finder") { store.revealInFinder(workspace.root) }
                 Button("Copy branch name") { store.copyToClipboard(workspace.branch) }
                 Divider()
-                Button("Archive — keeps every worktree") { store.archiveWorkspace(workspace.id) }
+                Button("Archive — keeps every worktree") { store.requestArchive(workspace.id) }
                 Divider()
-                Button("Close (keep worktrees)") {
-                    store.deleteWorkspace(workspace.id, removeWorktrees: false, force: false)
+                Button("Close (keep worktrees)…") {
+                    store.requestDelete(workspace.id, removeWorktrees: false, force: false)
                 }
-                Button("Delete worktrees") {
-                    store.deleteWorkspace(workspace.id, removeWorktrees: true, force: false)
+                Button("Delete worktrees…") {
+                    store.requestDelete(workspace.id, removeWorktrees: true, force: false)
                 }
-                Button("Delete and discard changes", role: .destructive) {
-                    store.deleteWorkspace(workspace.id, removeWorktrees: true, force: true)
+                Button("Delete and discard changes…", role: .destructive) {
+                    store.requestDelete(workspace.id, removeWorktrees: true, force: true)
                 }
             }
 
@@ -332,10 +372,13 @@ public struct Sidebar: View {
 
     private func repoRow(_ repo: WorkspaceRepo, workspace: Workspace) -> some View {
         let worktree = store.worktrees[repo.worktreePath]
+        // Past sessions in it, and the agents working in it now: an agent's
+        // session is drawn by its terminal rather than as a card of its own,
+        // so counting the cards alone left out everything still running.
         let sessions = store.graph.nodes.filter { node in
             guard case .session = node.kind else { return false }
             return node.repoID == repo.id
-        }
+        }.count + workspace.terminals.filter { $0.repoID == repo.id && $0.sessionID != nil }.count
         return SidebarRow(
             isSelected: store.selection == .worktree(repo.worktreePath),
             action: { store.reveal(.worktree(repo.worktreePath)) }
@@ -359,10 +402,11 @@ public struct Sidebar: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                if !sessions.isEmpty {
-                    Text("\(sessions.count)")
+                if sessions > 0 {
+                    Text("\(sessions)")
                         .font(Theme.mono(9.5, .medium))
                         .foregroundStyle(Theme.textTertiary)
+                        .help("\(sessions) \(sessions == 1 ? "session" : "sessions") in this repository")
                 }
             }
             .padding(.leading, 16)
@@ -375,7 +419,7 @@ public struct Sidebar: View {
             Button("Open in editor") { store.openInEditor(repo.worktreePath) }
             Button("Reveal in Finder") { store.revealInFinder(repo.worktreePath) }
             Divider()
-            Button("Remove from workspace") { store.removeRepo(repo.id) }
+            Button("Remove from workspace") { store.requestRemoveRepo(repo.id) }
         }
     }
 

@@ -76,7 +76,7 @@ extension MeshvyStore {
 
     /// Writes the page's own URL and title back onto the node, so the board
     /// reopens where it was left and the header says what the page says.
-    func bindBrowser(_ id: UUID) {
+    public func bindBrowser(_ id: UUID) {
         guard let session = browsers.session(for: id), session.onPageChange == nil else { return }
         session.onPageChange = { [weak self] url, pageTitle in
             guard let self, var workspace = self.activeWorkspace,
@@ -130,7 +130,7 @@ extension MeshvyStore {
     // MCP server dropped and is blocking on, so every path must write exactly
     // one answer back — including the failures.
 
-    func drainBrowserBridge() {
+    public func drainBrowserBridge() {
         guard let workspace = activeWorkspace else { return }
         for (url, request) in BrowserBridge.pendingRequests(for: workspace) {
             // Removed first: a request that throws must not be retried forever.
@@ -139,7 +139,7 @@ extension MeshvyStore {
         }
     }
 
-    func serve(_ request: BrowserBridge.Request, in workspace: Workspace) async {
+    public func serve(_ request: BrowserBridge.Request, in workspace: Workspace) async {
         do {
             let result = try await perform(request)
             BrowserBridge.answer(

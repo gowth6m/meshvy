@@ -11,12 +11,6 @@ import SwiftUI
 public struct ShortcutsSheet: View {
     @Bindable public var store: MeshvyStore
 
-    public init(
-        store: MeshvyStore
-    ) {
-        self.store = store
-    }
-
     private struct Row: Identifiable {
         public var keys: String
         public var what: String
@@ -34,6 +28,7 @@ public struct ShortcutsSheet: View {
             Section(title: "Board", rows: [
                 Row(keys: "⌘K", what: "Command palette — agents, nodes, terminal output"),
                 Row(keys: "⌘F", what: "Find on the board; ⇧⌘F frames the hits"),
+                Row(keys: "esc in the search", what: "Clear it and hand the board back"),
                 Row(keys: "⇧⌘N", what: "New workspace"),
                 Row(keys: "⇧⌘O", what: "Add repositories"),
                 Row(keys: "⌥⌘A", what: "Archive the workspace — keeps every worktree"),
@@ -58,7 +53,8 @@ public struct ShortcutsSheet: View {
                 Row(keys: "⌘-scroll · pinch", what: "Zoom"),
                 Row(keys: "⌘0 · ⌘1", what: "Fit to content · actual size"),
                 Row(keys: "double-click", what: "Centre a node"),
-                Row(keys: "drag the header", what: "Move a node; the corner grip resizes it")
+                Row(keys: "drag the header", what: "Move a node; the corner grip resizes it"),
+                Row(keys: "right-click", what: "Everything else a node can do — restart, reveal, copy, close")
             ]),
             Section(title: "Terminals", rows: [
                 Row(keys: "rest the pointer", what: "Hands the terminal the scroll wheel"),
@@ -101,10 +97,12 @@ public struct ShortcutsSheet: View {
                                 .foregroundStyle(Theme.textTertiary)
                             ForEach(section.rows) { row in
                                 HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    // Wide enough for the longest gesture —
+                                    // "⏎ in the address bar" was cut short.
                                     Text(row.keys)
                                         .font(Theme.mono(10.5, .medium))
                                         .foregroundStyle(Theme.accent)
-                                        .frame(width: 128, alignment: .leading)
+                                        .frame(width: 156, alignment: .leading)
                                     Text(row.what)
                                         .font(Theme.ui(11.5))
                                         .foregroundStyle(Theme.textSecondary)

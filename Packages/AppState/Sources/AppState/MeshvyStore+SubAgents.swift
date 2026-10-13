@@ -7,7 +7,7 @@ extension MeshvyStore {
 
     /// Re-reads the orchestrator's transcript for Agent-tool dispatches. Cheap
     /// enough to run on every transcript write while it is working.
-    func refreshSubAgents() {
+    public func refreshSubAgents() {
         guard let sessionID = activeWorkspace?.orchestrator?.sessionID,
               let url = transcriptURL(for: sessionID) else {
             if !subAgents.isEmpty { subAgents = []; rebuild() }
@@ -26,7 +26,7 @@ extension MeshvyStore {
 
     /// Transcripts are named after the session id, so a filename match finds it
     /// without having to re-derive the project folder encoding.
-    func transcriptURL(for sessionID: String) -> URL? {
+    public func transcriptURL(for sessionID: String) -> URL? {
         indexer.transcriptFiles().first { $0.deletingPathExtension().lastPathComponent == sessionID }
     }
 

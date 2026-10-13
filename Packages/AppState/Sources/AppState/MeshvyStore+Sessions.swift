@@ -7,7 +7,7 @@ import MeshvyModels
 extension MeshvyStore {
     // MARK: - Indexing
 
-    func startIndexing(files: [URL], quiet: Bool = false) {
+    public func startIndexing(files: [URL], quiet: Bool = false) {
         isIndexing = true
         if !quiet { statusLine = "Indexing \(files.count) transcripts…" }
         let indexer = self.indexer
@@ -26,7 +26,7 @@ extension MeshvyStore {
         }
     }
 
-    func merge(_ batch: [SessionSummary]) {
+    public func merge(_ batch: [SessionSummary]) {
         for summary in batch {
             if let position = sessionIndexByID[summary.id] {
                 allSessions[position] = summary

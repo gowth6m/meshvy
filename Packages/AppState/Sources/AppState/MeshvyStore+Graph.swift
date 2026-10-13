@@ -7,7 +7,7 @@ import PersistenceKit
 extension MeshvyStore {
     // MARK: - Graph
 
-    func rebuild() {
+    public func rebuild() {
         guard let workspace = activeWorkspace else {
             graph = CanvasGraph()
             return
@@ -40,7 +40,7 @@ extension MeshvyStore {
         return graph.node(.workspace(workspace.id))
     }
 
-    func recomputeMatches() {
+    public func recomputeMatches() {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { matchingNodes = []; return }
         let terms = query.split(separator: " ").map(String.init)
@@ -55,7 +55,7 @@ extension MeshvyStore {
 
     public func matches(_ id: NodeID) -> Bool { matchingNodes.contains(id.storageKey) }
 
-    func summaryLine() -> String {
+    public func summaryLine() -> String {
         guard let workspace = activeWorkspace else { return "No workspace — create one to get started" }
         let sessions = graph.nodes.filter { if case .session = $0.kind { return true } else { return false } }.count
         let running = workspace.allTerminals.filter { terminals.isRunning($0.id) }.count
@@ -74,8 +74,11 @@ extension MeshvyStore {
     public func show(_ banner: Banner) {
         self.banner = banner
         let id = banner.id
+        // Long enough to read; longer still when there is a button on it,
+        // which has to be found and reached before the banner goes.
+        let seconds = banner.kind == .failure ? 12 : (banner.action == nil ? 4 : 8)
         Task {
-            try? await Task.sleep(for: .seconds(banner.kind == .failure ? 12 : 4))
+            try? await Task.sleep(for: .seconds(seconds))
             if self.banner?.id == id { self.banner = nil }
         }
     }
@@ -143,7 +146,7 @@ extension MeshvyStore {
     /// told about each other by hand now share a frame of reference. A target
     /// that is not a running agent keeps the line on the board and nothing
     /// more — it is still a note to you about how the work fits together.
-    func deliverContext(for link: WorkspaceLink, in workspace: Workspace) {
+    public func deliverContext(for link: WorkspaceLink, in workspace: Workspace) {
         guard let brief = contextBrief(for: link.from, in: workspace) else { return }
         // Only an agent is told. A plain shell has no one reading it — typing a
         // paragraph of prose at a bash prompt would just be a failed command —
@@ -162,7 +165,7 @@ extension MeshvyStore {
     }
 
     /// The terminal a node id stands for, if it is one at all.
-    func terminalNode(for id: NodeID) -> TerminalNode? {
+    public func terminalNode(for id: NodeID) -> TerminalNode? {
         guard let workspace = activeWorkspace else { return nil }
         switch id {
         case .terminal(let uuid): return workspace.terminals.first { $0.id == uuid }
@@ -173,7 +176,7 @@ extension MeshvyStore {
 
     /// One paragraph describing a node, in the terms an agent can act on: where
     /// it is on disk, and what it is doing there.
-    func contextBrief(for id: NodeID, in workspace: Workspace) -> String? {
+    public func contextBrief(for id: NodeID, in workspace: Workspace) -> String? {
         switch id {
         case .terminal, .workspace:
             guard let node = terminalNode(for: id) else { return nil }

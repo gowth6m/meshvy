@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
-import MeshvyModels
 import SwiftUI
+import MeshvyModels
 
 // Framing the board: fit, reveal, zoom.
 extension MeshvyStore {
