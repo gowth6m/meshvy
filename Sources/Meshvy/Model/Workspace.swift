@@ -24,6 +24,9 @@ struct Workspace: Identifiable, Codable, Hashable {
     var terminals: [TerminalNode] = []
     /// Browser nodes on the board — a page you can watch and an agent can drive.
     var browsers: [BrowserNode] = []
+    /// Links drawn by hand between two nodes. The composer derives every other
+    /// edge from the shape of the workspace; these are the ones you decide.
+    var links: [WorkspaceLink] = []
     /// Size of the workspace node on the board.
     var boardWidth: Double = 780
     var boardHeight: Double = 520
@@ -89,7 +92,21 @@ struct Workspace: Identifiable, Codable, Hashable {
         createdAt = fields.value(.createdAt, or: Date())
         notes = fields.optional(String.self, .notes)
         archivedAt = fields.optional(Date.self, .archivedAt)
+        links = fields.value(.links, or: [])
     }
+}
+
+/// A link drawn between two nodes: what the source is doing is context the
+/// target should have.
+///
+/// Every other edge on the board is derived — a terminal owns the checkout it
+/// runs in, the orchestrator dispatched the agent it spawned. This is the one
+/// kind the board cannot work out for itself, so it is stored.
+struct WorkspaceLink: Codable, Hashable, Identifiable {
+    var from: NodeID
+    var to: NodeID
+    var createdAt: Date = Date()
+    var id: String { from.storageKey + "->" + to.storageKey }
 }
 
 /// One repository's checkout inside a workspace.

@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- **⌘-drag on empty board draws a new agent where you drew it.** The rectangle
+  is the node: where it sits and how big it is. One repository in the workspace
+  answers for itself, more than one asks which — an agent has to work
+  somewhere, and a rectangle cannot say where. Which of pan or draw a drag is
+  gets decided when it starts and held for the whole of it, so letting go of ⌘
+  halfway finishes the rectangle rather than lurching into a pan.
+- **Links you draw between nodes.** Selecting a node puts a handle on its right
+  edge; drag that onto another node and the two are linked. Every other edge on
+  the board is derived — a terminal owns the checkout it runs in, the
+  orchestrator dispatched the agent it spawned — so this is the one the board
+  cannot work out for itself, and it is stored on the workspace and drawn
+  dashed to say so.
+- A link hands the target what the source is: which folder it is working in and
+  what it was asked to do, typed into its session so two agents share a frame
+  of reference without being told about each other by hand. Only an agent is
+  told — a paragraph of prose at a bash prompt is just a failed command — and a
+  link whose far end is not running stays on the board as a note to you.
 - **All files, not only the changed ones.** The panel for a node with a
   directory now opens on a tree of what that directory actually holds —
   directories first, lazily, each one read the first time you open it, so a

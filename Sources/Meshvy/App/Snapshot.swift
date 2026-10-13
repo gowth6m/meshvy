@@ -640,9 +640,12 @@ struct SnapshotRequest {
     /// Open a browser node at this URL before rendering, so a board shot has the
     /// running application on it as well as the agents.
     var browserURL: String?
-    /// Open a shell in this repository before rendering, so a shot can be about
-    /// a terminal node and the panel that follows it.
+    /// Open a shell in each of these repositories before rendering, so a shot
+    /// can be about a terminal node and the panel that follows it. Comma
+    /// separated; `root` means the workspace root.
     var shellRepo: String?
+    /// Draw a link between the first two nodes, for a shot of one.
+    var link: Bool
     /// Which node the inspector should be showing. Left alone the shot picks
     /// for itself: the workspace after an agent has run, the browser when the
     /// shot is only about a browser, otherwise a checkout with changes in it.
@@ -677,6 +680,7 @@ struct SnapshotRequest {
         withAgent = arguments.contains("--agent")
         browserURL = value("--browser")
         shellRepo = value("--shell")
+        link = arguments.contains("--link")
         select = value("--select").flatMap(Selection.init(rawValue:))
         tidy = arguments.contains("--tidy")
     }
@@ -721,12 +725,31 @@ enum Snapshot {
             }
         }
 
-        if let name = request.shellRepo, store.activeWorkspace?.terminals.isEmpty == true {
-            // `--shell root` opens one at the workspace root, which belongs to
-            // no single repository and so answers for all of them.
-            let repo = store.activeWorkspace?.repos.first { $0.name == name }
-            if repo != nil || name == "root" {
-                store.openTerminal(role: .shell, repoID: repo?.id)
+        if let names = request.shellRepo, store.activeWorkspace?.terminals.isEmpty == true {
+            // Comma-separated, so a shot can have more than one agent on it.
+            // `root` opens one at the workspace root, which belongs to no
+            // single repository and so answers for all of them.
+            for name in names.split(separator: ",").map(String.init) {
+                let repo = store.activeWorkspace?.repos.first { $0.name == name }
+                if repo != nil || name == "root" {
+                    store.openTerminal(role: .shell, repoID: repo?.id)
+                }
+            }
+        }
+
+        // Draw a link between the first two things on the board, so the edge a
+        // person makes by hand can be photographed like any other.
+        if request.link, let workspace = store.activeWorkspace {
+            let ends: [NodeID] = workspace.terminals.map { .terminal($0.id) }
+            if ends.count >= 2 {
+                // Side by side, or the line between two stacked cards is a stub
+                // too short to read. Framing only.
+                let first = workspace.terminals[0]
+                store.moveTerminal(first.id, to: CGPoint(x: first.position.x - 760, y: first.position.y))
+                store.commitTerminalMove()
+                store.link(from: ends[0], to: ends[1])
+            } else if let first = ends.first {
+                store.link(from: .workspace(workspace.id), to: first)
             }
         }
 

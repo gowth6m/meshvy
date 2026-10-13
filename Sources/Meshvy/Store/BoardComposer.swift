@@ -154,6 +154,14 @@ struct BoardComposer {
             ))
         }
 
+        // 6. Links drawn by hand. Added last, so an end that has since left the
+        //    board — a terminal closed, an agent finished — simply drops the
+        //    line rather than leaving it hanging in space.
+        let present = Set(graph.nodes.map(\.id))
+        for link in workspace.links where present.contains(link.from) && present.contains(link.to) {
+            graph.edges.append(CanvasEdge(from: link.from, to: link.to, isLive: true, kind: .feeds))
+        }
+
         applyPinned(&graph, pinned: input.pinned)
         return graph
     }

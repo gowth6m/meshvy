@@ -104,6 +104,8 @@ struct CanvasEdge: Identifiable {
         case dispatched
         /// A browser is pointed at what the workspace is running.
         case watches
+        /// Drawn by hand: the source's work is context for the target.
+        case feeds
     }
 
     var from: NodeID

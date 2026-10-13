@@ -80,6 +80,7 @@ struct CanvasBackdrop: View {
         var idle = Path()
         var structural = Path()
         var active = Path()
+        var drawn = Path()
 
         for edge in graph.edges {
             guard let fromFrame = frames[edge.from], let toFrame = frames[edge.to] else { continue }
@@ -103,6 +104,7 @@ struct CanvasBackdrop: View {
             // far end is idle. Amber is reserved for an agent actually working.
             switch edge.kind {
             case .owns, .dispatched, .watches: structural.addPath(path)
+            case .feeds: drawn.addPath(path)
             case .ranIn:
                 if edge.isLive { active.addPath(path) } else { idle.addPath(path) }
             }
@@ -122,6 +124,17 @@ struct CanvasBackdrop: View {
             active,
             with: .color(Theme.busy.opacity(0.55)),
             style: StrokeStyle(lineWidth: max(0.7, 1.8 * viewport.scale), lineCap: .round)
+        )
+        // Dashed, because a link you drew is a claim about the work rather than
+        // a fact about the workspace.
+        context.stroke(
+            drawn,
+            with: .color(Theme.sidechain.opacity(0.85)),
+            style: StrokeStyle(
+                lineWidth: max(0.8, 2.0 * viewport.scale),
+                lineCap: .round,
+                dash: [max(2, 6 * viewport.scale), max(2, 4 * viewport.scale)]
+            )
         )
     }
 
