@@ -52,6 +52,13 @@ extension EnvironmentValues {
 /// `ImageRenderer` cannot draw AppKit-backed controls — a `TextField` comes out
 /// as a solid yellow block — so a `--snapshot` would show broken chrome. The
 /// live app always gets the real control.
+///
+/// It also draws its own placeholder. A plain SwiftUI field on macOS draws its
+/// placeholder in near-white whatever style it is given — measured, #D8DBDF
+/// against #D6DEEB for typed text — so an empty search box read as a search
+/// already made, and "Payments revamp" in New workspace as a name already
+/// given, beside a Create button that would not press. Snapshots never showed
+/// it: they draw this as a `Text`, which was always the right colour.
 struct SnapshotSafeField: View {
     @Environment(\.meshvySnapshotMode) private var isSnapshot
     var placeholder: String
@@ -69,16 +76,46 @@ struct SnapshotSafeField: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(font)
-                .foregroundStyle(Theme.textPrimary)
+            ZStack(alignment: .leading) {
+                if text.isEmpty {
+                    Placeholder(text: placeholder, font: font)
+                }
+                TextField("", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(font)
+                    .foregroundStyle(Theme.textPrimary)
+                    .accessibilityLabel(placeholder)
+            }
         }
+    }
+}
+
+/// A field's placeholder, drawn by hand in the colour hints are set in — see
+/// `SnapshotSafeField` for why the field cannot be trusted to draw its own.
+struct Placeholder: View {
+    var text: String
+    var font: Font
+
+    var body: some View {
+        Text(text)
+            .font(font)
+            .foregroundStyle(Theme.textTertiary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
 /// A menu that becomes its own label when rendered offscreen, for the same
 /// reason as `SnapshotSafeField`.
+///
+/// A button-style menu with a plain button, not a borderless one. The
+/// borderless style hands the label to AppKit, which keeps the first image and
+/// the first line of text and drops the rest — so the workspace switcher the
+/// screenshots show, name over branch with its chevron after, was in the app a
+/// chevron, then the name, and no branch at all. This draws the label as it
+/// was written, which is also how a snapshot draws it.
 struct SnapshotSafeMenu<Label: View, Content: View>: View {
     @Environment(\.meshvySnapshotMode) private var isSnapshot
     @ViewBuilder var content: Content
@@ -89,7 +126,8 @@ struct SnapshotSafeMenu<Label: View, Content: View>: View {
             label
         } else {
             Menu { content } label: { label }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
         }

@@ -124,11 +124,19 @@ struct MetaStat: View {
 }
 
 /// Toolbar-style button that matches the dark chrome.
+///
+/// `help` is the tooltip, and for a button that is only an icon it is the
+/// accessibility label too. It is a parameter rather than a `.help` at the call
+/// site because the button used to set its own, from the SF Symbol's name —
+/// which is how the inspector came to explain its buttons as "xmark",
+/// "folder" and "arrow.clockwise", and VoiceOver to read them out that way.
 struct ChromeButton: View {
     var icon: String
     var label: String?
+    var help: String?
     var isActive: Bool = false
     var action: () -> Void
+    @Environment(\.chromeButtonsBordered) private var bordered
     @State private var hovering = false
 
     var body: some View {
@@ -142,16 +150,36 @@ struct ChromeButton: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isActive ? Theme.accent.opacity(0.14) : (hovering ? Theme.fill : .clear))
+                    .fill(isActive ? Theme.accent.opacity(0.14) : (hovering ? Theme.fill : restingFill))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(isActive ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1)
+                    .stroke(isActive ? Theme.accent.opacity(0.35) : restingStroke, lineWidth: 1)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(label ?? icon)
+        .help(help ?? label ?? "")
+        .accessibilityLabel(Text(label ?? help ?? icon))
+    }
+
+    /// A toolbar button is found by where it sits; one in a panel, among text
+    /// and values, has to look like something you can press before anyone
+    /// hovers it.
+    private var restingFill: Color { bordered ? Theme.fillSubtle : .clear }
+    private var restingStroke: Color { bordered ? Theme.hairline : .clear }
+}
+
+private struct ChromeButtonsBorderedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Set on a panel so its `ChromeButton`s draw their outline at rest.
+    var chromeButtonsBordered: Bool {
+        get { self[ChromeButtonsBorderedKey.self] }
+        set { self[ChromeButtonsBorderedKey.self] = newValue }
     }
 }
 

@@ -59,6 +59,10 @@ final class MeshvyStore {
     var selection: NodeID?
     var searchQuery = "" { didSet { recomputeMatches() } }
     private(set) var matchingNodes: Set<String> = []
+    /// ⌘F asks for the sidebar's search field. A flag the sidebar clears once
+    /// it has taken focus, rather than an event, because the sidebar may only
+    /// be coming into existence on the same keystroke.
+    var searchFocusRequested = false
 
     var showEndedSessions = true { didSet { rebuild(); persistLayout() } }
     var invertScroll = false { didSet { persistLayout() } }
@@ -98,6 +102,11 @@ final class MeshvyStore {
     private(set) var isIndexing = false
     private(set) var isLoadingGit = false
     private(set) var isWorking = false
+    /// Whether the `claude` CLI is there to be run — nil until the shell has
+    /// answered, or when it could not. Meshvy drives the CLI and does not ship
+    /// it, and without it every Start button opens a terminal that fails on
+    /// its first line; only a definite no is worth saying anything about.
+    private(set) var claudeInstalled: Bool?
     private(set) var statusLine = "No workspace"
     private(set) var banner: Banner?
 
@@ -107,6 +116,28 @@ final class MeshvyStore {
         var kind: Kind
         var title: String
         var detail: String?
+        /// One thing to do about it — undo what just happened, or go and look
+        /// at what it was about. A banner is gone in seconds, so the way back
+        /// has to be on the banner itself rather than buried in a menu.
+        var action: (label: String, run: () -> Void)?
+    }
+
+    /// A question waiting to be answered before something that cannot be taken
+    /// back: an agent stopped mid-task, a checkout torn off disk. Raised here
+    /// and asked once, by `RootView`, so every path to the same action — a
+    /// header button, a context menu, a keystroke — asks the same question.
+    var confirmation: Confirmation?
+
+    struct Confirmation: Identifiable {
+        var id = UUID()
+        var title: String
+        var message: String
+        /// The button that goes ahead, which says what it does.
+        var action: String
+        var run: () -> Void
+        /// A safer way to the same end, offered alongside — archiving instead
+        /// of forgetting, say.
+        var alternative: (label: String, run: () -> Void)?
     }
 
     // MARK: Transcript reader
@@ -138,6 +169,7 @@ final class MeshvyStore {
     private var browserWatcher: DirectoryWatcher?
     private var liveTimer: Timer?
     private var gitTimer: Timer?
+    private var activationObserver: NSObjectProtocol?
     private var hasFitInitially = false
     private var sessionIndexByID: [String: Int] = [:]
     private var hasBootstrapped = false
@@ -168,6 +200,8 @@ final class MeshvyStore {
         startWatching()
         startTimers()
         models.refresh()
+        checkClaudeInstalled()
+        recheckClaudeOnActivation()
         // Quietly, on launch: only speaks up when there is something to take.
         updates.check()
 
@@ -238,17 +272,46 @@ final class MeshvyStore {
 
     /// Creates the workspace and its worktrees in one step: every repository
     /// gets a checkout of the same new branch under `~/.meshvy/<slug>/`.
-    func createWorkspace(name: String, repos: [WorkspaceRepo], baseRef: String?, branch: String?) {
+    ///
+    /// Remotes are cloned first and built in with the rest. The two used to
+    /// run side by side, and whichever finished first decided where a clone
+    /// went — one that beat the new workspace into existence was added to
+    /// whichever workspace had been open before it. A workspace of nothing but
+    /// URLs could not be created at all.
+    func createWorkspace(
+        name: String, repos: [WorkspaceRepo], cloning remotes: [String] = [],
+        baseRef: String?, branch: String?
+    ) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = trimmed.isEmpty ? "Workspace" : trimmed
         let branchName = (branch?.isEmpty == false ? branch! : Workspace.slug(resolved))
         let builder = self.builder
 
         isWorking = true
-        show(.init(kind: .info, title: "Creating worktrees in \(repos.count) repos…", detail: nil))
+        show(.init(
+            kind: .info,
+            title: remotes.isEmpty
+                ? "Creating worktrees in \(repos.count) repos…"
+                : "Cloning \(remotes.count), then creating worktrees…",
+            detail: nil
+        ))
 
         Task.detached(priority: .userInitiated) {
-            let workspace = builder.build(name: resolved, branch: branchName, baseRef: baseRef, repos: repos)
+            let clones = MeshvyStore.clone(remotes, with: builder)
+            let all = repos + clones.repos.filter { clone in !repos.contains { $0.id == clone.id } }
+            // Every clone failed and there was nothing else: no workspace,
+            // rather than an empty one named after what could not be fetched.
+            guard remotes.isEmpty || !all.isEmpty else {
+                await MainActor.run { [weak self] in
+                    self?.isWorking = false
+                    self?.show(.init(
+                        kind: .failure, title: "Nothing to create — the clone failed",
+                        detail: clones.failures.joined(separator: "\n")
+                    ))
+                }
+                return
+            }
+            let workspace = builder.build(name: resolved, branch: branchName, baseRef: baseRef, repos: all)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isWorking = false
@@ -258,7 +321,7 @@ final class MeshvyStore {
                 self.hasFitInitially = false
                 self.loadActiveWorkspace()
 
-                let failures = workspace.repos.compactMap { repo in
+                let failures = clones.failures + workspace.repos.compactMap { repo in
                     repo.failure.map { "\(repo.name): \($0)" }
                 }
                 if failures.isEmpty {
@@ -270,7 +333,7 @@ final class MeshvyStore {
                 } else {
                     self.show(.init(
                         kind: .failure,
-                        title: "\(workspace.readyRepos.count) of \(workspace.repos.count) worktrees created",
+                        title: "\(workspace.readyRepos.count) of \(workspace.repos.count + clones.failures.count) worktrees created",
                         detail: failures.joined(separator: "\n")
                     ))
                 }
@@ -278,45 +341,56 @@ final class MeshvyStore {
         }
     }
 
-    func addRepos(_ repos: [WorkspaceRepo]) {
+    /// Adds repositories to the open workspace, cloning any remotes first.
+    func addRepos(_ repos: [WorkspaceRepo], cloning remotes: [String] = []) {
         guard let workspace = activeWorkspace else { return }
         let builder = self.builder
         isWorking = true
+        if !remotes.isEmpty { show(.init(kind: .info, title: "Cloning \(remotes.count)…", detail: nil)) }
 
         Task.detached(priority: .userInitiated) {
-            let updated = builder.extend(workspace, with: repos)
+            let clones = MeshvyStore.clone(remotes, with: builder)
+            let incoming = repos + clones.repos.filter { clone in !repos.contains { $0.id == clone.id } }
+            let extended = builder.extend(workspace, with: incoming)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isWorking = false
-                self.update(updated)
+                // Onto the workspace as it is now, not as it was when this
+                // began: two adds in flight at once each wrote back their own
+                // starting copy, and the later one dropped what the other had
+                // just added.
+                guard var current = self.workspaces.first(where: { $0.id == workspace.id }) else { return }
+                let added = extended.repos.filter { repo in !current.repos.contains { $0.id == repo.id } }
+                current.repos += added
+                self.update(current)
                 self.refreshGitStatus()
-                self.show(.init(kind: .success, title: "Added \(repos.count) to “\(workspace.name)”", detail: nil))
+                if clones.failures.isEmpty {
+                    self.show(.init(kind: .success, title: "Added \(added.count) to “\(workspace.name)”", detail: nil))
+                } else {
+                    self.show(.init(
+                        kind: .failure,
+                        title: "Added \(added.count) to “\(workspace.name)” — \(clones.failures.count) could not be cloned",
+                        detail: clones.failures.joined(separator: "\n")
+                    ))
+                }
             }
         }
     }
 
-    func cloneRepos(_ references: [String], thenAddToActive: Bool) {
-        let builder = self.builder
-        isWorking = true
-        show(.init(kind: .info, title: "Cloning \(references.count)…", detail: nil))
-
-        Task.detached(priority: .userInitiated) {
-            let outcomes = references.map { ($0, builder.clone($0)) }
-            let cloned: [WorkspaceRepo] = outcomes.compactMap {
-                if case .cloned(let repo) = $0.1 { return repo } else { return nil }
-            }
-            let failures: [String] = outcomes.compactMap {
-                if case .failed(let message) = $0.1 { return "\($0.0): \(message)" } else { return nil }
-            }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.isWorking = false
-                if !cloned.isEmpty, thenAddToActive { self.addRepos(cloned) }
-                if !failures.isEmpty {
-                    self.show(.init(kind: .failure, title: "Clone failed", detail: failures.joined(separator: "\n")))
-                }
+    /// Clones each remote, sorting what came back into repositories and the
+    /// reasons the rest did not.
+    private nonisolated static func clone(
+        _ remotes: [String], with builder: WorkspaceBuilder
+    ) -> (repos: [WorkspaceRepo], failures: [String]) {
+        var repos: [WorkspaceRepo] = []
+        var failures: [String] = []
+        for remote in remotes {
+            switch builder.clone(remote) {
+            case .cloned(let repo): repos.append(repo)
+            case .failed(let message): failures.append("\(remote): \(message)")
             }
         }
+        return (repos, failures)
     }
 
     func activate(_ id: UUID) {
@@ -385,7 +459,8 @@ final class MeshvyStore {
         show(.init(
             kind: .success,
             title: "Archived “\(name)”",
-            detail: "The worktrees are untouched. Restore it from the workspace menu."
+            detail: "The worktrees are untouched. Restore it from the workspace menu.",
+            action: ("Undo", { [weak self] in self?.unarchiveWorkspace(id) })
         ))
     }
 
@@ -448,10 +523,163 @@ final class MeshvyStore {
     }
 
     func removeRepo(_ repoID: String) {
-        guard var workspace = activeWorkspace else { return }
-        workspace.repos.removeAll { $0.id == repoID }
+        guard var workspace = activeWorkspace,
+              let position = workspace.repos.firstIndex(where: { $0.id == repoID }) else { return }
+        let repo = workspace.repos[position]
+        // Its terminals go with it, and so must their processes. Dropping the
+        // nodes alone left their agents running with nothing on the board to
+        // show for them, still editing a checkout you had just taken away.
+        for terminal in workspace.terminals where terminal.repoID == repoID {
+            terminals.discard(terminal.id)
+            unread.remove(terminal.id)
+            if let sessionID = terminal.sessionID { activity[sessionID] = nil }
+        }
+        workspace.repos.remove(at: position)
         workspace.terminals.removeAll { $0.repoID == repoID }
         update(workspace)
+        notifier.badge(agentsNeedingYou.count)
+
+        let workspaceID = workspace.id
+        show(.init(
+            kind: .success,
+            title: "Removed “\(repo.name)” from “\(workspace.name)”",
+            detail: "Its checkout is still at \(repo.worktreePath.replacingOccurrences(of: NSHomeDirectory(), with: "~")).",
+            action: ("Undo", { [weak self] in self?.restoreRepo(repo, at: position, in: workspaceID) })
+        ))
+    }
+
+    /// Puts a removed repository back where it was. The checkout never left
+    /// the disk, so this is only the board remembering it again.
+    private func restoreRepo(_ repo: WorkspaceRepo, at position: Int, in workspaceID: UUID) {
+        guard var workspace = activeWorkspace, workspace.id == workspaceID,
+              !workspace.repos.contains(where: { $0.id == repo.id }) else { return }
+        workspace.repos.insert(repo, at: min(position, workspace.repos.count))
+        update(workspace)
+        refreshGitStatus()
+    }
+
+    // MARK: - Asking first
+    //
+    // What a button calls, as opposed to the plain verbs it ends in. Each one
+    // decides whether the action is one you could regret — an agent stopped
+    // mid-task, work taken off disk — and asks first if so. The quiet cases go
+    // straight through: a shell closes on one click, and an idle board archives
+    // without a question, because there is nothing either could cost you.
+
+    /// Closes a terminal, asking first while an agent is running in it.
+    func requestClose(_ terminalID: UUID) {
+        guard let workspace = activeWorkspace else { return }
+        if workspace.orchestrator?.id == terminalID {
+            requestStopOrchestrator()
+            return
+        }
+        guard let node = workspace.terminals.first(where: { $0.id == terminalID }),
+              node.sessionID != nil, terminals.isRunning(terminalID) else {
+            closeTerminal(terminalID)
+            return
+        }
+        let working = activity(for: node)?.state == .working
+        confirmation = Confirmation(
+            title: "Stop “\(node.title)”?",
+            message: (working ? "It is in the middle of a turn. " : "")
+                + "Closing the terminal ends the agent. Its transcript stays on disk.",
+            action: "Close and stop the agent",
+            run: { [weak self] in self?.closeTerminal(terminalID) }
+        )
+    }
+
+    /// Stops the orchestrator, asking first while it is running.
+    func requestStopOrchestrator() {
+        guard isOrchestratorRunning, let workspace = activeWorkspace else {
+            stopOrchestrator()
+            return
+        }
+        let working = workspace.orchestrator.flatMap { activity(for: $0) }?.state == .working
+        confirmation = Confirmation(
+            title: "Stop the orchestrator?",
+            message: (working ? "It is in the middle of a turn. " : "")
+                + "Claude Code on “\(workspace.name)” ends. Agents it started keep running in their own terminals.",
+            action: "Stop the orchestrator",
+            run: { [weak self] in self?.stopOrchestrator() }
+        )
+    }
+
+    /// Archives a workspace, asking first only when that would stop something.
+    /// The toolbar button used to be the one path that asked; the menu item,
+    /// ⌥⌘A and the palette stopped running agents without a word.
+    func requestArchive(_ id: UUID) {
+        guard let workspace = workspaces.first(where: { $0.id == id }) else { return }
+        let running = workspace.allTerminals.filter { terminals.isRunning($0.id) }.count
+        guard running > 0 else {
+            archiveWorkspace(id)
+            return
+        }
+        confirmation = Confirmation(
+            title: "Archive “\(workspace.name)”?",
+            message: "The worktrees and the branch are untouched. Restore it from the workspace menu.",
+            action: "Archive and stop \(running) \(running == 1 ? "agent" : "agents")",
+            run: { [weak self] in self?.archiveWorkspace(id) }
+        )
+    }
+
+    /// The three ways to let go of a workspace, each asked about in its own
+    /// words — what they cost you is exactly what differs between them. These
+    /// sat one click deep in a context menu, and the last of them deletes the
+    /// branch along with any commit that was never pushed.
+    func requestDelete(_ id: UUID, removeWorktrees: Bool, force: Bool) {
+        guard let workspace = workspaces.first(where: { $0.id == id }) else { return }
+        let folder = workspace.root.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        let delete: () -> Void = { [weak self] in
+            self?.deleteWorkspace(id, removeWorktrees: removeWorktrees, force: force)
+        }
+        if !removeWorktrees {
+            confirmation = Confirmation(
+                title: "Close “\(workspace.name)”?",
+                message: "Meshvy forgets it and stops its terminals. The worktrees stay in \(folder), "
+                    + "but nothing here can reopen them — archive it instead to keep it one click away.",
+                action: "Close",
+                run: delete,
+                alternative: ("Archive instead", { [weak self] in self?.archiveWorkspace(id) })
+            )
+        } else if !force {
+            confirmation = Confirmation(
+                title: "Delete the worktrees of “\(workspace.name)”?",
+                message: "Every checkout in \(folder) is removed, and Meshvy forgets the workspace once "
+                    + "they all are. One with uncommitted changes is kept and reported instead, and the "
+                    + "branch \(workspace.branch) stays in every repository.",
+                action: "Delete worktrees",
+                run: delete
+            )
+        } else {
+            confirmation = Confirmation(
+                title: "Delete “\(workspace.name)” and discard its changes?",
+                message: "Every checkout in \(folder) is removed, uncommitted work and all, and the branch "
+                    + "\(workspace.branch) is deleted from each repository — commits that were never "
+                    + "pushed go with it. This cannot be undone.",
+                action: "Delete and discard changes",
+                run: delete
+            )
+        }
+    }
+
+    /// Takes a repository out of the workspace, asking first when terminals are
+    /// running in it, since they stop with it. Otherwise it goes straight away
+    /// and the banner offers it back.
+    func requestRemoveRepo(_ repoID: String) {
+        guard let workspace = activeWorkspace,
+              let repo = workspace.repos.first(where: { $0.id == repoID }) else { return }
+        let running = workspace.terminals.filter { $0.repoID == repoID && terminals.isRunning($0.id) }.count
+        guard running > 0 else {
+            removeRepo(repoID)
+            return
+        }
+        confirmation = Confirmation(
+            title: "Remove “\(repo.name)” from “\(workspace.name)”?",
+            message: "\(running) \(running == 1 ? "terminal" : "terminals") running in it will stop. "
+                + "The checkout stays on disk.",
+            action: "Remove and stop \(running == 1 ? "it" : "them")",
+            run: { [weak self] in self?.removeRepo(repoID) }
+        )
     }
 
     private func update(_ workspace: Workspace) {
@@ -546,7 +774,8 @@ final class MeshvyStore {
         show(.init(
             kind: .success,
             title: "Orchestrator started an agent in \(repo.name)",
-            detail: request.task
+            detail: request.task,
+            action: ("Show", { [weak self] in self?.reveal(.terminal(node.id)) })
         ))
     }
 
@@ -764,7 +993,7 @@ final class MeshvyStore {
         AgentBridge.install(for: workspace)
         BrowserBridge.install(for: workspace)
         let options = agentOptions(for: workspace)
-        terminals.start(
+        let session = terminals.start(
             node: node,
             command: AgentCommand.orchestrator(
                 workspace: workspace, sessionID: sessionID, name: name, options: options
@@ -772,6 +1001,7 @@ final class MeshvyStore {
             // Puts `meshvy` on the orchestrator's PATH so it can delegate.
             environment: ["PATH": AgentBridge.binDirectory(for: workspace) + ":" + currentPath()]
         )
+        watchExit(of: node, session: session)
         workspace.orchestrator = node
         update(workspace)
         startBridge(for: workspace)
@@ -948,12 +1178,83 @@ final class MeshvyStore {
             )
         }
 
-        terminals.start(node: node, command: command)
+        watchExit(of: node, session: terminals.start(node: node, command: command))
         workspace.terminals.append(node)
         update(workspace)
         selection = .terminal(node.id)
         reveal(.terminal(node.id))
         return node
+    }
+
+    /// Hears about a terminal's process ending, which nothing else announces.
+    /// An agent that exits fires no hook to say so, and a session's
+    /// `isRunning` is not observed — so a dead terminal went on being drawn as
+    /// a live one until something unrelated happened to redraw the board.
+    private func watchExit(of node: TerminalNode, session: TerminalSession) {
+        let started = Date()
+        session.onExit = { [weak self] code in
+            self?.terminalExited(node, code: code, after: Date().timeIntervalSince(started))
+        }
+    }
+
+    private func terminalExited(_ node: TerminalNode, code: Int32?, after seconds: TimeInterval) {
+        // Closed or restarted from here: the node is gone, and so is the news.
+        guard activeWorkspace?.allTerminals.contains(where: { $0.id == node.id }) ?? false else { return }
+        rebuild()
+        statusLine = summaryLine()
+        notifier.badge(agentsNeedingYou.count)
+
+        // An agent gone within seconds of starting never got going — most
+        // often because `claude` is not on the PATH a login shell sees. The
+        // orchestrator's node folds back to its start prompt the moment its
+        // process ends, taking whatever the shell printed with it, so the
+        // reason is kept on a banner instead of vanishing with the terminal.
+        guard node.sessionID != nil, let code, code != 0, seconds < 15 else { return }
+        // 127 is the shell failing to find `claude` — as definite an answer
+        // as asking for it, so every Start prompt can say so too.
+        if code == 127 { claudeInstalled = false }
+        let lastLines = (terminals.session(for: node.id)?.screenText ?? "")
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .suffix(3)
+            .joined(separator: "\n")
+        show(.init(
+            kind: .failure,
+            title: code == 127
+                ? "Claude Code is not installed, or not on your PATH"
+                : "\(node.title) exited as it started (exit \(code))",
+            detail: lastLines.isEmpty ? nil : lastLines,
+            action: code == 127 ? ("Get Claude Code", { [weak self] in self?.openClaudeCodeInstallPage() }) : nil
+        ))
+    }
+
+    /// Where the `claude` CLI comes from. Meshvy drives it and does not ship it.
+    func openClaudeCodeInstallPage() {
+        if let url = URL(string: "https://claude.com/claude-code") { NSWorkspace.shared.open(url) }
+    }
+
+    /// Asks the login shell whether `claude` is on its PATH, off the main
+    /// thread — a login shell can take a moment to read its profile.
+    func checkClaudeInstalled() {
+        Task.detached(priority: .utility) {
+            let installed = AgentCommand.isInstalled()
+            await MainActor.run { [weak self] in self?.claudeInstalled = installed }
+        }
+    }
+
+    /// While the answer is no, asks again whenever Meshvy comes back to the
+    /// front — which is what happens after installing it in Terminal — so the
+    /// warning goes away without a relaunch.
+    private func recheckClaudeOnActivation() {
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.claudeInstalled == false else { return }
+                self.checkClaudeInstalled()
+            }
+        }
     }
 
     // MARK: - Browsers
@@ -1500,6 +1801,15 @@ final class MeshvyStore {
         workspaceChanges.reduce(0) { $0 + $1.files.count }
     }
 
+    /// Every changed file in the workspace, in the inspector — which is what
+    /// the workspace node's own panel is. Selected rather than revealed: the
+    /// list is the point, and moving the board under you would not be.
+    func showWorkspaceChanges() {
+        guard let id = activeWorkspace?.id else { return }
+        inspectorVisible = true
+        select(.workspace(id))
+    }
+
     /// One repository's git state, or as much as is known before the first
     /// read of it lands.
     func worktree(for repo: WorkspaceRepo) -> Worktree {
@@ -1636,8 +1946,11 @@ final class MeshvyStore {
     func show(_ banner: Banner) {
         self.banner = banner
         let id = banner.id
+        // Long enough to read; longer still when there is a button on it,
+        // which has to be found and reached before the banner goes.
+        let seconds = banner.kind == .failure ? 12 : (banner.action == nil ? 4 : 8)
         Task {
-            try? await Task.sleep(for: .seconds(banner.kind == .failure ? 12 : 4))
+            try? await Task.sleep(for: .seconds(seconds))
             if self.banner?.id == id { self.banner = nil }
         }
     }

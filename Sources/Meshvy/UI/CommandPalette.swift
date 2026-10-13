@@ -29,6 +29,9 @@ struct PaletteItem: Identifiable {
     var tint: Color = Theme.textSecondary
     /// Extra words the query may match that are not shown.
     var keywords: String = ""
+    /// The key that does the same thing without the palette, shown on the
+    /// row — which is how anyone learns it.
+    var shortcut: String?
     var run: () -> Void
 }
 
@@ -120,15 +123,22 @@ struct CommandPalette: View {
                     .foregroundStyle(query.isEmpty ? Theme.textTertiary : Theme.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-            TextField("Start an agent, go to a node, search output…", text: $query)
-                .textFieldStyle(.plain)
-                .font(Theme.ui(14))
-                .foregroundStyle(Theme.textPrimary)
-                .focused($focused)
-                .onSubmit(activate)
-                .onKeyPress(.downArrow) { move(1) }
-                .onKeyPress(.upArrow) { move(-1) }
-                .onKeyPress(.escape) { close(); return .handled }
+            // The placeholder is drawn by hand: see `SnapshotSafeField`.
+            ZStack(alignment: .leading) {
+                if query.isEmpty {
+                    Placeholder(text: "Start an agent, go to a node, search output…", font: Theme.ui(14))
+                }
+                TextField("", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(Theme.ui(14))
+                    .foregroundStyle(Theme.textPrimary)
+                    .accessibilityLabel("Command palette")
+                    .focused($focused)
+                    .onSubmit(activate)
+                    .onKeyPress(.downArrow) { move(1) }
+                    .onKeyPress(.upArrow) { move(-1) }
+                    .onKeyPress(.escape) { close(); return .handled }
+            }
             }
             Text("esc")
                 .font(Theme.mono(9.5, .medium))
@@ -142,25 +152,35 @@ struct CommandPalette: View {
     }
 
     private func list(_ items: [PaletteItem]) -> some View {
-        ScrollableStack(alignment: .leading) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    if index == 0 || items[index - 1].group != item.group {
-                        Text(item.group.title.uppercased())
-                            .font(Theme.ui(9, .heavy))
-                            .tracking(0.7)
-                            .foregroundStyle(Theme.textTertiary)
-                            .padding(.horizontal, 14)
-                            .padding(.top, index == 0 ? 10 : 12)
-                            .padding(.bottom, 4)
+        ScrollViewReader { proxy in
+            ScrollableStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index == 0 || items[index - 1].group != item.group {
+                            Text(item.group.title.uppercased())
+                                .font(Theme.ui(9, .heavy))
+                                .tracking(0.7)
+                                .foregroundStyle(Theme.textTertiary)
+                                .padding(.horizontal, 14)
+                                .padding(.top, index == 0 ? 10 : 12)
+                                .padding(.bottom, 4)
+                        }
+                        row(item, isHighlighted: index == highlighted)
+                            .id(item.id)
+                            .onTapGesture { item.run(); close() }
                     }
-                    row(item, isHighlighted: index == highlighted)
-                        .onTapGesture { item.run(); close() }
                 }
+                .padding(.bottom, 8)
             }
-            .padding(.bottom, 8)
+            .frame(maxHeight: 420)
+            // The list is taller than its box with nothing typed, and ↓ used
+            // to walk the highlight off the bottom of it — Return then ran a
+            // row you could not see.
+            .onChange(of: highlighted) { _, index in
+                guard items.indices.contains(index) else { return }
+                proxy.scrollTo(items[index].id)
+            }
         }
-        .frame(maxHeight: 420)
     }
 
     private func row(_ item: PaletteItem, isHighlighted: Bool) -> some View {
@@ -183,6 +203,14 @@ struct CommandPalette: View {
                 }
             }
             Spacer(minLength: 0)
+            if let shortcut = item.shortcut {
+                Text(shortcut)
+                    .font(Theme.mono(10, .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Theme.fill))
+            }
             if isHighlighted {
                 Text("↵").font(Theme.mono(10, .bold)).foregroundStyle(Theme.textTertiary)
             }
@@ -257,11 +285,11 @@ enum PaletteCommands {
         func item(
             _ id: String, _ title: String, _ icon: String,
             subtitle: String? = nil, keywords: String = "", tint: Color = Theme.textSecondary,
-            run: @escaping () -> Void
+            shortcut: String? = nil, run: @escaping () -> Void
         ) -> PaletteItem {
             PaletteItem(
                 id: id, group: .action, title: title, subtitle: subtitle,
-                icon: icon, tint: tint, keywords: keywords, run: run
+                icon: icon, tint: tint, keywords: keywords, shortcut: shortcut, run: run
             )
         }
 
@@ -274,7 +302,8 @@ enum PaletteCommands {
                 "point.3.connected.trianglepath.dotted",
                 subtitle: store.activeWorkspace?.root.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
                 keywords: "claude code agent start run",
-                tint: Theme.accent
+                tint: Theme.accent,
+                shortcut: "⇧⌘T"
             ) {
                 if store.isOrchestratorRunning, let id = store.activeWorkspace?.id {
                     store.reveal(.workspace(id))
@@ -297,28 +326,33 @@ enum PaletteCommands {
             }
 
             items.append(item(
-                "act:shell", "New shell at the workspace root", "terminal", keywords: "bash zsh ⌘t"
+                "act:shell", "New shell at the workspace root", "terminal", keywords: "bash zsh ⌘t",
+                shortcut: "⌘T"
             ) { store.openTerminal(role: .shell) })
             items.append(item(
-                "act:addRepos", "Add repositories…", "plus.rectangle.on.folder", keywords: "⇧⌘o open"
+                "act:addRepos", "Add repositories…", "plus.rectangle.on.folder", keywords: "⇧⌘o open",
+                shortcut: "⇧⌘O"
             ) { sheet.wrappedValue = .addRepos })
             items.append(item(
                 "act:browser", "New browser on the board", "globe",
                 subtitle: "Watch the running app, and let an agent drive it",
                 keywords: "⌘b browser web page localhost chrome preview",
-                tint: Theme.branch
+                tint: Theme.branch,
+                shortcut: "⌘B"
             ) { store.openBrowser() })
             if let active = store.activeWorkspace {
                 items.append(item(
                     "act:archive", "Archive “\(active.name)”", "archivebox",
                     subtitle: "Out of the way, worktrees untouched",
-                    keywords: "⌥⌘a archive put away hide done"
-                ) { store.archiveWorkspace(active.id) })
+                    keywords: "⌥⌘a archive put away hide done",
+                    shortcut: "⌥⌘A"
+                ) { store.requestArchive(active.id) })
             }
         }
 
         items.append(item(
-            "act:newWorkspace", "New workspace…", "rectangle.3.group", keywords: "⇧⌘n create"
+            "act:newWorkspace", "New workspace…", "rectangle.3.group", keywords: "⇧⌘n create",
+            shortcut: "⇧⌘N"
         ) { sheet.wrappedValue = .newWorkspace })
 
         for workspace in store.liveWorkspaces where workspace.id != store.activeWorkspaceID {
@@ -359,19 +393,19 @@ enum PaletteCommands {
             "bell", keywords: "notification alert badge"
         ) { store.notifier.isEnabled.toggle(); store.persistLayout() })
 
-        items.append(item("act:refresh", "Refresh everything", "arrow.clockwise", keywords: "⌘r reload") {
+        items.append(item("act:refresh", "Refresh everything", "arrow.clockwise", keywords: "⌘r reload", shortcut: "⌘R") {
             store.refreshAll()
         })
-        items.append(item("act:fit", "Fit to content", "arrow.up.left.and.arrow.down.right", keywords: "⌘0 zoom") {
+        items.append(item("act:fit", "Fit to content", "arrow.up.left.and.arrow.down.right", keywords: "⌘0 zoom", shortcut: "⌘0") {
             store.fit()
         })
-        items.append(item("act:actual", "Actual size", "1.magnifyingglass", keywords: "⌘1 zoom 100%") {
+        items.append(item("act:actual", "Actual size", "1.magnifyingglass", keywords: "⌘1 zoom 100%", shortcut: "⌘1") {
             store.zoomToActualSize()
         })
         items.append(item("act:reset", "Reset auto-layout", "square.grid.2x2", keywords: "tidy arrange") {
             store.resetLayout()
         })
-        items.append(item("act:shortcuts", "Keyboard shortcuts", "keyboard", keywords: "⌘/ help keys") {
+        items.append(item("act:shortcuts", "Keyboard shortcuts", "keyboard", keywords: "⌘/ help keys", shortcut: "⌘/") {
             store.shortcutsOpen = true
         })
         return items
