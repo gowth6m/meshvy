@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+- **"The request timed out" when installing an update.** The downloader read
+  the asset one byte at a time out of `URLSession.AsyncBytes`, appending each
+  to a `Data` — about 140 KB/s on an idle machine, so a five-megabyte update
+  the network had already delivered in under a second took 38 seconds to
+  collect, against a 30-second timeout. Worse, every member of `UpdateService`
+  is on the main actor, so that loop ran on the main thread, behind the canvas
+  and every terminal redrawing on it: the connection sat waiting to be read
+  until the request gave up. It streams straight to a file now, off the main
+  thread, which is 1.7 seconds for the same asset. The transfer also has a
+  budget of its own — `timeoutInterval` on a request is the gap between
+  packets, which never said anything about how long the whole download may
+  take.
+- The progress bar moves while an update downloads. It was fed by counting
+  bytes through the loop above; the replacement reports from the session's own
+  delegate, which has to belong to the session rather than the task — a
+  task-level delegate is never sent `didWriteData` on Darwin, and the bar
+  would have sat at nothing until it jumped to done.
+- Checking for updates no longer blocks the main thread. `gh auth token` was
+  shelled out to, synchronously with an eight-second timeout, on the main
+  actor, for every request the updater made.
+
 ## [0.10.4] - 2026-10-13
 
 - **An orchestrator that exited left its workspace node with nothing to press.**

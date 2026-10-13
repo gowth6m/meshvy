@@ -2,13 +2,110 @@ import AppKit
 import Foundation
 import Observation
 
+/// Every request the updater makes, with a budget for the whole transfer
+/// rather than only for the gaps in it: `timeoutInterval` on a request is an
+/// idle timeout, which says nothing about how long a five-megabyte asset may
+/// take in total.
+private let updateSession: URLSession = {
+    let configuration = URLSessionConfiguration.default
+    configuration.timeoutIntervalForRequest = 30
+    configuration.timeoutIntervalForResource = 600
+    return URLSession(configuration: configuration)
+}()
+
+/// One asset, streamed to a file, reporting progress as it lands.
+///
+/// The delegate belongs to the session rather than to the task: a task-level
+/// delegate handed to the async `download(for:delegate:)` is never sent
+/// `didWriteData` on Darwin, so the bar would sit at nothing for the whole
+/// transfer and only jump to done.
+private final class AssetDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let onProgress: @Sendable (Double) -> Void
+    private let lock = NSLock()
+    private var resume: CheckedContinuation<URL, Error>?
+
+    init(onProgress: @escaping @Sendable (Double) -> Void) {
+        self.onProgress = onProgress
+        super.init()
+    }
+
+    func fetch(_ request: URLRequest) async throws -> URL {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        // The budget for the whole transfer. `timeoutInterval` on a request
+        // only covers the gaps between packets, which says nothing about how
+        // long several megabytes may take end to end.
+        configuration.timeoutIntervalForResource = 600
+        // An installer is not worth caching, and this one is megabytes.
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+
+        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        // The session holds the delegate — which is this object — until it is
+        // invalidated, so it has to be, whichever way the download goes.
+        defer { session.finishTasksAndInvalidate() }
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            resume = continuation
+            lock.unlock()
+            session.downloadTask(with: request).resume()
+        }
+    }
+
+    private func finish(_ result: Result<URL, Error>) {
+        lock.lock()
+        let continuation = resume
+        resume = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        onProgress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        // A refusal has a body too, and it would unpack to nothing useful.
+        guard let http = downloadTask.response as? HTTPURLResponse, http.statusCode == 200 else {
+            finish(.failure(UpdateService.Failure.message("Could not download the update.")))
+            return
+        }
+        // The file is gone the moment this returns, so it moves now.
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meshvy-update-\(UUID().uuidString).zip")
+        do {
+            try FileManager.default.moveItem(at: location, to: destination)
+            finish(.success(destination))
+        } catch {
+            finish(.failure(error))
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        // Success has already been reported by the time this runs; `finish`
+        // ignores the second call.
+        if let error { finish(.failure(error)) }
+    }
+}
+
 /// Checks GitHub Releases for a newer build and installs it in place.
 ///
-/// Not Sparkle: Sparkle needs a publicly reachable appcast, and this repository
-/// is private. The GitHub API serves the same information, and the `gh` CLI the
-/// developer already has signed in supplies the token — the same way the app
-/// shells out to `git` and `claude`. If the repository is ever made public the
-/// unauthenticated path works unchanged.
+/// Not Sparkle: Sparkle needs a publicly reachable appcast, and a release here
+/// is a GitHub release. The API serves the same information unauthenticated,
+/// which is the path this takes now that the repository is public; the `gh`
+/// CLI's token is still picked up when it is there, so nothing breaks if the
+/// repository is ever closed again.
 @MainActor
 @Observable
 final class UpdateService {
@@ -112,7 +209,7 @@ final class UpdateService {
         Task {
             do {
                 state = .downloading(0)
-                let archive = try await Self.download(release.zipURL, repository: repository) { progress in
+                let archive = try await Self.download(release.zipURL) { progress in
                     Task { @MainActor in self.state = .downloading(progress) }
                 }
                 if let checksumURL = release.checksumURL {
@@ -149,7 +246,7 @@ final class UpdateService {
 
     /// The token the `gh` CLI already holds. Private repositories need it for
     /// both the release listing and the asset download.
-    private static func token() -> String? {
+    private nonisolated static func token() -> String? {
         if let fromEnvironment = ProcessInfo.processInfo.environment["GITHUB_TOKEN"], !fromEnvironment.isEmpty {
             return fromEnvironment
         }
@@ -162,7 +259,7 @@ final class UpdateService {
         return nil
     }
 
-    private static func request(_ url: URL, accept: String) -> URLRequest {
+    private nonisolated static func request(_ url: URL, accept: String) -> URLRequest {
         var request = URLRequest(url: url)
         request.setValue(accept, forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
@@ -173,9 +270,9 @@ final class UpdateService {
         return request
     }
 
-    private static func fetchLatest(repository: String) async throws -> Release {
+    private nonisolated static func fetchLatest(repository: String) async throws -> Release {
         let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
-        let (data, response) = try await URLSession.shared.data(
+        let (data, response) = try await updateSession.data(
             for: request(url, accept: "application/vnd.github+json")
         )
         guard let http = response as? HTTPURLResponse else { throw Failure.message("No response from GitHub.") }
@@ -205,48 +302,31 @@ final class UpdateService {
         )
     }
 
-    private static func downloadText(_ url: URL, repository: String) async throws -> String {
-        let (data, _) = try await URLSession.shared.data(
+    private nonisolated static func downloadText(_ url: URL, repository: String) async throws -> String {
+        let (data, _) = try await updateSession.data(
             for: request(url, accept: "application/octet-stream")
         )
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    private static func download(
+    /// Streams the asset straight to disk.
+    ///
+    /// This used to read `URLSession.AsyncBytes` a byte at a time and append
+    /// each one to a `Data`. That manages about 140 KB/s on an idle machine —
+    /// and because every member of this type is on the main actor, it ran on
+    /// the main thread, behind the canvas and every terminal redrawing on it.
+    /// The connection then sat idle waiting to be read, long enough for the
+    /// request to time out: a five-megabyte update that the network had
+    /// finished delivering in under a second reported "the request timed out".
+    private nonisolated static func download(
         _ url: URL,
-        repository: String,
-        progress: @escaping (Double) -> Void
+        progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
-        let (bytes, response) = try await URLSession.shared.bytes(
-            for: request(url, accept: "application/octet-stream")
-        )
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw Failure.message("Could not download the update.")
-        }
-        let total = http.expectedContentLength
-        var data = Data()
-        data.reserveCapacity(total > 0 ? Int(total) : 8_000_000)
-        var lastReported = 0.0
-
-        for try await byte in bytes {
-            data.append(byte)
-            if total > 0 {
-                let fraction = Double(data.count) / Double(total)
-                // Reporting every byte would flood the main actor.
-                if fraction - lastReported > 0.01 {
-                    lastReported = fraction
-                    progress(fraction)
-                }
-            }
-        }
-
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("meshvy-update-\(UUID().uuidString).zip")
-        try data.write(to: destination)
-        return destination
+        try await AssetDownload(onProgress: progress)
+            .fetch(request(url, accept: "application/octet-stream"))
     }
 
-    private static func verify(archive: URL, against checksums: String?) throws {
+    private nonisolated static func verify(archive: URL, against checksums: String?) throws {
         guard let checksums, !checksums.isEmpty else { return }
         let name = archive.lastPathComponent
         _ = name
@@ -267,7 +347,7 @@ final class UpdateService {
         }
     }
 
-    private static func unpack(_ archive: URL) throws -> URL {
+    private nonisolated static func unpack(_ archive: URL) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("meshvy-staged-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -287,7 +367,7 @@ final class UpdateService {
     }
 
     /// Refuse to install anything that is not recognisably this app.
-    private static func validate(_ bundle: URL) throws {
+    private nonisolated static func validate(_ bundle: URL) throws {
         let plist = bundle.appendingPathComponent("Contents/Info.plist")
         guard let data = try? Data(contentsOf: plist),
               let info = try? PropertyListSerialization.propertyList(
@@ -307,7 +387,7 @@ final class UpdateService {
     /// this process to exit, swaps the two, and relaunches. It restores the old
     /// bundle if the swap fails, so a failed update never leaves nothing
     /// installed.
-    private static func scheduleSwap(staged: URL, destination: URL) throws {
+    private nonisolated static func scheduleSwap(staged: URL, destination: URL) throws {
         let script = """
         #!/bin/sh
         PID="$1"; DEST="$2"; STAGED="$3"
