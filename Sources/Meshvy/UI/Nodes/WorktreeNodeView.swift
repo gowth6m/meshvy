@@ -142,13 +142,18 @@ struct WorktreeNodeView: View {
                 MetaStat(icon: "ellipsis", value: "", zoom: zoom)
             }
             if attachedSessions > 0 {
+                // `square.link.3d.up` is not an SF Symbol, so this count sat
+                // on the card with nothing to say what it was counting.
                 MetaStat(
-                    icon: "square.link.3d.up",
+                    icon: "bubble.left.and.bubble.right",
                     value: liveSessions > 0 ? "\(attachedSessions) · \(liveSessions) live" : "\(attachedSessions)",
                     tint: liveSessions > 0 ? Theme.busy : Theme.textTertiary,
                     zoom: zoom
                 )
-                .help("\(attachedSessions) sessions in this worktree")
+                .help(
+                    "\(attachedSessions) \(attachedSessions == 1 ? "session" : "sessions") in this repository"
+                        + (liveSessions > 0 ? ", \(liveSessions) running" : "")
+                )
             }
             Spacer(minLength: 0)
             if let date = worktree.lastCommitDate {

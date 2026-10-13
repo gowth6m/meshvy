@@ -114,12 +114,12 @@ struct TerminalNodeView: View {
                 Circle().fill(Theme.clean).frame(width: zoom.s(5), height: zoom.s(5))
             }
 
-            Button { store.closeTerminal(node.id) } label: {
+            Button { store.requestClose(node.id) } label: {
                 Image(systemName: "xmark").font(zoom.font(9, .bold))
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.textTertiary)
-            .help("Close terminal")
+            .help(node.sessionID != nil && isRunning ? "Close terminal and stop the agent" : "Close terminal")
         }
         .padding(.horizontal, zoom.s(10))
         .frame(height: zoom.s(28))
@@ -166,7 +166,9 @@ struct TerminalNodeView: View {
     @ViewBuilder
     private var scrollHint: some View {
         if store.hoveredTerminal == node.id, !isArmed, zoom.scale > 0.5 {
-            Text("hold to scroll")
+            // "Still", because it is a pause and not a press: "hold to
+            // scroll" read as press-and-hold, which does something else.
+            Text("hold still to scroll")
                 .font(zoom.font(8.5, .medium))
                 .foregroundStyle(Theme.textTertiary)
                 .padding(.horizontal, zoom.s(6))

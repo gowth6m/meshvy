@@ -129,7 +129,8 @@ building it — see [The browser](#the-browser).
 board and out of the switcher without touching a thing on disk: the worktrees
 stay registered in their repositories and the branch stays where it is.
 Restore it from **Archived** in the workspace menu or at the foot of the
-sidebar. Deleting worktrees is still there, still separate, and still asks.
+sidebar, or with **Undo** on the banner it leaves. Deleting worktrees is still
+there, still separate, and still asks.
 
 ## The browser
 
@@ -236,7 +237,7 @@ line it matched — the one thing the canvas cannot tell you.
 | New browser | ⌘B |
 | Archive the workspace | ⌥⌘A |
 | Next agent waiting on you | ⌥⌘N |
-| Find | ⌘F · frame the hits ⇧⌘F |
+| Find | ⌘F · frame the hits ⇧⌘F · clear Esc |
 | Fit to content | ⌘0 · actual size ⌘1 · zoom ⌘+ / ⌘− |
 | Toggle sidebar / inspector | ⌥⌘S / ⌥⌘I |
 | Refresh everything | ⌘R · git only ⇧⌘R |

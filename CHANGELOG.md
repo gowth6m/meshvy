@@ -1,5 +1,87 @@
 # Changelog
 
+## [Unreleased]
+
+- **Nothing you could lose goes without a question.** "Delete and discard
+  changes" removed every checkout with `--force` and ran `git branch -D` in
+  each repository — one click deep in a context menu, unpushed commits and all.
+  It asks now, and says exactly that. So do Delete worktrees, closing a
+  workspace (which offers to archive it instead), closing a terminal with an
+  agent running in it, stopping the orchestrator, and removing a repository
+  with terminals running in it. Every path to the same action asks the same
+  question from one place: the toolbar's archive button was the only one that
+  asked about running agents, while the menu item, ⌥⌘A and the palette stopped
+  them without a word. The quiet cases still take one click — a shell, an idle
+  board.
+- **Banners can undo what they announce.** Archiving and removing a repository
+  leave a banner with **Undo**, and an agent the orchestrator starts comes with
+  **Show**.
+- **Removing a repository stops its agents.** Its terminals were dropped from
+  the board but their processes were left running, still editing a checkout
+  that was no longer in the workspace, with nothing on the board to show for it.
+- **A new shell came up already exited.** A plain shell ran as a login shell
+  with nothing left to do once it had cleared the screen, so ⌘T, Open shell
+  here and the inspector's Shell button each opened a terminal marked
+  "exited". It is an interactive login shell in the same folder now.
+- **Placeholders no longer look typed.** SwiftUI draws a plain field's
+  placeholder in near-white whatever it is told — #D8DBDF, against #D6DEEB for
+  real text — so an empty search box read as a search, and New workspace opened
+  with "Payments revamp" apparently filled in beside a Create button that would
+  not press. Placeholders are drawn by hand, in the tertiary colour. Snapshots
+  never showed it: they draw a field as plain text.
+- **The workspace switcher shows its branch.** The toolbar's menus handed their
+  labels to AppKit, which keeps one icon and one line of text: the switcher was
+  a chevron and a name, and the model pill lost its outline. They are drawn as
+  designed now, which is how the screenshots always showed them.
+- **New workspace takes GitHub URLs on their own.** Create stayed greyed out
+  until a local folder was added, however many URLs were. A URL pasted but never
+  confirmed with Add is no longer dropped on submit, the footer says what Create
+  is waiting for, the name field has focus when the sheet opens, and
+  repositories can be dropped onto it from Finder.
+- Remotes are cloned before the workspace is built, not alongside it. Whichever
+  finished first decided where a clone went, so a quick one was added to
+  whichever workspace had been open before. Two additions in flight at once no
+  longer drop each other's repositories either.
+- **An agent that dies on launch says why.** One that exits within seconds of
+  starting — most often because `claude` is not on the PATH a login shell sees —
+  leaves a banner with the last lines it printed. The orchestrator's node folds
+  back to its start prompt when its process ends, which took the error with it.
+  The exit status is decoded too: SwiftTerm hands over the raw wait status, so
+  "command not found" arrived as 32512 rather than 127.
+- Meshvy says when Claude Code is not installed — on the first-run screen and
+  on the workspace node, with a link to get it — and checks again whenever it
+  comes back to the front.
+- A terminal whose process ends is drawn as exited straight away. Nothing
+  announced it — no hook fires, and a session's state is not observed — so a
+  dead terminal went on looking live until something unrelated redrew the board.
+- **The update pill appears.** It was written and never placed, so a new
+  release only reached anyone who thought to open Check for Updates… themselves.
+- **⌘F puts the cursor in the search box.** It showed the sidebar and stopped
+  there, which with the sidebar already open was nothing at all. Esc clears the
+  search and hands the board back, and the match count frames the matches.
+- **Repository cards stopped counting the workspace as a session.** Its
+  ownership edge was counted, so every card claimed a session it never had —
+  and since that edge is live whenever the orchestrator is, the whole row turned
+  amber the moment one started. The count's icon was not an SF Symbol and drew
+  nothing; nor did the first-run screen's.
+- Every icon-only button has a tooltip. The inspector's offered their SF Symbol
+  names — "xmark", "folder", "arrow.clockwise" — and VoiceOver read them out
+  the same way. Buttons in the inspector are outlined at rest so they read as
+  buttons, and closing a terminal from there is labelled rather than a bare ✕.
+- The palette shows each action's shortcut, and ↓ keeps the highlighted row in
+  view instead of walking it off the bottom of the list.
+- "N changed" in the status bar opens every changed file in the inspector; it
+  was drawn like a link and did nothing.
+- The first-run screen says what happens in three steps instead of one
+  paragraph, and the inspector's empty state says what each kind of node shows.
+- **Tertiary text is easier to read.** Night Owl's `muted` measured 3.9:1 on the
+  canvas and 2.5:1 on the palette. Lifted a fifth of the way to the foreground
+  it clears 5:1 on the canvas, and still sits well below secondary text.
+- Show Ended Sessions and Invert Scroll Direction carry a checkmark in the View
+  menu, the sidebar's agent rows have a context menu, and the scroll hint says
+  "hold still", since "hold" read as press-and-hold. The shortcut list covers
+  right-click and Esc, and no longer cuts "⏎ in the address bar" short.
+
 ## [0.10.5] - 2026-10-13
 
 - **Nothing could be dragged above the workspace node, and which nodes would

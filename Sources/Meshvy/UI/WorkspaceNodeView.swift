@@ -100,7 +100,7 @@ struct WorkspaceNodeView: View {
                             .foregroundStyle(Theme.clean)
                     }
                 }
-                Button { store.stopOrchestrator() } label: {
+                Button { store.requestStopOrchestrator() } label: {
                     Image(systemName: "stop.circle").font(zoom.font(11))
                 }
                 .buttonStyle(.plain)
@@ -174,37 +174,62 @@ struct WorkspaceNodeView: View {
         .background(Theme.canvasDeep)
     }
 
+    /// No `claude` on the PATH a terminal gets. Only a definite answer counts:
+    /// while the shell is still being asked, the prompt is the usual one.
+    private var claudeMissing: Bool { store.claudeInstalled == false }
+
     private var startPrompt: some View {
         VStack(spacing: zoom.s(10)) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
+            Image(systemName: claudeMissing ? "exclamationmark.triangle" : "point.3.connected.trianglepath.dotted")
                 .font(zoom.font(22, .light))
-                .foregroundStyle(Theme.accent.opacity(0.8))
+                .foregroundStyle(claudeMissing ? Theme.dirty : Theme.accent.opacity(0.8))
             VStack(spacing: zoom.s(3)) {
-                Text("Open Claude Code here")
+                Text(claudeMissing ? "Claude Code is not installed" : "Open Claude Code here")
                     .font(zoom.font(12.5, .semibold))
                     .foregroundStyle(Theme.textPrimary)
-                Text("Runs at the workspace root, with all \(workspace.repos.count) repos beneath it. It will split work into sub-agents.")
+                Text(claudeMissing
+                    ? "Meshvy runs the claude CLI, and a login shell here cannot find it. Install it and sign in once, then start the orchestrator."
+                    : "Runs at the workspace root, with all \(workspace.repos.count) repos beneath it, and hands work to an agent in each.")
                     .font(zoom.font(10.5))
                     .foregroundStyle(Theme.textTertiary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: zoom.s(340))
             }
-            Button { store.startOrchestrator() } label: {
-                HStack(spacing: zoom.s(5)) {
-                    Image(systemName: "play.fill").font(zoom.font(10, .bold))
-                    Text("Start orchestrator").font(zoom.font(11.5, .semibold))
+            HStack(spacing: zoom.s(8)) {
+                if claudeMissing {
+                    promptButton("arrow.up.right", "Get Claude Code", prominent: true) {
+                        store.openClaudeCodeInstallPage()
+                    }
+                    // The check could be wrong; the terminal will say so if not.
+                    promptButton("play.fill", "Start anyway", prominent: false) { store.startOrchestrator() }
+                } else {
+                    promptButton("play.fill", "Start orchestrator", prominent: true) { store.startOrchestrator() }
                 }
-                .foregroundStyle(Theme.onAccent)
-                .padding(.horizontal, zoom.s(14))
-                .padding(.vertical, zoom.s(7))
-                .background(RoundedRectangle(cornerRadius: zoom.s(7), style: .continuous).fill(Theme.accent))
             }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(zoom.s(14))
         .background(Theme.canvasDeep)
+    }
+
+    private func promptButton(
+        _ icon: String, _ title: String, prominent: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: zoom.s(5)) {
+                Image(systemName: icon).font(zoom.font(10, .bold))
+                Text(title).font(zoom.font(11.5, .semibold))
+            }
+            .foregroundStyle(prominent ? Theme.onAccent : Theme.textSecondary)
+            .padding(.horizontal, zoom.s(14))
+            .padding(.vertical, zoom.s(7))
+            .background(
+                RoundedRectangle(cornerRadius: zoom.s(7), style: .continuous)
+                    .fill(prominent ? Theme.accent : Theme.fill)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var resizeGrip: some View {

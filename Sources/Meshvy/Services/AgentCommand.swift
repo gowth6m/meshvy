@@ -22,6 +22,20 @@ enum AgentCommand {
         return "claude"
     }()
 
+    /// Whether there is a `claude` to run at all. The candidates above are on
+    /// disk; failing those, the question goes to the same login shell every
+    /// terminal is started under, since its PATH is the one an agent actually
+    /// gets. Nil when the shell did not answer in time — which is not a no.
+    ///
+    /// Blocks on a shell, so never from the main thread.
+    static func isInstalled() -> Bool? {
+        if claudePath != "claude" { return true }
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let result = Shell.run(shell, ["-l", "-c", "command -v claude"], cwd: nil, timeout: 10)
+        if result.timedOut { return nil }
+        return result.status == 0 && !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     struct Options {
         var model: String? = ModelDefaults.modelID
         var permissionMode: PermissionMode = .acceptEdits

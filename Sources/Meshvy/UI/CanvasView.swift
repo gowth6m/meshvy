@@ -107,7 +107,7 @@ struct CanvasView: View {
                 .contextMenu {
                     if store.isOrchestratorRunning {
                         Button("Restart Claude Code") { store.restartTerminal(workspace.orchestrator!.id) }
-                        Button("Stop Claude Code") { store.stopOrchestrator() }
+                        Button("Stop Claude Code") { store.requestStopOrchestrator() }
                     } else {
                         Button("Start Claude Code") { store.startOrchestrator() }
                     }
@@ -133,7 +133,7 @@ struct CanvasView: View {
                     Button("Reveal folder in Finder") { store.revealInFinder(terminal.cwd) }
                     Button("Copy folder path") { store.copyToClipboard(terminal.cwd) }
                     Divider()
-                    Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
+                    Button("Close terminal", role: .destructive) { store.requestClose(terminal.id) }
                 }
             } else if case .browser(let browser) = node.kind {
                 BrowserNodeView(
@@ -316,12 +316,32 @@ struct CanvasView: View {
         return nil
     }
 
+    /// Sessions that ran in a checkout, and how many are running now: the past
+    /// session cards stacked under it, plus the agents on the board working in
+    /// it.
+    ///
+    /// Counted from edges, but not every edge into a checkout is a session.
+    /// The workspace's own ownership edge was counted as one, so every card
+    /// claimed a session it never had — and, since that edge is live whenever
+    /// the orchestrator is, turned amber across the whole row the moment one
+    /// started, whatever was or was not happening in each repository.
     private func attachedSessions(to path: String) -> (total: Int, live: Int) {
         var total = 0
         var live = 0
         for edge in store.graph.edges where edge.to == .worktree(path) {
-            total += 1
-            if edge.isLive { live += 1 }
+            switch edge.from {
+            case .session:
+                total += 1
+                if edge.isLive { live += 1 }
+            case .terminal(let id):
+                // A plain shell is a terminal, not a session.
+                guard store.activeWorkspace?.terminals.first(where: { $0.id == id })?.sessionID != nil
+                else { continue }
+                total += 1
+                if store.terminals.isRunning(id) { live += 1 }
+            default:
+                continue
+            }
         }
         return (total, live)
     }
@@ -378,7 +398,7 @@ struct CanvasView: View {
             Button("Copy path") { store.copyToClipboard(summary.resolvedPath) }
         case .terminal(let terminal):
             Button("Restart") { store.restartTerminal(terminal.id) }
-            Button("Close terminal", role: .destructive) { store.closeTerminal(terminal.id) }
+            Button("Close terminal", role: .destructive) { store.requestClose(terminal.id) }
         case .workspace, .browser:
             EmptyView()
         case .subAgent(let agent):
