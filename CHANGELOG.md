@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **All files, not only the changed ones.** The panel for a node with a
+  directory now opens on a tree of what that directory actually holds —
+  directories first, lazily, each one read the first time you open it, so a
+  `node_modules` or a `.build` costs nothing until it is asked for. Picking a
+  file reads it below, in the place the diff sits on the other tab. A changed
+  list can only ever answer "what has been touched", which is nothing at all
+  until an agent has done something; "what is this agent working on" is the
+  question you have before that.
 - **An agent's panel shows what it has changed.** Selecting a terminal node
   gave you its role, its folder and its session id — everything about the
   agent except the thing you actually want while watching one work, which is

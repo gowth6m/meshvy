@@ -1,10 +1,19 @@
 import SwiftUI
 
+/// Which half of a node's files pane is showing.
+enum FilesTab: String, CaseIterable, Hashable {
+    case files, changes
+}
+
 /// Right panel: everything known about the selected node, plus the transcript
 /// reader for sessions.
 struct InspectorView: View {
     @Bindable var store: MeshvyStore
     @Binding var sheet: MeshvySheet?
+
+    /// Kept on the panel rather than per node, so moving between agents stays
+    /// on whichever half you were reading.
+    @State private var filesTab: FilesTab = .files
 
     var body: some View {
         VStack(spacing: 0) {
@@ -453,7 +462,7 @@ struct InspectorView: View {
         VStack(spacing: 0) {
             terminalSummary(terminal)
             Divider().overlay(Theme.hairline)
-            changesForNode(repoID: terminal.repoID)
+            filesPane(root: terminal.cwd, repoID: terminal.repoID)
         }
     }
 
@@ -575,7 +584,7 @@ struct InspectorView: View {
             .padding(14)
 
             Divider().overlay(Theme.hairline)
-            changesSection(repoPath: worktree.path, files: files)
+            filesPane(root: worktree.path, repoID: repoID)
         }
     }
 
@@ -611,6 +620,54 @@ struct InspectorView: View {
                     .lineLimit(1)
             }
         }
+    }
+
+    /// The files pane: what a node's working directory holds, and what of it
+    /// has changed.
+    ///
+    /// Two questions, and the changed list can only answer one of them. Before
+    /// an agent has done anything there is nothing in it, which is exactly when
+    /// you want to know what it is working on.
+    private func filesPane(root: String, repoID: String?) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                SegmentedControl(
+                    options: FilesTab.allCases,
+                    selection: $filesTab,
+                    label: { tab in
+                        switch tab {
+                        case .files: return "All files"
+                        case .changes:
+                            let count = changedCount(repoID: repoID)
+                            return count == 0 ? "Changes" : "Changes \(count)"
+                        }
+                    },
+                    icon: { $0 == .files ? "folder" : "plusminus" }
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            Divider().overlay(Theme.hairline)
+
+            switch filesTab {
+            case .files:
+                // Keyed on the folder, so moving to another node starts its
+                // tree closed rather than inheriting the last one's shape.
+                FilesBrowser(root: root) { store.openInEditor($0) }
+                    .id(root)
+            case .changes:
+                changesForNode(repoID: repoID)
+            }
+        }
+    }
+
+    /// How many files the node's directory has changed, for the tab's own count.
+    private func changedCount(repoID: String?) -> Int {
+        if let repoID, let repo = store.activeWorkspace?.repos.first(where: { $0.id == repoID }) {
+            return store.changes[repo.worktreePath]?.count ?? 0
+        }
+        return store.totalChangedFiles
     }
 
     /// What a node's working directory has changed, and the diff for whichever
