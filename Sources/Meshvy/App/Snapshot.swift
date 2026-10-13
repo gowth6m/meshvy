@@ -640,6 +640,9 @@ struct SnapshotRequest {
     /// Open a browser node at this URL before rendering, so a board shot has the
     /// running application on it as well as the agents.
     var browserURL: String?
+    /// Open a shell in this repository before rendering, so a shot can be about
+    /// a terminal node and the panel that follows it.
+    var shellRepo: String?
     /// Which node the inspector should be showing. Left alone the shot picks
     /// for itself: the workspace after an agent has run, the browser when the
     /// shot is only about a browser, otherwise a checkout with changes in it.
@@ -650,7 +653,7 @@ struct SnapshotRequest {
     var tidy: Bool
 
     enum Selection: String {
-        case workspace, browser, repo
+        case workspace, browser, repo, terminal
     }
 
     init?(arguments: [String]) {
@@ -673,6 +676,7 @@ struct SnapshotRequest {
         shortcuts = arguments.contains("--shortcuts")
         withAgent = arguments.contains("--agent")
         browserURL = value("--browser")
+        shellRepo = value("--shell")
         select = value("--select").flatMap(Selection.init(rawValue:))
         tidy = arguments.contains("--tidy")
     }
@@ -714,6 +718,15 @@ enum Snapshot {
                 store.navigateBrowser(existing.id, to: url)
             } else {
                 store.openBrowser(url: url, reveal: false)
+            }
+        }
+
+        if let name = request.shellRepo, store.activeWorkspace?.terminals.isEmpty == true {
+            // `--shell root` opens one at the workspace root, which belongs to
+            // no single repository and so answers for all of them.
+            let repo = store.activeWorkspace?.repos.first { $0.name == name }
+            if repo != nil || name == "root" {
+                store.openTerminal(role: .shell, repoID: repo?.id)
             }
         }
 
@@ -775,6 +788,17 @@ enum Snapshot {
             if let id = store.activeWorkspace?.id { store.select(.workspace(id)) }
         case .browser:
             if let node = store.activeWorkspace?.browsers.first { store.select(.browser(node.id)) }
+        case .terminal:
+            // An agent, with whatever its own directory has changed open beside
+            // it — which is what that panel is for.
+            if let node = store.activeWorkspace?.terminals.first {
+                store.select(.terminal(node.id))
+                if let repoID = node.repoID,
+                   let repo = store.activeWorkspace?.repos.first(where: { $0.id == repoID }),
+                   let first = store.changes[repo.worktreePath]?.first {
+                    store.openDiff(repoPath: repo.worktreePath, change: first)
+                }
+            }
         case .repo:
             // A checkout with changes in it — that is what the panel is for.
             if let dirty = store.workspaceChanges.first {

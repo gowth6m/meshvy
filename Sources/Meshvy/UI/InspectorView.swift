@@ -443,7 +443,21 @@ struct InspectorView: View {
         }
     }
 
+    /// An agent's panel: what it is and what it has changed.
+    ///
+    /// The files are the point. A terminal node is opened in one directory and
+    /// does its work there, so the question you have while watching one is what
+    /// it has touched — which used to mean selecting the repository separately
+    /// and remembering which agent was in it.
     private func terminalInspector(_ terminal: TerminalNode) -> some View {
+        VStack(spacing: 0) {
+            terminalSummary(terminal)
+            Divider().overlay(Theme.hairline)
+            changesForNode(repoID: terminal.repoID)
+        }
+    }
+
+    private func terminalSummary(_ terminal: TerminalNode) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 7) {
                 Image(systemName: terminal.role.icon)
@@ -482,9 +496,9 @@ struct InspectorView: View {
                 Spacer(minLength: 0)
                 ChromeButton(icon: "xmark") { store.closeTerminal(terminal.id) }
             }
-            Spacer(minLength: 0)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// What the agent is doing, as its own hooks reported it.
@@ -599,19 +613,87 @@ struct InspectorView: View {
         }
     }
 
+    /// What a node's working directory has changed, and the diff for whichever
+    /// file is open.
+    ///
+    /// A node opened inside a repository shows that repository. One opened at
+    /// the workspace root — a shell there, or an agent with no repository of
+    /// its own — shows every repository beneath it, because that is what its
+    /// working directory actually holds.
+    @ViewBuilder
+    private func changesForNode(repoID: String?) -> some View {
+        if let repoID, let repo = store.activeWorkspace?.repos.first(where: { $0.id == repoID }) {
+            changesSection(repoPath: repo.worktreePath, files: store.changes[repo.worktreePath] ?? [])
+        } else {
+            groupedChangesSection()
+        }
+    }
+
+    /// Every repository under the workspace root that has changed, each under
+    /// its own name, over the one diff pane they share.
+    @ViewBuilder
+    private func groupedChangesSection() -> some View {
+        let grouped = store.workspaceChanges
+        if grouped.isEmpty {
+            noChanges
+        } else {
+            VSplit(
+                top: {
+                    ScrollableStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 9) {
+                            ForEach(grouped, id: \.repo.id) { entry in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Button { store.reveal(.worktree(entry.repo.worktreePath)) } label: {
+                                        HStack(spacing: 5) {
+                                            Image(systemName: "square.on.square")
+                                                .font(Theme.ui(8.5)).foregroundStyle(Theme.worktree)
+                                            Text(entry.repo.name)
+                                                .font(Theme.ui(11, .semibold))
+                                                .foregroundStyle(Theme.textSecondary)
+                                            Spacer(minLength: 0)
+                                            Text("\(entry.files.count)")
+                                                .font(Theme.mono(9.5))
+                                                .foregroundStyle(Theme.textTertiary)
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    ChangesList(
+                                        changes: entry.files,
+                                        selected: store.openFile?.repoPath == entry.repo.worktreePath
+                                            ? store.openFile?.change : nil,
+                                        onSelect: { store.openDiff(repoPath: entry.repo.worktreePath, change: $0) }
+                                    )
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
+                    }
+                },
+                bottom: { diffPane }
+            )
+        }
+    }
+
+    private var noChanges: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "checkmark.seal")
+                .font(.system(size: 20, weight: .light))
+                .foregroundStyle(Theme.textTertiary)
+            Text("No changes yet")
+                .font(Theme.ui(11.5))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     /// The file list, and the diff for whichever file is open.
     @ViewBuilder
     private func changesSection(repoPath: String, files: [FileChange]) -> some View {
         if files.isEmpty {
-            VStack(spacing: 6) {
-                Image(systemName: "checkmark.seal")
-                    .font(.system(size: 20, weight: .light))
-                    .foregroundStyle(Theme.textTertiary)
-                Text("No changes yet")
-                    .font(Theme.ui(11.5))
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            noChanges
         } else {
             VSplit(
                 top: {

@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+- **An agent's panel shows what it has changed.** Selecting a terminal node
+  gave you its role, its folder and its session id — everything about the
+  agent except the thing you actually want while watching one work, which is
+  what it has touched. It now carries the same file list and diff a repository
+  does, scoped to the directory the node was opened in: an agent working in a
+  repository shows that repository, and a shell at the workspace root shows
+  every repository beneath it, grouped under their names. Answering "what has
+  this one done" used to mean selecting the repository separately and
+  remembering which agent was in it.
+- `--snapshot --select terminal` frames a shot on an agent with its files
+  open, and `--shell <repo>` (or `--shell root`) puts one on the board to be
+  framed. The panel had no way to be photographed for the documentation
+  otherwise.
+
 ## [0.11.0] - 2026-10-13
 
 - **Repositories are no longer nodes on the board.** Every workspace hung a
