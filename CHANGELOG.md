@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+- **Nothing could be dragged above the workspace node, and which nodes would
+  move at all depended on where they were sitting.** A terminal, browser or
+  workspace node is moved by its chrome, so its body keeps text selection —
+  but the test for "is this the chrome?" was re-asked on every step of the
+  drag, against the node's *current* top. That top falls as the node is
+  dragged upwards, so a node on its way up eventually failed a test it had
+  already passed and stopped dead, part of the way there. The test is settled
+  once now, when the drag begins.
+- The same comparison measured a drag's start in the gesture's local space
+  against an edge in the board's, so whether a node could be picked up at all
+  came down to where it happened to be: a node low on the board could be
+  dragged by its whole body, and one whose top had scrolled above the canvas
+  could not be dragged anywhere. The board's coordinate space is named now,
+  and both sides of the comparison are taken in it.
+- The grab area matches each kind's actual chrome. Every kind was given the
+  28pt of a terminal's header, which left most of a workspace node's 78pt of
+  header and repository strip, and most of a browser's address bar, looking
+  draggable and not being. Both the drag and the scroll wheel read the same
+  measurement now, so they cannot disagree about where a card's own surface
+  begins.
+- Workspace and browser nodes no longer have an invisible second copy of
+  themselves laid on top. The card layer skipped only terminals, so it also
+  drew an empty, node-sized view over every workspace and browser — carrying
+  a drag with no chrome test, two tap gestures and a context menu, all
+  competing for the same clicks as the real node underneath.
 - **"The request timed out" when installing an update.** The downloader read
   the asset one byte at a time out of `URLSession.AsyncBytes`, appending each
   to a `Data` — about 140 KB/s on an idle machine, so a five-megabyte update

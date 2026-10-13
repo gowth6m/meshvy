@@ -15,6 +15,10 @@ struct CanvasView: View {
     @State private var cursorPoint = CGPoint.zero
     @State private var scrollMonitor: Any?
 
+    /// The board's own coordinate space, which is what the viewport projects
+    /// into. Named so a gesture can report where it began in those terms.
+    private static let canvasSpace = "meshvy.canvas"
+
     private var detail: DetailLevel { DetailLevel(scale: store.viewport.scale) }
     private var zoom: Zoom { Zoom(scale: store.viewport.scale) }
 
@@ -46,6 +50,12 @@ struct CanvasView: View {
             }
             .background(Theme.canvas)
             .clipped()
+            // Named, so a drag can say where it began in the same terms the
+            // viewport projects nodes into. A gesture's `.local` space is the
+            // view it is attached to, which for a card is the card itself —
+            // comparing that against a projected edge compares two different
+            // origins, and the answer depends on where the node happens to be.
+            .coordinateSpace(.named(Self.canvasSpace))
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let point):
@@ -151,36 +161,78 @@ struct CanvasView: View {
         }
     }
 
-    /// Terminals are dragged by their header so the body keeps normal text
-    /// selection and keyboard focus.
+    /// A node hosting a live AppKit view is dragged by its chrome, so the body
+    /// keeps normal text selection and keyboard focus.
+    ///
+    /// Whether the drag has hold of the chrome is settled once, when it starts.
+    /// It used to be re-asked on every change against the node's *current*
+    /// projected top — which falls as the node is dragged upwards, so a node on
+    /// its way up eventually failed a test it had already passed and stopped
+    /// dead. That is why nothing could be moved above the workspace node: the
+    /// drag gave out partway there. The same comparison mixed a local-space
+    /// start with a canvas-space edge, so whether a node could be picked up at
+    /// all came down to where on the board it was sitting.
     private func terminalDrag(_ node: CanvasNode) -> some Gesture {
-        DragGesture(minimumDistance: 3, coordinateSpace: .local)
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(Self.canvasSpace))
             .onChanged { value in
-                guard value.startLocation.y <= store.viewport.project(node.frame).minY + zoom.s(28) else { return }
                 if draggingNode != node.id {
+                    let rect = store.viewport.project(node.frame)
+                    guard value.startLocation.y <= rect.minY + zoom.s(chromeHeight(of: node)) else { return }
                     draggingNode = node.id
                     dragOrigin = node.position
                 }
-                guard let origin = dragOrigin else { return }
+                guard draggingNode == node.id, let origin = dragOrigin else { return }
                 store.moveNode(node.id, to: CGPoint(
                     x: origin.x + value.translation.width / store.viewport.scale,
                     y: origin.y + value.translation.height / store.viewport.scale
                 ))
             }
             .onEnded { _ in
+                // A drag that began in the body never moved anything, and has
+                // nothing to persist.
+                guard draggingNode == node.id else { return }
                 draggingNode = nil
                 dragOrigin = nil
                 store.commitTerminalMove()
             }
     }
 
+    /// How much of a node's top is chrome rather than live content: the header,
+    /// and whatever sits between it and the body. It is the part you can take
+    /// hold of to move the node, and the part the scroll wheel must not reach
+    /// through — one answer, so those two can never disagree about where a
+    /// card's own surface begins.
+    private func chromeHeight(of node: CanvasNode) -> CGFloat {
+        switch node.kind {
+        case .terminal(let terminal):
+            // Header and its divider, plus the status strip and its own —
+            // which a plain shell does not draw.
+            return terminal.sessionID == nil ? 29 : 48
+        case .workspace:
+            // Header plus the repository strip.
+            return 78
+        case .browser:
+            // Header, the address bar, and the divider under each.
+            return 60
+        default:
+            return 0
+        }
+    }
+
     // MARK: - Cards
 
     private var nodeLayer: some View {
         let visible = store.viewport.visibleWorldRect()
+        // Everything `terminalLayer` already draws is skipped here. It used to
+        // skip only terminals, so every workspace and browser node also got an
+        // empty card of its own size laid over the real one — carrying a drag
+        // with no chrome test, two tap gestures and a context menu that render
+        // as nothing, competing with the node underneath for the same clicks.
         let nodes = store.graph.nodes.filter { node in
-            if case .terminal = node.kind { return false }
-            return node.frame.intersects(visible)
+            switch node.kind {
+            case .terminal, .workspace, .browser: return false
+            default: return node.frame.intersects(visible)
+            }
         }
         return ForEach(nodes) { node in
             let rect = store.viewport.project(node.frame)
@@ -248,25 +300,17 @@ struct CanvasView: View {
             switch node.kind {
             case .terminal(let terminal):
                 id = terminal.id
-                // Header and its divider, plus the status strip and its own —
-                // which a plain shell does not draw.
-                let chrome: CGFloat = terminal.sessionID == nil ? 29 : 48
-                rect.origin.y += zoom.s(chrome)
-                rect.size.height -= zoom.s(chrome)
             case .workspace(let workspace):
                 guard let orchestrator = workspace.orchestrator else { continue }
                 id = orchestrator.id
-                // Header plus the repository strip.
-                rect.origin.y += zoom.s(78)
-                rect.size.height -= zoom.s(78)
             case .browser(let browser):
                 id = browser.id
-                // Header, the address bar, and the divider under each.
-                rect.origin.y += zoom.s(60)
-                rect.size.height -= zoom.s(60)
             default:
                 continue
             }
+            let chrome = zoom.s(chromeHeight(of: node))
+            rect.origin.y += chrome
+            rect.size.height -= chrome
             if rect.height > 0, rect.contains(point) { return id }
         }
         return nil
