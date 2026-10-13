@@ -3,8 +3,9 @@ import SwiftUI
 /// Left rail: every workspace, with its repositories nested underneath.
 ///
 /// Workspaces are the organising unit, so they are all listed here — not just
-/// the open one. Clicking a repository pans the canvas to its card; clicking a
-/// different workspace switches the board.
+/// the open one. Clicking a repository puts its changes in the inspector and
+/// pans to the workspace node its chip sits on; clicking a different workspace
+/// switches the board.
 struct Sidebar: View {
     @Bindable var store: MeshvyStore
     @Binding var sheet: MeshvySheet?
@@ -318,8 +319,9 @@ struct Sidebar: View {
 
     private func repoRow(_ repo: WorkspaceRepo, workspace: Workspace) -> some View {
         let worktree = store.worktrees[repo.worktreePath]
-        let sessions = store.graph.edges.filter {
-            $0.to == .worktree(repo.worktreePath) && $0.kind == .ranIn
+        let sessions = store.graph.nodes.filter { node in
+            guard case .session = node.kind else { return false }
+            return node.repoID == repo.id
         }
         return SidebarRow(
             isSelected: store.selection == .worktree(repo.worktreePath),

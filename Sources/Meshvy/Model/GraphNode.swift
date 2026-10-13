@@ -5,6 +5,9 @@ import Foundation
 /// keys used by the saved layout, so they must not change between launches.
 enum NodeID: Hashable, Codable {
     case session(String)
+    /// A repository, by its checkout path. It is never a node of its own — the
+    /// workspace node carries a chip for it — so this only ever names what is
+    /// selected: its changes in the inspector.
     case worktree(String)
     case terminal(UUID)
     case workspace(UUID)
@@ -39,7 +42,6 @@ enum NodeID: Hashable, Codable {
 
 enum NodeKind {
     case session(SessionSummary, status: SessionStatus, live: LiveSession?)
-    case worktree(Worktree)
     case terminal(TerminalNode)
     /// The parent node: the workspace itself, hosting its orchestrator.
     case workspace(Workspace)
@@ -69,8 +71,6 @@ struct CanvasNode: Identifiable {
         case .session(let s, _, let live):
             return [s.displayTitle, s.resolvedPath, s.gitBranch, s.model, live?.name, s.id]
                 .compactMap { $0 }.joined(separator: " ").lowercased()
-        case .worktree(let w):
-            return [w.path, w.branch, w.lastCommitSubject].compactMap { $0 }.joined(separator: " ").lowercased()
         case .terminal(let t):
             return [t.title, t.cwd, t.role.label].joined(separator: " ").lowercased()
         case .workspace(let w):
@@ -85,7 +85,6 @@ struct CanvasNode: Identifiable {
     var sortDate: Date {
         switch kind {
         case .session(let s, _, _): return s.lastActivityAt
-        case .worktree(let w): return w.lastCommitDate ?? .distantPast
         case .terminal(let t): return t.createdAt
         case .workspace(let w): return w.createdAt
         case .subAgent(let a): return a.startedAt ?? .distantPast
@@ -97,13 +96,13 @@ struct CanvasNode: Identifiable {
 /// A relationship drawn on the edge layer.
 struct CanvasEdge: Identifiable {
     enum Kind {
-        /// A session ran in this checkout.
+        /// A session ran in one of the workspace's repositories.
         case ranIn
-        /// A terminal or the workspace has this checkout under it.
+        /// A terminal opened by hand in one of the workspace's repositories.
         case owns
-        /// The orchestrator dispatched this sub-agent.
+        /// The orchestrator dispatched this agent.
         case dispatched
-        /// A browser is pointed at what this checkout is running.
+        /// A browser is pointed at what the workspace is running.
         case watches
     }
 

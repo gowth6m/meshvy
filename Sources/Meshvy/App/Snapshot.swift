@@ -729,7 +729,7 @@ enum Snapshot {
         applySelection(store: store, request: request)
         if let zoom = request.zoom {
             store.viewport.scale = CGFloat(zoom)
-            if let selected = store.selection, let node = store.graph.node(selected) {
+            if let selected = store.selection, let node = store.boardNode(for: selected) {
                 store.viewport.center = node.frame.center
             } else if let rect = store.graph.contentRect {
                 store.viewport.center = rect.center
@@ -873,7 +873,7 @@ enum Snapshot {
             // On whatever the shot is about, as the camera does everywhere
             // else; the workspace node only when nothing is selected.
             store.viewport.scale = CGFloat(zoom)
-            let centre = store.selection.flatMap { store.graph.node($0) }
+            let centre = store.selection.flatMap { store.boardNode(for: $0) }
                 ?? store.activeWorkspace.flatMap { store.graph.node(.workspace($0.id)) }
             store.viewport.center = centre?.frame.center ?? .zero
         } else if request.zoomToFit {

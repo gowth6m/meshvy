@@ -274,18 +274,6 @@ struct CanvasView: View {
                 isSelected: store.selection == node.id,
                 isDimmed: dimmed
             )
-        case .worktree(let worktree):
-            let attached = attachedSessions(to: worktree.path)
-            WorktreeNodeView(
-                worktree: worktree,
-                zoom: zoom,
-                detail: detail,
-                isSelected: store.selection == node.id,
-                isHovered: hoveredNode == node.id,
-                isDimmed: dimmed,
-                attachedSessions: attached.total,
-                liveSessions: attached.live
-            )
         }
     }
 
@@ -314,16 +302,6 @@ struct CanvasView: View {
             if rect.height > 0, rect.contains(point) { return id }
         }
         return nil
-    }
-
-    private func attachedSessions(to path: String) -> (total: Int, live: Int) {
-        var total = 0
-        var live = 0
-        for edge in store.graph.edges where edge.to == .worktree(path) {
-            total += 1
-            if edge.isLive { live += 1 }
-        }
-        return (total, live)
     }
 
     // MARK: - Gestures
@@ -385,24 +363,6 @@ struct CanvasView: View {
             Button("Copy task") { store.copyToClipboard(agent.prompt) }
             if let result = agent.result {
                 Button("Copy result") { store.copyToClipboard(result) }
-            }
-        case .worktree(let worktree):
-            Button("Open agent terminal here") {
-                store.openTerminal(role: .repo, repoID: node.repoID)
-            }
-            Button("Open shell here") {
-                store.openTerminal(role: .shell, repoID: node.repoID)
-            }
-            Button("Open a browser here") {
-                store.openBrowser(repoID: node.repoID)
-            }
-            Divider()
-            Button("Open in editor") { store.openInEditor(worktree.path) }
-            Button("Reveal in Finder") { store.revealInFinder(worktree.path) }
-            Divider()
-            Button("Copy path") { store.copyToClipboard(worktree.path) }
-            if let branch = worktree.branch {
-                Button("Copy branch name") { store.copyToClipboard(branch) }
             }
         }
     }
