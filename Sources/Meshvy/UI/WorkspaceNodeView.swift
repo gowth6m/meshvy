@@ -113,31 +113,49 @@ struct WorkspaceNodeView: View {
     }
 
     /// Which repositories belong to this workspace, and how each one is doing.
+    ///
+    /// A repository has no node of its own on the board; this chip is where it
+    /// lives. Clicking it puts its changes in the inspector, and right-clicking
+    /// it starts something there.
     private var repoStrip: some View {
         HStack(spacing: zoom.s(5)) {
             ForEach(workspace.repos) { repo in
                 let worktree = store.worktrees[repo.worktreePath]
                 let tint: SwiftUI.Color = !repo.isReady ? Theme.danger
                     : (worktree?.isDirty == true ? Theme.dirty : Theme.worktree)
+                let isShown = store.selection == .worktree(repo.worktreePath)
                 Button {
-                    store.reveal(.worktree(repo.worktreePath))
+                    store.select(.worktree(repo.worktreePath))
                 } label: {
                     HStack(spacing: zoom.s(4)) {
                         Circle().fill(tint).frame(width: zoom.s(5), height: zoom.s(5))
                         Text(repo.name)
                             .font(zoom.font(10.5, .medium))
-                            .foregroundStyle(Theme.textSecondary)
+                            .foregroundStyle(isShown ? Theme.textPrimary : Theme.textSecondary)
                     }
                     .padding(.horizontal, zoom.s(7))
                     .padding(.vertical, zoom.s(3.5))
                     .background(
                         RoundedRectangle(cornerRadius: zoom.s(5), style: .continuous)
-                            .fill(Theme.fill)
+                            .fill(isShown ? Theme.accent.opacity(0.16) : Theme.fill)
                     )
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(repo.failure ?? repo.worktreePath)
+                .contextMenu {
+                    Button("Open agent terminal here") { store.openTerminal(role: .repo, repoID: repo.id) }
+                    Button("Open shell here") { store.openTerminal(role: .shell, repoID: repo.id) }
+                    Button("Open a browser here") { store.openBrowser(repoID: repo.id) }
+                    Divider()
+                    Button("Open in editor") { store.openInEditor(repo.worktreePath) }
+                    Button("Reveal in Finder") { store.revealInFinder(repo.worktreePath) }
+                    Divider()
+                    Button("Copy path") { store.copyToClipboard(repo.worktreePath) }
+                    if let branch = worktree?.branch {
+                        Button("Copy branch name") { store.copyToClipboard(branch) }
+                    }
+                }
             }
             Spacer(minLength: 0)
             Text("\(workspace.repos.count) \(workspace.repos.count == 1 ? "repo" : "repos")")

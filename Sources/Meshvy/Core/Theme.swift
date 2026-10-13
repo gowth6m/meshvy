@@ -138,7 +138,6 @@ enum Theme {
     static let accentRail: CGFloat = 3
 
     static let sessionNodeSize = CGSize(width: 268, height: 132)
-    static let worktreeNodeSize = CGSize(width: 268, height: 112)
 
     // MARK: Type
     static func ui(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {

@@ -431,11 +431,6 @@ enum PaletteCommands {
                 subtitle: terminal.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
                 icon: terminal.role.icon, tint: Theme.worktree
             )
-        case .worktree(let worktree):
-            return Described(
-                title: worktree.displayName ?? URL(fileURLWithPath: worktree.path).lastPathComponent,
-                subtitle: worktree.branch, icon: "folder.fill", tint: Theme.worktree
-            )
         case .session(let summary, _, _):
             return Described(
                 title: summary.displayTitle, subtitle: summary.workspaceName,

@@ -96,8 +96,8 @@ to cut from. Another branch means another workspace.
 
 **The workspace node** is the parent on the canvas. It names the branch, shows
 a chip per repository, and hosts the orchestrator's Claude Code session in its
-own body — the working directory *is* that folder. Edges run down to each
-repository.
+own body — the working directory *is* that folder. A repository has no node of
+its own: its chip is where it lives on the board.
 
 **Delegated agents are real terminals.** When the orchestrator splits work up,
 each teammate is a full Claude Code session with its own terminal node you can
@@ -120,7 +120,8 @@ anyway it still appears as a card read from the parent's transcript, so no work
 is invisible.
 
 **Terminals** come in three kinds — the workspace orchestrator, a per-repo
-agent, and a plain shell. Right-click a repository card for the last two.
+agent, and a plain shell. Right-click a repository, on the workspace node or in
+the sidebar, for the last two.
 
 **Browser nodes** put the running application on the board next to the agents
 building it — see [The browser](#the-browser).
@@ -175,15 +176,15 @@ how an agent addresses that node.
 
 ## What's on the board
 
-Six kinds of node, with the edges saying how they relate: a repository is
-*owned* by its workspace, an agent was *dispatched* by it, a browser *watches*
-what they produce.
+Five kinds of node, and every edge runs back to the workspace: an agent was
+*dispatched* by it, a session *ran in* it, a browser *watches* what it is
+building.
 
 **The workspace node** hosts the orchestrator's session in its own body and
-names every repository under it.
-
-**Worktree cards** come from `git worktree list`: branch, dirty and untracked
-counts, divergence from upstream, tip commit.
+names every repository under it, a chip each, marked when it has uncommitted
+work. Repositories are not nodes — the board is for what runs in them. Click a
+chip for that repository's [changes](#changes); right-click it to open an agent,
+a shell or a browser there.
 
 **Terminal nodes** are the agents and the shells — each a real pty you can
 read, interrupt and type into.
@@ -208,9 +209,10 @@ through whoever is waiting.
 
 ## Changes
 
-Select a repository to see every file it has touched against HEAD — modified,
-added, deleted, renamed, untracked — with per-file `+/−` counts and a unified
-diff showing both line numbers. Select the workspace node instead and you get
+Select a repository — its chip on the workspace node, or its row in the
+sidebar — to see every file it has touched against HEAD: modified, added,
+deleted, renamed, untracked, with per-file `+/−` counts and a unified diff
+showing both line numbers. Select the workspace node instead and you get
 the same list across every repository at once, which is the view you want after
 an orchestrator run.
 

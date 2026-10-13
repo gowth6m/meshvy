@@ -1810,6 +1810,24 @@ final class MeshvyStore {
         select(.workspace(id))
     }
 
+    /// One repository's git state, or as much as is known before the first
+    /// read of it lands.
+    func worktree(for repo: WorkspaceRepo) -> Worktree {
+        if let read = worktrees[repo.worktreePath] { return read }
+        return Worktree(
+            path: repo.worktreePath,
+            branch: activeWorkspace?.branch,
+            head: nil,
+            isMain: false,
+            isDetached: false,
+            isLocked: false,
+            isPrunable: repo.failure != nil,
+            isArchived: !FileManager.default.fileExists(atPath: repo.worktreePath),
+            displayName: repo.name,
+            failureReason: repo.failure
+        )
+    }
+
     // MARK: - Live sessions
 
     func refreshLive(rebuildGraph: Bool = true) {
@@ -1871,7 +1889,6 @@ final class MeshvyStore {
         )
         graph = composer.compose(.init(
             workspace: workspace,
-            worktrees: worktrees,
             sessions: allSessions,
             statuses: statuses,
             live: live,
@@ -1882,7 +1899,17 @@ final class MeshvyStore {
             orchestratorRunning: isOrchestratorRunning
         ))
         recomputeMatches()
-        if let selection, graph.node(selection) == nil { self.selection = nil }
+        if let selection, boardNode(for: selection) == nil { self.selection = nil }
+    }
+
+    /// The node on the board that shows `id`. A repository has no node of its
+    /// own — it is a chip on the workspace node — so that is where it is drawn,
+    /// for as long as it is still part of the workspace.
+    func boardNode(for id: NodeID) -> CanvasNode? {
+        guard case .worktree(let path) = id else { return graph.node(id) }
+        guard let workspace = activeWorkspace,
+              workspace.repos.contains(where: { $0.worktreePath == path }) else { return nil }
+        return graph.node(.workspace(workspace.id))
     }
 
     private func recomputeMatches() {
@@ -2018,7 +2045,7 @@ final class MeshvyStore {
     }
 
     func reveal(_ id: NodeID) {
-        guard let node = graph.node(id) else { return }
+        guard let node = boardNode(for: id) else { return }
         withAnimation(.easeOut(duration: 0.25)) {
             viewport.scale = max(viewport.scale, 0.8)
             viewport.center = node.frame.center

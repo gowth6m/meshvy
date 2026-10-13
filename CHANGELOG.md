@@ -59,11 +59,6 @@
 - **⌘F puts the cursor in the search box.** It showed the sidebar and stopped
   there, which with the sidebar already open was nothing at all. Esc clears the
   search and hands the board back, and the match count frames the matches.
-- **Repository cards stopped counting the workspace as a session.** Its
-  ownership edge was counted, so every card claimed a session it never had —
-  and since that edge is live whenever the orchestrator is, the whole row turned
-  amber the moment one started. The count's icon was not an SF Symbol and drew
-  nothing; nor did the first-run screen's.
 - Every icon-only button has a tooltip. The inspector's offered their SF Symbol
   names — "xmark", "folder", "arrow.clockwise" — and VoiceOver read them out
   the same way. Buttons in the inspector are outlined at rest so they read as
@@ -73,7 +68,8 @@
 - "N changed" in the status bar opens every changed file in the inspector; it
   was drawn like a link and did nothing.
 - The first-run screen says what happens in three steps instead of one
-  paragraph, and the inspector's empty state says what each kind of node shows.
+  paragraph, under the mark rather than an icon that was not an SF Symbol and
+  drew nothing. The inspector's empty state says what each kind of node shows.
 - **Tertiary text is easier to read.** Night Owl's `muted` measured 3.9:1 on the
   canvas and 2.5:1 on the palette. Lifted a fifth of the way to the foreground
   it clears 5:1 on the canvas, and still sits well below secondary text.
@@ -81,6 +77,21 @@
   menu, the sidebar's agent rows have a context menu, and the scroll hint says
   "hold still", since "hold" read as press-and-hold. The shortcut list covers
   right-click and Esc, and no longer cuts "⏎ in the address bar" short.
+
+## [0.11.0] - 2026-10-13
+
+- **Repositories are no longer nodes on the board.** Every workspace hung a
+  small card per repository beneath its node, wired to it — a second copy of
+  the chips the node already carries, under a branch name the whole workspace
+  shares. The board is for what runs in them: agents, sessions and browsers.
+  A repository lives on its chip now. Click it for the changes and the diff,
+  exactly as the card did; right-click it to open an agent, a shell or a
+  browser there, or to open it in your editor. The sidebar row does the same,
+  and brings the workspace node into view.
+- Past sessions still sit in a row beneath the workspace node, a column per
+  repository that has any, and their edges run to the workspace itself — as do
+  a browser's and an agent's you opened by hand. Every edge on the board now
+  has the workspace node at one end.
 
 ## [0.10.5] - 2026-10-13
 

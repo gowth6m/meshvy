@@ -8,12 +8,16 @@ struct InspectorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let selection = store.selection, let node = store.graph.node(selection) {
+            // A repository is not a node on the board — it is selected from
+            // its chip on the workspace node, or its row in the sidebar — so
+            // it is looked up in the workspace rather than in the graph.
+            if case .worktree(let path)? = store.selection,
+               let repo = store.activeWorkspace?.repos.first(where: { $0.worktreePath == path }) {
+                worktreeInspector(store.worktree(for: repo), repoID: repo.id)
+            } else if let selection = store.selection, let node = store.graph.node(selection) {
                 switch node.kind {
                 case .session(let summary, let status, let live):
                     sessionInspector(summary, status: status, live: live)
-                case .worktree(let worktree):
-                    worktreeInspector(worktree, repoID: node.repoID)
                 case .terminal(let terminal):
                     terminalInspector(terminal)
                 case .workspace(let workspace):
@@ -32,10 +36,10 @@ struct InspectorView: View {
         .environment(\.chromeButtonsBordered, true)
     }
 
-    /// What each kind of node shows here, so the panel teaches the board
+    /// What each kind of selection shows here, so the panel teaches the board
     /// rather than waiting for a click. It used to name sessions and
-    /// worktrees only — two of the six kinds, and not the two that matter
-    /// most once an agent has run.
+    /// repositories only — not the workspace or its agents, which are what
+    /// matter most once an orchestrator has run.
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "square.on.square.dashed")
@@ -724,17 +728,6 @@ struct InspectorView: View {
                 .foregroundStyle(Theme.textTertiary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    private func attachedSessions(_ path: String) -> [(SessionSummary, SessionStatus)] {
-        store.graph.edges
-            .filter { $0.to == .worktree(path) }
-            .compactMap { edge in
-                guard let node = store.graph.node(edge.from),
-                      case .session(let summary, let status, _) = node.kind else { return nil }
-                return (summary, status)
-            }
-            .sorted { $0.0.lastActivityAt > $1.0.lastActivityAt }
     }
 
     // MARK: - Helpers
