@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.11.0] - 2026-10-13
 
 - **Repositories are no longer nodes on the board.** Every workspace hung a
   small card per repository beneath its node, wired to it — a second copy of
