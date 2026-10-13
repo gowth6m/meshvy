@@ -1,7 +1,7 @@
 name: Release
 
 # Tag a version to publish it:
-#   ./scripts/release.sh 0.7.0
+#   ./Scripts/release.sh 0.7.0
 #
 # Signing and notarisation are optional. Without the secrets below the release
 # still builds, but macOS warns on first open and the install note in the
@@ -88,7 +88,7 @@ jobs:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
-        run: ./scripts/package-release.sh
+        run: ./Scripts/package-release.sh
 
       - name: Verify the bundle is universal
         run: |
@@ -103,7 +103,7 @@ jobs:
           # asking the artifact, rather than by whether a secret happens to be
           # set. The two came apart once already: a half-notarised build would
           # have shipped notes saying it was signed while macOS refused it.
-          if ./scripts/verify-release.sh --require-notarised dist/Meshvy.app dist/*.dmg; then
+          if ./Scripts/verify-release.sh --require-notarised dist/Meshvy.app dist/*.dmg; then
             echo "notarised=true" >> "$GITHUB_OUTPUT"
           else
             echo "notarised=false" >> "$GITHUB_OUTPUT"

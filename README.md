@@ -1,4 +1,4 @@
-<img src="docs/mark.png" width="72" alt="">
+<img src="Docs/mark.png" width="72" alt="">
 
 # Meshvy
 
@@ -12,7 +12,7 @@ by side under `~/.meshvy/`. Open Claude Code on the workspace node and every
 repository is a subdirectory beneath it, so one orchestrator can put a real
 agent — with its own terminal — on each of them.
 
-![The board](docs/board.png)
+![The board](Docs/board.png)
 
 One workspace across three repositories, the orchestrator delegating an agent
 to two of them, and the app they are all changing running on the board beside
@@ -24,7 +24,7 @@ them. Every screenshot here is the app drawing itself — see
 One command, and nothing to sign in to:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/gowth6m/meshvy/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gowth6m/meshvy/main/Scripts/install.sh | bash
 ```
 
 It downloads the latest release, checks it against the published SHA-256,
@@ -42,7 +42,7 @@ Releases are signed with a Developer ID and notarised by Apple, so a download
 opens without a warning. Check for yourself:
 
 ```sh
-./scripts/verify-release.sh /Applications/Meshvy.app
+./Scripts/verify-release.sh /Applications/Meshvy.app
 ```
 
 > **Before 0.10.1** builds were unsigned, and macOS refused the first launch
@@ -144,7 +144,7 @@ app next to the agent writing it. It keeps cookies between launches, so a dev
 server you have signed into stays signed in, and the node reopens where you
 left it.
 
-![A browser on the board](docs/browser.png)
+![A browser on the board](Docs/browser.png)
 
 Selecting the node puts the page's console in the inspector, and the header
 carries a count of what it has thrown — above, two errors from a panel whose
@@ -215,7 +215,7 @@ showing both line numbers. Select the workspace node instead and you get
 the same list across every repository at once, which is the view you want after
 an orchestrator run.
 
-![Changes](docs/changes.png)
+![Changes](Docs/changes.png)
 
 ## ⌘K
 
@@ -224,7 +224,7 @@ to a node by name, branch or path, and changing the permission mode. With three
 characters or more it also searches *inside* your live terminals and shows the
 line it matched — the one thing the canvas cannot tell you.
 
-![Command palette](docs/palette.png)
+![Command palette](Docs/palette.png)
 
 ## Using it
 
@@ -267,7 +267,7 @@ session, or restart the agent from the same menu.
 A fresh install opens on this, and so does a board whose last workspace you
 archived:
 
-![Empty state](docs/empty.png)
+![Empty state](Docs/empty.png)
 
 ### First run in a new workspace
 
@@ -301,7 +301,7 @@ compiler and macOS SDK from the Command Line Tools are enough:
 
 ```sh
 xcode-select --install     # if you don't already have the tools
-./scripts/build-app.sh     # -> dist/Meshvy.app
+./Scripts/build-app.sh     # -> dist/Meshvy.app
 open dist/Meshvy.app
 ```
 
@@ -312,7 +312,7 @@ faster native-only build while developing.
 
 The only dependency is [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)
 for the terminal emulator. Brand assets are in `Resources/brand/`;
-`./scripts/make-icon.sh` rebuilds the icon from `app-icon.png`, scaling it onto
+`./Scripts/make-icon.sh` rebuilds the icon from `app-icon.png`, scaling it onto
 Apple's grid so it sits at the same size as other Dock icons. The toolbar mark
 is drawn in SwiftUI from the same geometry as `mark-on-dark.svg`, in the same
 colours — Night Owl's foreground with the brand mint `#64FFDA` on the lit node,
@@ -325,25 +325,25 @@ shipped icon, mint ground and dark mark, for use on dark backgrounds.
 matching `## [x.y.z]` heading, then:
 
 ```sh
-./scripts/release.sh 0.9.0
+./Scripts/release.sh 0.9.0
 git push origin HEAD && git push origin v0.9.0
 ```
 
 The tag triggers `.github/workflows/release.yml`, which builds a universal app,
 packages a DMG and a zip with checksums, and publishes a GitHub Release.
 `release.sh` refuses to tag on a dirty tree, an existing tag, or a missing
-changelog section. `ci.yml` builds every push and fails on warnings in
-`Sources/Meshvy`.
+changelog section. `ci.yml` builds every push, checks the module graph, runs the tests
+and the self-tests, and fails on warnings in `Packages/` or `Apps/`.
 
-To build artifacts locally without tagging: `./scripts/package-release.sh`.
+To build artifacts locally without tagging: `./Scripts/package-release.sh`.
 
 ### Signing and notarisation
 
-Releases are signed and notarised; `scripts/verify-release.sh` says whether a
+Releases are signed and notarised; `Scripts/verify-release.sh` says whether a
 given build really is, and the release workflow runs it as a gate rather than
 trusting that the secrets were set. The six secrets, how to issue a new
 certificate or notarisation key without Xcode, and what expires when are in
-[docs/signing.md](docs/signing.md).
+[Docs/signing.md](Docs/signing.md).
 
 The workflow still skips cleanly when the secrets are absent — a fork builds
 an unsigned release, and its notes say so.
@@ -374,18 +374,53 @@ step.
 
 ## Layout
 
+Nineteen library modules and the app, in one package, in dependency order — a module may depend only
+on the tiers above it, and `Tools/check-architecture.py` enforces that in CI.
+Each has a `README.md` saying what it owns.
+
 ```
-Sources/Meshvy/
-  App/        entry point, menus, snapshot + test harnesses
-  Core/       canvas geometry, Night Owl theme, persistence
-  Model/      workspaces, terminals, browsers, sub-agents, sessions, git, diffs
-  Services/   byte scanner, indexer, transcript loader, git, worktree builder,
-              terminal registry, browser engine + bridge, agent bridge,
-              agent hooks, model catalog, updater, FSEvents
-  Store/      app state, board composition
-  UI/         canvas, workspace node, cards, terminals, browsers, sidebar,
-              inspector, diff viewer, command palette, transcript reader
+Apps/macOS/                  entry point, menus, snapshot + test harnesses
+Packages/
+  Foundation/                pure values; no platform, no UI
+    MeshvyCore/              canvas camera, zoom thresholds, board metrics,
+                             formatting, lenient decoding
+    MeshvyModels/            workspaces, terminals, browsers, sub-agents,
+                             sessions, git, diffs
+  Platform/                  one subsystem of the machine each
+    ProcessKit/              subprocesses
+    FileSystemKit/           FSEvents, and the byte scanner
+    PersistenceKit/          board and layout files
+    GitKit/                  checkouts, status, diffs
+    TerminalKit/             PTY sessions, owned across view rebuilds
+  Features/
+    AgentKit/                claude argv, the delegation bridge, status hooks,
+                             sub-agents, model catalog, notifications
+    SessionKit/              transcript index, loader, live sessions
+    BrowserKit/              WebKit sessions and the browser_* MCP server
+    WorkspaceKit/            cutting and tearing down worktrees
+    UpdateKit/               the updater
+    AgentsUI/                badges, status strips, per-node agent settings
+    CanvasUI/                the canvas and a view per node kind
+    InspectorUI/             transcript, changes, diffs, files
+    WorkspacesUI/            the new-workspace and add-repository sheets
+  DesignSystem/              Night Owl theme, zoom, shared chrome
+  AppState/                  the board; split by concern, depends on no UI
+  AppShell/                  window, sidebar, palette, status bar
+Docs/
+  architecture/              ADRs — why it is this way
+  signing.md                 certificates, notarisation, what expires
+  demo/                      throwaway repos the screenshot script builds on
+  *.png                      the images in this README
+Tools/                       architecture check, formatting
 ```
+
+`AppState` deliberately has no dependency on any UI module; that is the edge
+that lets the feature UIs be separate modules at all. It is also the app's one
+real bottleneck — [ADR 2](Docs/Architecture/0002-appstate-bottleneck.md)
+says why it is still one type and what splits next.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the tier diagram and where a given change
+belongs.
 
 ### Development harnesses
 
@@ -412,8 +447,8 @@ window full screen for an app that is not frontmost.
 ### Shots
 
 ```sh
-./scripts/make-shots.sh                      # every image in docs/
-./scripts/make-shots.sh board browser        # or just these
+./Scripts/make-shots.sh                      # every image in Docs/
+./Scripts/make-shots.sh board browser        # or just these
 ```
 
 `--snapshot` renders the real view tree with no window, so the app can draw
@@ -436,7 +471,7 @@ captured in an offscreen window just before the render.
 | `--wait 6` · `--no-fit` | how long to let the board settle · leave the camera alone |
 
 `make-shots.sh` builds the board the images are taken against rather than using
-whatever is on your machine: three throwaway repositories from `docs/demo/`,
+whatever is on your machine: three throwaway repositories from `Docs/demo/`,
 one workspace cut across them, a dev server for the web one, and a real
 orchestrator run that delegates an agent to two of them. It puts everything
 back afterwards — the worktrees, the scratch repos, and its own entry in your

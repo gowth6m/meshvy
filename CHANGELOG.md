@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+- **The app is nineteen library modules plus the app, instead of one target.**
+  Same code, same
+  behaviour, but `Packages/` now holds a module per feature and capability with
+  its dependencies declared, so `internal` finally means something smaller than
+  "all 16,700 lines" and the compiler is what stops the inspector reaching into
+  the canvas. The layout is organised by what a thing is for rather than by
+  what kind of thing it is — `CanvasUI` is the canvas, `AgentKit` is everything
+  about driving an agent — and every module has a README saying what it owns.
+  `Docs/Architecture/` records why, including what was deliberately
+  not done.
+- Splitting it surfaced a circular dependency the single target had hidden: the
+  agent command line advertised the browser's tools while the browser bridge
+  read the agent bridge's directory paths. Those four paths were never the
+  agent bridge's — they are a convention about where a workspace keeps its own
+  plumbing — so they moved onto `Workspace`, which owns the directory. Three
+  subsystems now share one definition instead of two of them agreeing by
+  coincidence.
+- `Notifier` no longer reaches for `MeshvyStore.shared` to act on a clicked
+  notification; the board hands it a callback. It was the one place a service
+  called back up into application state, and it made that half of the agent
+  plumbing impossible to test without the whole store.
+- `MeshvyStore` is eleven files instead of one of 1,930 lines, split along the
+  concerns it was already marked up with — no logic moved. It is still one
+  type, and still the app's one real bottleneck; the ADR says why splitting it
+  into per-feature stores is its own change rather than a free one.
+- **Tests, for the first time.** 141 assertions across eight modules, over the
+  parts that are pure functions of their inputs: the canvas camera, zoom
+  thresholds, formatting, node ids and slugs, the byte scanner, the process
+  runner, the layout store, prompt cleaning, agent argv, and git discovery
+  against real throwaway checkouts. Writing them turned up that `SavedLayout`
+  decodes strictly where everything else we persist decodes leniently, so a
+  file from an older build loses your camera and panel widths; that one is
+  documented rather than changed, because it is a behaviour change and this was
+  not.
+- `scripts/` and `docs/` are now `Scripts/` and `Docs/`, matching `Packages/`,
+  `Apps/`, `Tools/` and `Resources/`. The ADRs are `Docs/Architecture/`. Entries
+  under released versions below still say the old names, because that is what
+  they were called at the time. One thing to know: the install one-liner in the
+  README points at `main`, so it only resolves once this lands there.
+
+- CI now checks the module graph before it builds anything, runs the tests, and
+  runs the self-tests against the binary it just built. The warning gate was
+  scoped to `Sources/Meshvy`, a path that no longer exists — it would have
+  silently stopped checking anything.
+
 - **⌘-drag on empty board draws a new agent where you drew it.** The rectangle
   is the node: where it sits and how big it is. One repository in the workspace
   answers for itself, more than one asks which — an agent has to work

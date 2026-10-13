@@ -11,6 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: swift --version
+
+      - name: Architecture rules
+        run: |
+          # SwiftPM rejects an undeclared dependency and a cycle, but it has no
+          # opinion about direction: nothing in the manifest stops AppShell
+          # appearing in MeshvyCore's dependencies. This checks the tier order
+          # in Docs/Architecture/0001-modular-monolith.md.
+          #
+          # First, because it reads the manifest and takes a second — there is
+          # no reason to spend five minutes compiling a graph we already know
+          # is the wrong shape.
+          python3 Tools/check-architecture.py
+
       - name: Build
         run: |
           # `set -o pipefail`, or the step's exit status is `tee`'s and a build
@@ -18,14 +31,50 @@ jobs:
           # 0.10.0 went green here and then failed to build in the release job.
           set -o pipefail
           swift build -c release 2>&1 | tee /tmp/build.log
+
       - name: No warnings in our own sources
         run: |
-          # Scoped to Sources/Meshvy: a dependency's warnings are not ours to
+          # Scoped to the paths we own: a dependency's warnings are not ours to
           # fix, and failing on them would make CI red for reasons nobody here
-          # can act on.
-          if grep "warning:" /tmp/build.log | grep -q "Sources/Meshvy/"; then
-            echo "::error::build produced warnings in Sources/Meshvy"
-            grep "warning:" /tmp/build.log | grep "Sources/Meshvy/" | head -20
+          # can act on. Both roots are listed because the app and the modules
+          # live in different trees — a pattern that only matched Sources/
+          # silently stopped checking anything when the modules moved.
+          if grep "warning:" /tmp/build.log | grep -qE "(Packages|Apps)/"; then
+            echo "::error::build produced warnings in our own sources"
+            grep "warning:" /tmp/build.log | grep -E "(Packages|Apps)/" | head -20
             exit 1
           fi
           echo "clean"
+
+      - name: Test
+        run: |
+          # Every module's suite. They are separate targets, so --filter
+          # narrows to one while working; CI runs the lot.
+          set -o pipefail
+          swift test 2>&1 | tee /tmp/test.log
+
+      - name: Self-tests against the built binary
+        run: |
+          # The unit suites cover the pure parts; these are the app driving its
+          # own machinery, and they are what has actually caught regressions.
+          # Each prints "<NAME> OK" and exits non-zero otherwise.
+          set -o pipefail
+          BIN="$(swift build -c release --show-bin-path)/Meshvy"
+
+          # Decodes a board written by a version that predates the `browsers`
+          # field. Self-contained: it builds its own fixture.
+          "$BIN" --formattest
+
+          # Parses a real `git diff`. It needs something to diff and refuses a
+          # clean tree, so give it one change and take it back afterwards —
+          # otherwise this step passes by doing nothing.
+          printf '\n<!-- ci difftest scratch -->\n' >> README.md
+          "$BIN" --difftest "$PWD"
+          git checkout -- README.md
+
+          # Not run here:
+          #   --perftest   needs a real ~/.claude transcript store, and exits 1
+          #                without one
+          #   --hooktest   drives the real `claude` CLI
+          #   --selftest   same, and it creates worktrees
+          # Those three are a pre-release check on a developer machine.
