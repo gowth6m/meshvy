@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import MeshvyCore
 import MeshvyModels
 import PersistenceKit
 
@@ -22,12 +23,16 @@ extension MeshvyStore {
             live: live,
             subAgents: subAgents,
             pinned: pinned,
+            sized: sized,
             claimedSessions: terminals.claimedSessionIDs,
             showEnded: showEndedSessions,
             orchestratorRunning: isOrchestratorRunning
         ))
         recomputeMatches()
-        if let selection, boardNode(for: selection) == nil { self.selection = nil }
+        // A node that has left the board cannot stay selected — an agent that
+        // finished, a browser that was closed. Pruned rather than cleared, so
+        // closing one of six selected nodes does not drop the other five.
+        selected.removeAll { boardNode(for: $0) == nil }
     }
 
     /// The node on the board that shows `id`. A repository has no node of its
@@ -85,16 +90,134 @@ extension MeshvyStore {
 
     public func dismissBanner() { banner = nil }
 
-    // MARK: - Interaction
+    // MARK: - Selection
 
     public func select(_ id: NodeID?) {
-        selection = id
+        selected = id.map { [$0] } ?? []
+        raise(id)
+        focus(id)
+    }
+
+    /// Says that `id` is now the node the panels follow.
+    ///
+    /// Every path that changes which node is last in `selected` goes through
+    /// here, because two things have to happen and neither is optional: the
+    /// node stops being unread, and a session card's transcript is read off
+    /// disk. ⇧-click and the marquee used to skip both, so making a session
+    /// card the subject that way left the inspector saying the transcript was
+    /// not loaded, with nothing that would load it.
+    private func focus(_ id: NodeID?) {
         markRead(id)
         guard case .session(let sessionID)? = id else { return }
         loadTranscript(sessionID)
     }
 
+    /// ⇧-click: adds the node to the selection, or takes it out again if it was
+    /// already in. Re-selecting a node already in the set makes it the one the
+    /// panels follow, which is why it is removed and appended rather than left
+    /// where it was.
+    public func extendSelection(to id: NodeID) {
+        if let index = selected.firstIndex(of: id) {
+            selected.remove(at: index)
+            // Taking the last one out leaves the panels showing whatever is
+            // still selected, which is the node before it.
+            focus(selected.last)
+            return
+        }
+        selected.append(id)
+        raise(id)
+        focus(id)
+    }
+
+    /// Replaces the selection wholesale — what a marquee drag ends with.
+    public func select(all ids: [NodeID]) {
+        selected = ids
+        focus(ids.last)
+    }
+
+    public func selectEverything() { select(all: graph.nodes.map(\.id)) }
+
+    public func clearSelection() { selected = [] }
+
+    /// The nodes behind the selection, in selection order.
+    public var selectedNodes: [CanvasNode] { selected.compactMap { graph.node($0) } }
+
+    /// Whether anything selected hosts a terminal or a page.
+    ///
+    /// You select one of those by clicking into it, so while one is selected
+    /// the keyboard is almost certainly meant for the agent in it — which is
+    /// what the board checks before treating a keystroke as a shortcut.
+    public var hasLiveSelection: Bool { selectedNodes.contains(where: \.hostsLiveContent) }
+
+    // MARK: - The pointer
+
+    /// Which tool is in hand. Switching away from a creation tool is the common
+    /// case — you draw one agent and go back to selecting — so a tool is only
+    /// sticky while it is useful.
+    public func use(_ tool: BoardTool) {
+        guard self.tool != tool else { return }
+        self.tool = tool
+        // Only the select tool hovers, so anything the last one left behind
+        // has to go with it: a link handle from the previous hover would
+        // otherwise stay live over the board — above the creation tool's own
+        // surface, catching the drag meant for it — and a terminal would keep
+        // the scroll wheel it was only holding because the pointer was on it.
+        hover(nil)
+        // A creation tool takes the board over completely, and a selection
+        // drawn with the previous tool would keep drawing handles over a canvas
+        // that no longer answers to them.
+        if tool.isCreation { clearSelection() }
+    }
+
+    public func hover(_ id: NodeID?, edge: NodeEdge? = nil) {
+        guard hoveredNode != id || hoveredEdge != edge else { return }
+        hoveredNode = id
+        hoveredEdge = edge
+    }
+
+    /// Which live node, if any, the scroll wheel belongs to.
+    ///
+    /// The wheel pans the board, which is right almost everywhere — but it also
+    /// means a terminal can never be scrolled back through and a page can never
+    /// be scrolled down. This used to be answered by a 500ms dwell timer and a
+    /// floating "hold still to scroll" hint, which is a lot of machinery for a
+    /// question selection already answers: the node you clicked into is the one
+    /// you are working in, and it is the one that should take the wheel. Click
+    /// the board and the board has it back.
+    public var scrollingNode: NodeID? {
+        guard let hoveredNode, isSelected(hoveredNode),
+              graph.node(hoveredNode)?.hostsLiveContent == true else { return nil }
+        return hoveredNode
+    }
+
+    // MARK: - Stacking
+    //
+    // Nodes overlap: a terminal is four times the size of a session card and a
+    // board is arranged by hand. Whatever you last touched is on top, which is
+    // the only stacking rule that never needs explaining. It is not persisted —
+    // the board is rebuilt from the workspace on every launch, and a saved
+    // z-order would be one more thing that could disagree with it.
+
+    public func raise(_ id: NodeID?) {
+        guard let id else { return }
+        raisedAt += 1
+        raised[id] = raisedAt
+    }
+
+    /// Where a node sits in the stack. Zero for anything never touched, so an
+    /// untouched board draws in composition order exactly as it used to.
+    ///
+    /// A dictionary keyed by the id itself, not a list of storage keys: this
+    /// is asked once per node on every evaluation of the board's body, and
+    /// `storageKey` builds a `String` each time it is asked.
+    public func stackIndex(of id: NodeID) -> Double {
+        Double(raised[id] ?? 0)
+    }
+
+    // MARK: - Placement
+
     public func moveNode(_ id: NodeID, to position: CGPoint) {
+        let position = Self.placeable(position)
         if case .terminal(let terminalID) = id {
             moveTerminal(terminalID, to: position)
             return
@@ -103,13 +226,221 @@ extension MeshvyStore {
             moveBrowser(browserID, to: position)
             return
         }
+        pin(id, to: position)
+    }
+
+    /// Moves several nodes by one delta, touching the workspace once.
+    ///
+    /// Each `moveNode` on a terminal or a browser copies the whole `Workspace`
+    /// value, writes it back into the array and scans the graph — fine for one
+    /// node, but a group drag does it for every member of the selection on
+    /// every frame of the gesture. This does the same work in a single pass.
+    public func moveNodes(_ origins: [NodeID: CGPoint], by delta: CGSize) {
+        guard var workspace = activeWorkspace,
+              let slot = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
+        var moved: [NodeID: CGPoint] = [:]
+        // Only written back if something in it actually moved. A `Workspace` is
+        // a value holding every terminal, browser and repository, and the whole
+        // app shell reads the array it lives in — so putting it back on a frame
+        // where only cards moved redraws the sidebar, the top bar and the
+        // status bar sixty times a second for nothing.
+        var workspaceChanged = false
+        for (id, origin) in origins {
+            let position = Self.placeable(
+                CGPoint(x: origin.x + delta.width, y: origin.y + delta.height)
+            )
+            moved[id] = position
+            switch id {
+            case .terminal(let terminalID):
+                if let index = workspace.terminals.firstIndex(where: { $0.id == terminalID }) {
+                    workspace.terminals[index].position = position
+                    workspaceChanged = true
+                }
+            case .browser(let browserID):
+                if let index = workspace.browsers.firstIndex(where: { $0.id == browserID }) {
+                    workspace.browsers[index].position = position
+                    workspaceChanged = true
+                }
+            default:
+                pinned[id.storageKey] = position
+            }
+        }
+        if workspaceChanged { workspaces[slot] = workspace }
+        for (offset, node) in graph.nodes.enumerated() {
+            guard let position = moved[node.id] else { continue }
+            graph.nodes[offset].position = position
+            graph.nodes[offset].isPinned = true
+            // The node's own copy of the model carries the position too, and
+            // the views read it from there.
+            switch node.id {
+            case .terminal(let id):
+                if let terminal = workspace.terminals.first(where: { $0.id == id }) {
+                    graph.nodes[offset].kind = .terminal(terminal)
+                }
+            case .browser(let id):
+                if let browser = workspace.browsers.first(where: { $0.id == id }) {
+                    graph.nodes[offset].kind = .browser(browser)
+                }
+            default: break
+            }
+        }
+    }
+
+    /// Moves and resizes in one call, because a handle on a node's top or left
+    /// edge does both at once: the far edge stays where it is, which means the
+    /// origin moves as the size changes. Two calls would show the node jump.
+    public func place(_ id: NodeID, frame: CGRect) {
+        let size = CGSize(width: max(1, frame.width), height: max(1, frame.height))
+        let origin = Self.placeable(frame.origin)
+        switch id {
+        case .terminal(let terminalID):
+            moveTerminal(terminalID, to: origin, size: size)
+        case .browser(let browserID):
+            moveBrowser(browserID, to: origin, size: size)
+        case .workspace:
+            resizeWorkspaceNode(to: size)
+            pin(id, to: origin)
+        case .session, .subAgent, .worktree:
+            pin(id, to: origin)
+            sized[id.storageKey] = size
+            if let index = graph.nodes.firstIndex(where: { $0.id == id }) {
+                graph.nodes[index].size = size
+            }
+        }
+    }
+
+    /// Where a node may actually be put.
+    ///
+    /// `BoardComposer` reads a terminal or browser at exactly `.zero` as one it
+    /// has never placed, and lays it out itself. World origin is a real place —
+    /// it is the workspace node's own top-left — so a node dragged or snapped
+    /// to it would jump into the auto-layout column on the next rebuild. A
+    /// hundredth of a unit is invisible and is not `.zero`.
+    public static func placeable(_ position: CGPoint) -> CGPoint {
+        position == .zero ? CGPoint(x: 0.01, y: 0.01) : position
+    }
+
+    /// Pins a node where the user put it. Pinned nodes opt out of auto-layout
+    /// for good — see `BoardComposer.applyPinned`.
+    private func pin(_ id: NodeID, to position: CGPoint) {
+        pinned[id.storageKey] = position
         guard let index = graph.nodes.firstIndex(where: { $0.id == id }) else { return }
         graph.nodes[index].position = position
         graph.nodes[index].isPinned = true
-        pinned[id.storageKey] = position
+    }
+
+    /// Frames worth lining a dragged node up against: everything on the board
+    /// bar the nodes being dragged, and bar anything too far off screen to be
+    /// drawn, since a guide you cannot see is a pull you cannot explain.
+    public func snapTargets(excluding ids: [NodeID]) -> [CGRect] {
+        let visible = viewport.visibleWorldRect()
+        let moving = Set(ids.map(\.storageKey))
+        return graph.nodes
+            .filter { !moving.contains($0.id.storageKey) && $0.frame.intersects(visible) }
+            .map(\.frame)
     }
 
     public func commitMove() { persistLayout(); persistWorkspaces() }
+
+    /// Puts every selected node in front of everything else, keeping their
+    /// order relative to each other.
+    public func bringSelectionToFront() {
+        for id in selected { raise(id) }
+    }
+
+    /// Lays the selection out in a row, in the order it reads on the board now.
+    ///
+    /// The one tidy-up worth a button: a board of agents is dragged into place
+    /// by hand, and the thing you want after an hour of that is for six nodes
+    /// of different heights to share a top edge and an even gap.
+    public func tidySelection() {
+        let nodes = selectedNodes.sorted { $0.position.x < $1.position.x }
+        guard nodes.count > 1, let origin = CGRect.bounding(nodes.map(\.frame))?.origin else { return }
+        var x = origin.x
+        for node in nodes {
+            place(node.id, frame: CGRect(x: x, y: origin.y, width: node.size.width, height: node.size.height))
+            x += node.size.width + BoardMetrics.tidyGap
+        }
+        commitMove()
+    }
+
+    // MARK: - Removing
+
+    /// What ⌘⌫ does to the selection.
+    ///
+    /// One question for the whole of it, however many nodes are selected. The
+    /// obvious shape — loop, and let each node ask for itself — cannot work:
+    /// `confirmation` is a single value, so four running agents would raise
+    /// four questions, three of which overwrite each other, and answering the
+    /// survivor would silently close only one of the four.
+    ///
+    /// The cards are not closable at all. A session card *is* a transcript on
+    /// disk and a sub-agent card is a line in one, so there is nothing a
+    /// keystroke here could delete; the workspace node is the board itself.
+    /// Saying so is better than a key that does nothing.
+    public func requestRemoveSelection() {
+        let nodes = selectedNodes
+        guard !nodes.isEmpty else { return }
+
+        var terminals: [TerminalNode] = []
+        var browsers: [UUID] = []
+        var derived = 0
+        for node in nodes {
+            switch node.id {
+            case .terminal(let id):
+                if let terminal = activeWorkspace?.terminals.first(where: { $0.id == id }) {
+                    terminals.append(terminal)
+                }
+            case .browser(let id): browsers.append(id)
+            case .workspace, .worktree, .session, .subAgent: derived += 1
+            }
+        }
+
+        guard !terminals.isEmpty || !browsers.isEmpty else {
+            var detail = "Session and agent cards are read from transcripts on disk. "
+                + "Hide the finished ones with ⇧⌘E."
+            if nodes.count == 1, case .workspace = nodes[0].id {
+                detail = "The workspace node is the board itself. Archive the workspace to put it away."
+            }
+            show(.init(kind: .info, title: "Nothing to close there", detail: detail))
+            return
+        }
+
+        let close: () -> Void = { [weak self] in
+            guard let self else { return }
+            for terminal in terminals { self.closeTerminal(terminal.id) }
+            for browser in browsers { self.closeBrowser(browser) }
+        }
+
+        // A browser loses nothing but a page, and an exited terminal has
+        // nothing left to stop. Anything with a live process in it is worth a
+        // question — including a plain shell, which is where a dev server runs.
+        let live = terminals.filter { terminals_isRunning($0) }
+        guard !live.isEmpty else { return close() }
+
+        let agents = live.filter { $0.sessionID != nil }.count
+        let working = live.filter { activity(for: $0)?.state == .working }.count
+        let total = terminals.count + browsers.count
+        var message = agents > 0
+            ? "\(agents) \(agents == 1 ? "is an agent" : "are agents") and will stop. "
+                + "Transcripts stay on disk."
+            : "Whatever is running in \(live.count == 1 ? "it" : "them") stops."
+        if working > 0 {
+            message = "\(working) \(working == 1 ? "is" : "are") in the middle of a turn. " + message
+        }
+        confirmation = Confirmation(
+            title: total == 1
+                ? "Close “\(live.first?.title ?? "this")”?"
+                : "Close \(total) nodes?",
+            message: message,
+            action: total == 1 ? "Close" : "Close all \(total)",
+            run: close
+        )
+    }
+
+    /// Whether a terminal still has a process in it. A one-line helper so the
+    /// confirmation above reads as prose rather than as registry calls.
+    private func terminals_isRunning(_ node: TerminalNode) -> Bool { terminals.isRunning(node.id) }
 
     // MARK: - Links
     //
@@ -206,6 +537,9 @@ extension MeshvyStore {
 
     public func resetLayout() {
         pinned.removeAll()
+        sized.removeAll()
+        raised.removeAll()
+        raisedAt = 0
         if var workspace = activeWorkspace {
             for index in workspace.terminals.indices { workspace.terminals[index].position = .zero }
             for index in workspace.browsers.indices { workspace.browsers[index].position = .zero }
@@ -218,6 +552,7 @@ extension MeshvyStore {
 
     public func persistLayout() {
         saved.pinned = pinned.mapValues { SavedLayout.Point(x: $0.x, y: $0.y) }
+        saved.sizes = sized.mapValues { SavedLayout.Size(width: $0.width, height: $0.height) }
         saved.cameraX = viewport.center.x
         saved.cameraY = viewport.center.y
         saved.scale = viewport.scale

@@ -51,12 +51,12 @@ public struct SessionNodeView: View {
             content
         }
         .background(
-            RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .fill(isHovered ? Theme.surfaceRaised : Theme.surface)
         )
-        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .stroke(
                     isSelected ? Theme.accent : (status.isLive ? accent.opacity(0.35) : Theme.hairline),
                     lineWidth: isSelected ? max(1, zoom.s(1.6)) : max(0.5, zoom.s(0.8))

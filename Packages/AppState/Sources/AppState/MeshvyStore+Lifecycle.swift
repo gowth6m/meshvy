@@ -48,6 +48,7 @@ extension MeshvyStore {
         guard let stored = layoutStore.load() else { return }
         saved = stored
         pinned = stored.pinned.mapValues { CGPoint(x: $0.x, y: $0.y) }
+        sized = (stored.sizes ?? [:]).mapValues { CGSize(width: $0.width, height: $0.height) }
         showEndedSessions = stored.showEndedSessions
         invertScroll = stored.invertScroll
         sidebarWidth = min(max(stored.sidebarWidth, 200), 520)

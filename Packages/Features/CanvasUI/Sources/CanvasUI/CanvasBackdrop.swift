@@ -13,14 +13,17 @@ import SwiftUI
 public struct CanvasBackdrop: View {
     public var graph: CanvasGraph
     public var viewport: Viewport
-    public var selection: NodeID?
+    /// Storage keys of everything selected. A set, because the board can hold
+    /// several nodes at once now, and because comparing keys here is cheaper
+    /// than comparing enums once per node per frame.
+    public var selection: Set<String>
     public var matching: Set<String>
     public var isSearching: Bool
 
     public init(
         graph: CanvasGraph,
         viewport: Viewport,
-        selection: NodeID? = nil,
+        selection: Set<String> = [],
         matching: Set<String>,
         isSearching: Bool
     ) {
@@ -165,7 +168,7 @@ public struct CanvasBackdrop: View {
             if case .terminal = node.kind { continue }
             if case .browser = node.kind { continue }
             let rect = viewport.project(node.frame)
-            let corner = max(2, Theme.nodeCorner * viewport.scale)
+            let corner = max(2, Theme.Corner.node * viewport.scale)
             let path = Path(roundedRect: rect, cornerRadius: corner, style: .continuous)
             let dimmed = isSearching && !matching.contains(node.id.storageKey)
 
@@ -196,8 +199,8 @@ public struct CanvasBackdrop: View {
             context.fill(Path(roundedRect: rail, cornerRadius: corner * 0.5), with: .color(accent))
             context.stroke(
                 path,
-                with: .color(node.id == selection ? Theme.accent : Theme.hairline),
-                lineWidth: node.id == selection ? max(1, 2 * viewport.scale) : 0.6
+                with: .color(selection.contains(node.id.storageKey) ? Theme.accent : Theme.hairline),
+                lineWidth: selection.contains(node.id.storageKey) ? max(1, 2 * viewport.scale) : 0.6
             )
             context.opacity = 1
         }

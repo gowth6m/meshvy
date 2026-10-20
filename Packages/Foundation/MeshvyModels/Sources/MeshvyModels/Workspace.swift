@@ -28,9 +28,15 @@ public struct Workspace: Identifiable, Codable, Hashable {
     /// Links drawn by hand between two nodes. The composer derives every other
     /// edge from the shape of the workspace; these are the ones you decide.
     public var links: [WorkspaceLink] = []
-    /// Size of the workspace node on the board.
+    /// Size of the workspace node on the board while an orchestrator is
+    /// running in it.
     public var boardWidth: Double = 780
     public var boardHeight: Double = 520
+    /// Height it takes when nothing is running in it, where it shows a start
+    /// prompt rather than a terminal. Its own field because the two states hold
+    /// different things and want different room: resize the node you can see
+    /// and it stays that size, without quietly rewriting the other one.
+    public var idleBoardHeight: Double = Workspace.idleHeight
     public var createdAt: Date = Date()
     public var notes: String?
     /// Set when the workspace has been archived: the worktrees stay exactly
@@ -42,7 +48,8 @@ public struct Workspace: Identifiable, Codable, Hashable {
     public var isArchived: Bool { archivedAt != nil }
     /// Every terminal on the board, orchestrator included.
     public var allTerminals: [TerminalNode] { (orchestrator.map { [$0] } ?? []) + terminals }
-    /// Height the node collapses to when no orchestrator is running.
+    /// Height the node collapses to when no orchestrator is running, before
+    /// anyone has resized it.
     public static let idleHeight: Double = 186
     public var worktreePaths: [String] { readyRepos.map(\.worktreePath) }
 
@@ -90,6 +97,7 @@ public struct Workspace: Identifiable, Codable, Hashable {
         browsers = fields.value(.browsers, or: [])
         boardWidth = fields.value(.boardWidth, or: 780)
         boardHeight = fields.value(.boardHeight, or: 520)
+        idleBoardHeight = fields.value(.idleBoardHeight, or: Workspace.idleHeight)
         createdAt = fields.value(.createdAt, or: Date())
         notes = fields.optional(String.self, .notes)
         archivedAt = fields.optional(Date.self, .archivedAt)

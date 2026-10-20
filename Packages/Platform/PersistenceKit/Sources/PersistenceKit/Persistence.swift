@@ -44,8 +44,8 @@ public struct FileStore<Value: Codable> {
     }
 }
 
-/// Node positions the user has dragged, plus the camera, so the board reopens
-/// exactly as it was left.
+/// Node positions and sizes the user has dragged, plus the camera, so the board
+/// reopens exactly as it was left.
 public struct SavedLayout: Codable {
     public struct Point: Codable {
         public var x: Double
@@ -57,8 +57,29 @@ public struct SavedLayout: Codable {
         }
     }
 
+    /// A card's size, once the user has chosen one. Terminals and browsers keep
+    /// theirs on the `Workspace` model instead, because the process behind them
+    /// belongs to the workspace and not to a layout file that can be thrown
+    /// away without losing anything.
+    public struct Size: Codable {
+        public var width: Double
+        public var height: Double
+
+        public init(width: Double, height: Double) {
+            self.width = width
+            self.height = height
+        }
+    }
+
     public var version: Int = 1
     public var pinned: [String: Point] = [:]
+    /// Sizes for the cards the user has resized. Optional, and for the same
+    /// reason as `effort` below: a synthesised `Decodable` asks for every
+    /// non-optional key whatever default it was given, so adding one as a plain
+    /// dictionary would make every layout saved before resizing existed fail to
+    /// decode — and a layout that fails to decode is a board that opens with
+    /// the camera, the panel widths and every pinned node forgotten.
+    public var sizes: [String: Size]?
     public var cameraX: Double = 0
     public var cameraY: Double = 0
     public var scale: Double = 1
@@ -80,6 +101,7 @@ public struct SavedLayout: Codable {
     public init(
         version: Int = 1,
         pinned: [String: Point] = [:],
+        sizes: [String: Size]? = nil,
         cameraX: Double = 0,
         cameraY: Double = 0,
         scale: Double = 1,
@@ -96,6 +118,7 @@ public struct SavedLayout: Codable {
     ) {
         self.version = version
         self.pinned = pinned
+        self.sizes = sizes
         self.cameraX = cameraX
         self.cameraY = cameraY
         self.scale = scale

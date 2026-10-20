@@ -218,28 +218,6 @@ extension MeshvyStore {
 
     public func isUnread(_ id: UUID) -> Bool { unread.contains(id) }
 
-    // MARK: - The hover guard
-    //
-    // The wheel pans the canvas, which is right almost everywhere — but it also
-    // means a terminal can never be scrolled back through, and a page can never
-    // be scrolled down. Resting the pointer on one hands it the wheel until the
-    // pointer leaves. Terminals and browsers share this, since node ids are
-    // unique across both.
-
-    public func hoverTerminal(_ id: UUID?) {
-        guard hoveredTerminal != id else { return }
-        hoveredTerminal = id
-        armTask?.cancel()
-        armedTerminal = nil
-        guard let id else { return }
-        armTask = Task { [weak self] in
-            try? await Task.sleep(for: MeshvyStore.armDelay)
-            guard !Task.isCancelled else { return }
-            guard let self, self.hoveredTerminal == id else { return }
-            self.armedTerminal = id
-        }
-    }
-
     /// Agents stopped on something only you can answer.
     public var agentsNeedingYou: [TerminalNode] {
         (activeWorkspace?.allTerminals ?? []).filter { activity(for: $0)?.state == .blocked }

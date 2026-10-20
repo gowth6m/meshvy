@@ -2,6 +2,7 @@ import AppKit
 import AppState
 import BrowserKit
 import DesignSystem
+import MeshvyCore
 import MeshvyModels
 import SwiftUI
 import WebKit
@@ -19,22 +20,19 @@ public struct BrowserNodeView: View {
     public var zoom: Zoom
     public var isSelected: Bool
     public var isDimmed: Bool
-    public var onResize: (CGSize) -> Void
 
     public init(
         node: BrowserNode,
         store: MeshvyStore,
         zoom: Zoom,
         isSelected: Bool,
-        isDimmed: Bool,
-        onResize: @escaping (CGSize) -> Void
+        isDimmed: Bool
     ) {
         self.node = node
         self.store = store
         self.zoom = zoom
         self.isSelected = isSelected
         self.isDimmed = isDimmed
-        self.onResize = onResize
     }
 
     @State private var typedURL = ""
@@ -56,19 +54,22 @@ public struct BrowserNodeView: View {
             // Below half scale the address bar is a row of mush, and the body
             // has already given up on drawing the page — so the card keeps its
             // header and says where it is pointed instead.
-            if zoom.scale > 0.5 {
+            if zoom.showsLiveContent {
                 addressBar
                 Divider().overlay(Theme.hairline)
             }
+            // Same band as every other node: see `TerminalNodeView`.
             content
+                .padding(.horizontal, zoom.s(CanvasGeometry.borderGrab))
+                .padding(.bottom, zoom.s(CanvasGeometry.borderGrab))
         }
         .background(
-            RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .fill(Theme.canvasDeep)
         )
-        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .stroke(
                     isSelected ? Theme.accent : accent.opacity(0.4),
                     lineWidth: isSelected ? max(1, zoom.s(1.8)) : max(0.5, zoom.s(1))
@@ -76,8 +77,6 @@ public struct BrowserNodeView: View {
         )
         .shadow(color: .black.opacity(isSelected ? 0.55 : 0.35), radius: zoom.s(isSelected ? 18 : 10), y: zoom.s(5))
         .opacity(isDimmed ? 0.25 : 1)
-        .overlay(alignment: .bottomTrailing) { resizeGrip }
-        .overlay(alignment: .bottom) { scrollHint }
         .onAppear {
             typedURL = node.url
             // A board restored from disk has the node but not the engine; this
@@ -143,7 +142,7 @@ public struct BrowserNodeView: View {
             .help("Close browser")
         }
         .padding(.horizontal, zoom.s(10))
-        .frame(height: zoom.s(28))
+        .frame(height: zoom.c(BoardMetrics.Chrome.header))
         .background(Theme.chrome)
     }
 
@@ -189,7 +188,7 @@ public struct BrowserNodeView: View {
             }
         }
         .padding(.horizontal, zoom.s(8))
-        .frame(height: zoom.s(30))
+        .frame(height: zoom.c(BoardMetrics.Chrome.addressBar))
         .background(Theme.chrome.opacity(0.7))
     }
 
@@ -212,7 +211,7 @@ public struct BrowserNodeView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let session, !isSnapshot, zoom.scale > 0.5 {
+        if let session, !isSnapshot, zoom.showsLiveContent {
             BrowserSurface(session: session, scale: zoom.scale)
         } else if let poster = session?.poster, isSnapshot {
             // A documentation shot of a browser that showed a globe would be a
@@ -248,42 +247,6 @@ public struct BrowserNodeView: View {
         .padding(zoom.s(12))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasDeep)
-    }
-
-    /// The wheel pans the canvas until the pointer has rested on a node, which
-    /// matters more for a page than for a terminal — most of what you want to
-    /// look at is below the fold. Same dwell as the terminals.
-    @ViewBuilder
-    private var scrollHint: some View {
-        if store.hoveredTerminal == node.id, store.armedTerminal != node.id, zoom.scale > 0.5 {
-            Text("hold still to scroll the page")
-                .font(zoom.font(8.5, .medium))
-                .foregroundStyle(Theme.textTertiary)
-                .padding(.horizontal, zoom.s(6))
-                .padding(.vertical, zoom.s(2))
-                .background(Capsule().fill(Theme.chrome.opacity(0.9)))
-                .padding(.bottom, zoom.s(6))
-                .transition(.opacity)
-                .allowsHitTesting(false)
-        }
-    }
-
-    private var resizeGrip: some View {
-        Image(systemName: "arrow.down.right")
-            .font(zoom.font(8, .bold))
-            .foregroundStyle(Theme.textTertiary)
-            .padding(zoom.s(4))
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        onResize(CGSize(
-                            width: max(320, node.size.width + value.translation.width / zoom.scale),
-                            height: max(240, node.size.height + value.translation.height / zoom.scale)
-                        ))
-                    }
-                    .onEnded { _ in store.commitTerminalMove() }
-            )
     }
 }
 

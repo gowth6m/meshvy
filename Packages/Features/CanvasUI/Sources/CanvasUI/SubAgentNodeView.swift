@@ -52,12 +52,12 @@ public struct SubAgentNodeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(
-            RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .fill(Theme.surface)
         )
-        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .stroke(isSelected ? Theme.accent : tint.opacity(0.3), lineWidth: isSelected ? max(1, zoom.s(1.6)) : max(0.5, zoom.s(0.8)))
         )
         .opacity(isDimmed ? 0.22 : 1)

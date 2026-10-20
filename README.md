@@ -231,6 +231,7 @@ line it matched — the one thing the canvas cannot tell you.
 
 | | |
 |---|---|
+| Tools | Select V · Hand H · Agent A · Shell S · Browser B |
 | Command palette | ⌘K |
 | New workspace | ⇧⌘N |
 | Add repositories | ⇧⌘O |
@@ -240,18 +241,31 @@ line it matched — the one thing the canvas cannot tell you.
 | Archive the workspace | ⌥⌘A |
 | Next agent waiting on you | ⌥⌘N |
 | Find | ⌘F · frame the hits ⇧⌘F · clear Esc |
-| Fit to content | ⌘0 · actual size ⌘1 · zoom ⌘+ / ⌘− |
+| Fit to content | ⌘0 · actual size ⌘1 · frame the selection ⌘2 · zoom ⌘+ / ⌘− |
+| Select everything · close what is selected | ⌘A · ⌘⌫ |
 | Toggle sidebar / inspector | ⌥⌘S / ⌥⌘I |
 | Refresh everything | ⌘R · git only ⇧⌘R |
 | Keyboard shortcuts | ⌘/ |
 
-Pan by dragging empty canvas or scrolling; zoom with ⌘-scroll or a pinch.
-Resting the pointer on a terminal or a browser for half a second hands it the
-wheel, so a scrollback is reachable and a page can be scrolled — zoom stays the
-canvas's. Drag any node by its title bar, resize from the corner grip,
-double-click one to centre it, and drag the side panels from their inner edge.
-Scrolling follows the system "natural scrolling" preference;
-**View → Invert Scroll Direction** if you want the opposite.
+**The board.** Drag empty canvas to draw a box around nodes and select them;
+hold space, use the hand tool or scroll to pan; ⌘-scroll or pinch to zoom.
+Pick the agent, shell or browser tool and drag out a rectangle where you want
+the new one, or click to drop one at its usual size.
+
+**A node.** Drag it by its header or by the band just inside its edge — the
+inside of a terminal or a page stays the node's own, including its clicks, its
+text selection and its keyboard. Eight handles resize whatever is selected,
+and the new size is drawn as an outline until you let go. Bring the pointer
+near any edge and a `+` appears on each of the four sides: drag one onto
+another node to tell that node what this one is doing. Dragging lines a node up
+with its neighbours and draws the guide; ⌘ ignores it. ⇧-click adds to the
+selection, arrows nudge, ⌘⌫ closes, right-click has the rest — including
+taking a link off again.
+
+The node you click into keeps the scroll wheel, so a terminal's scrollback and
+a page both scroll; the board pans everywhere else. Scrolling follows the
+system "natural scrolling" preference; **View → Invert Scroll Direction** if
+you want the opposite.
 
 Cards thin out as you zoom out rather than turning to mush: below 62% they keep
 a title and a status line, and below 30% they are a coloured block. A terminal

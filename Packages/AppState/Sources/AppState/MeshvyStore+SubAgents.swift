@@ -55,12 +55,17 @@ extension MeshvyStore {
         openTerminal(role: node.role, repoID: node.repoID)
     }
 
-    /// Persists a terminal's placement after a drag or resize.
     /// Resizes the workspace node itself.
+    ///
+    /// Which height this sets depends on what is in the node: it collapses to a
+    /// start prompt when no orchestrator is running, and the two states keep
+    /// their own height. Without that, dragging the collapsed node taller wrote
+    /// a number nothing read, and the node sprang back the moment you let go.
     public func resizeWorkspaceNode(to size: CGSize) {
         guard var workspace = activeWorkspace else { return }
         workspace.boardWidth = size.width
-        workspace.boardHeight = size.height
+        if isOrchestratorRunning { workspace.boardHeight = size.height }
+        else { workspace.idleBoardHeight = size.height }
         guard let position = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
         workspaces[position] = workspace
         if let node = graph.nodes.firstIndex(where: { $0.id == .workspace(workspace.id) }) {

@@ -121,7 +121,7 @@ public struct AgentStatusStrip: View {
         }
         .foregroundStyle(tint)
         .padding(.horizontal, zoom.s(10))
-        .frame(height: zoom.s(18))
+        .frame(height: zoom.c(BoardMetrics.Chrome.statusStrip))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tint.opacity(activity?.state == .waiting || activity == nil ? 0.04 : 0.09))
     }

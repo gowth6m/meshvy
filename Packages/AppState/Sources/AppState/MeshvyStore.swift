@@ -67,7 +67,36 @@ public final class MeshvyStore {
 
     // MARK: View state
     public var viewport = Viewport()
-    public var selection: NodeID?
+
+    /// What is selected on the board, oldest first. The board lets you take
+    /// hold of several nodes at once and move them together, so selection has
+    /// to be a set — but the inspector can only show one thing, and everything
+    /// that reveals a node (the sidebar, the palette, ⌥⌘N) means one thing by
+    /// it. `selection` below is that one thing: the last node added, which is
+    /// the one the user touched most recently.
+    public internal(set) var selected: [NodeID] = [] {
+        didSet { selectedKeys = Set(selected) }
+    }
+
+    /// The same thing as a set, kept alongside purely so membership is a
+    /// lookup. `isSelected` is asked once per node on every evaluation of the
+    /// board's body, so with the whole board selected the array form made that
+    /// quadratic — and the board's body runs whenever the hover moves.
+    private var selectedKeys: Set<NodeID> = []
+
+    /// The node the panels follow — the most recently selected. Writing it
+    /// replaces the whole selection, which is what every caller outside the
+    /// canvas means by setting it.
+    public var selection: NodeID? {
+        get { selected.last }
+        set { selected = newValue.map { [$0] } ?? [] }
+    }
+
+    public func isSelected(_ id: NodeID) -> Bool { selectedKeys.contains(id) }
+    /// True while more than one node is selected, so a view can say so rather
+    /// than drawing one node's chrome over a group.
+    public var hasMultipleSelected: Bool { selected.count > 1 }
+
     public var searchQuery = "" { didSet { recomputeMatches() } }
     public internal(set) var matchingNodes: Set<String> = []
     /// ⌘F asks for the sidebar's search field. A flag the sidebar clears once
@@ -99,16 +128,19 @@ public final class MeshvyStore {
     /// be retuned in a running session, with `/effort`.
     public var agentEffort = AgentEffort.inherit { didSet { persistLayout() } }
 
-    /// Terminal the pointer is over, and the one it has dwelled on long enough
-    /// to be handed the scroll wheel. Nil means the canvas keeps panning.
-    public internal(set) var hoveredTerminal: UUID?
-    public internal(set) var armedTerminal: UUID?
-    public var armTask: Task<Void, Never>?
+    /// What a drag on the board does. The board's one mode, and the only one
+    /// you can see — see `BoardTool`.
+    public var tool = BoardTool.select
 
-    /// How long the pointer has to rest on a terminal before it takes the
-    /// wheel. Long enough that flicking across the board never scrolls one by
-    /// accident, short enough not to feel like waiting.
-    public static let armDelay = Duration.milliseconds(500)
+    /// The node the pointer is over, and which of its edges it is nearest, if
+    /// it is near one at all.
+    ///
+    /// Held here rather than in the canvas because three things read it: the
+    /// frame that draws the link handles, the scroll monitor deciding whether
+    /// the wheel belongs to a terminal, and the snapshot harness, which has no
+    /// pointer and has to be able to stage the hover for a documentation shot.
+    public internal(set) var hoveredNode: NodeID?
+    public internal(set) var hoveredEdge: NodeEdge?
 
     public internal(set) var isIndexing = false
     public internal(set) var isLoadingGit = false
@@ -188,6 +220,14 @@ public final class MeshvyStore {
 
     public var saved = SavedLayout()
     public var pinned: [String: CGPoint] = [:]
+    /// Sizes for the cards the user has resized, keyed like `pinned`.
+    /// Terminals and browsers are not in here — their size lives on the
+    /// `Workspace`, beside the process it belongs to.
+    public var sized: [String: CGSize] = [:]
+    /// How recently each node was brought to the front. Not persisted — see
+    /// the stacking note in `MeshvyStore+Graph`.
+    public internal(set) var raised: [NodeID: Int] = [:]
+    public internal(set) var raisedAt = 0
     public var watchers: [DirectoryWatcher] = []
     public var bridgeWatcher: DirectoryWatcher?
     public var hookWatcher: DirectoryWatcher?

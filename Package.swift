@@ -127,7 +127,7 @@ let package = Package(
         .meshvy("AgentsUI", tier: "Features",
                 deps: ["AppState", "DesignSystem", "MeshvyModels", "AgentKit"]),
         .meshvy("CanvasUI", tier: "Features",
-                deps: ["AppState", "DesignSystem", "MeshvyModels", "TerminalKit",
+                deps: ["AppState", "DesignSystem", "MeshvyCore", "MeshvyModels", "TerminalKit",
                        "BrowserKit", "AgentKit", "AgentsUI"]),
         .meshvy("InspectorUI", tier: "Features",
                 deps: ["AppState", "DesignSystem", "MeshvyModels", "AgentKit", "SessionKit"]),

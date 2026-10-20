@@ -2,12 +2,12 @@ import AppState
 import DesignSystem
 import SwiftUI
 
-/// ⌘/ — the keys, in one place.
+/// ⌘/ — the keys and the gestures, in one place.
 ///
-/// A canvas has gestures you cannot discover by looking at it: that the wheel
-/// pans, that a terminal takes the wheel once you rest on it, that ⇧⇥ inside a
-/// session still cycles its permission mode. This is where those are written
-/// down.
+/// Most of the board teaches itself now — the tools are on a palette, the
+/// handles appear under the pointer — so what is left here is the half that
+/// cannot be seen: the keys, and the rules about which node owns the wheel and
+/// the keyboard.
 public struct ShortcutsSheet: View {
     @Bindable public var store: MeshvyStore
 
@@ -25,15 +25,23 @@ public struct ShortcutsSheet: View {
 
     private var sections: [Section] {
         [
-            Section(title: "Board", rows: [
-                Row(keys: "⌘K", what: "Command palette — agents, nodes, terminal output"),
-                Row(keys: "⌘F", what: "Find on the board; ⇧⌘F frames the hits"),
-                Row(keys: "esc in the search", what: "Clear it and hand the board back"),
-                Row(keys: "⇧⌘N", what: "New workspace"),
-                Row(keys: "⇧⌘O", what: "Add repositories"),
-                Row(keys: "⌥⌘A", what: "Archive the workspace — keeps every worktree"),
-                Row(keys: "⌘R", what: "Refresh everything; ⇧⌘R git only"),
-                Row(keys: "⌘/", what: "This list")
+            Section(title: "The board", rows: [
+                Row(keys: "V · H", what: "Select · hand. Esc always comes back to Select"),
+                Row(keys: "A · S · B", what: "Draw a new agent · shell · browser, then drag out its size"),
+                Row(keys: "drag empty space", what: "Draw a box around nodes to select them; ⇧ adds to the selection"),
+                Row(keys: "space · scroll", what: "Pan. ⌘-scroll or pinch to zoom"),
+                Row(keys: "⌘0 · ⌘1", what: "Fit to content · actual size"),
+                Row(keys: "⌘A", what: "Select everything on the board")
+            ]),
+            Section(title: "A node", rows: [
+                Row(keys: "drag its header or edge", what: "Move it. Everything inside stays the node's own"),
+                Row(keys: "drag a handle", what: "Resize it — eight of them, on anything that is selected"),
+                Row(keys: "hover an edge", what: "A pink + appears on each side; drag one onto another node to link them"),
+                Row(keys: "⌘ while dragging", what: "Ignore the alignment guides"),
+                Row(keys: "arrows · ⇧arrows", what: "Nudge by one · ten"),
+                Row(keys: "⌘⌫", what: "Close what is selected. Never plain ⌫ — that belongs to whatever you are typing in"),
+                Row(keys: "right-click", what: "Everything else a node can do — restart, reveal, copy, unlink, close"),
+                Row(keys: "double-click a card", what: "Centre it")
             ]),
             Section(title: "Agents", rows: [
                 Row(keys: "⇧⌘T", what: "Start or focus the orchestrator"),
@@ -42,28 +50,24 @@ public struct ShortcutsSheet: View {
                 Row(keys: "⌥⌘N", what: "Jump to the next agent that needs you"),
                 Row(keys: "the pill on a card", what: "Model, effort and permission mode — remembered for the next one")
             ]),
-            Section(title: "Browsers", rows: [
-                Row(keys: "⌘B", what: "New browser on the board"),
-                Row(keys: "rest the pointer", what: "Hands the page the scroll wheel"),
+            Section(title: "Terminals and browsers", rows: [
+                Row(keys: "click into one", what: "Type into it. It keeps the keyboard until you click elsewhere"),
+                Row(keys: "scroll inside it", what: "Its own scrollback or page — the board pans everywhere else"),
                 Row(keys: "⏎ in the address bar", what: "Go — a bare localhost:3000 is enough"),
-                Row(keys: "browser_* tools", what: "What an agent drives it with; the id is in the header")
+                Row(keys: "browser_* tools", what: "What an agent drives a browser with; the id is in its header")
             ]),
-            Section(title: "Canvas", rows: [
-                Row(keys: "drag · scroll", what: "Pan"),
-                Row(keys: "⌘-scroll · pinch", what: "Zoom"),
-                Row(keys: "⌘0 · ⌘1", what: "Fit to content · actual size"),
-                Row(keys: "double-click", what: "Centre a node"),
-                Row(keys: "drag the header", what: "Move a node; the corner grip resizes it"),
-                Row(keys: "right-click", what: "Everything else a node can do — restart, reveal, copy, close")
+            Section(title: "Finding things", rows: [
+                Row(keys: "⌘K", what: "Command palette — agents, nodes, terminal output"),
+                Row(keys: "⌘F", what: "Find on the board; ⇧⌘F frames the hits"),
+                Row(keys: "esc in the search", what: "Clear it and hand the board back"),
+                Row(keys: "⌘R", what: "Refresh everything; ⇧⌘R git only")
             ]),
-            Section(title: "Terminals", rows: [
-                Row(keys: "rest the pointer", what: "Hands the terminal the scroll wheel"),
-                Row(keys: "click", what: "Type into it"),
-                Row(keys: "⌘C", what: "Copy the selection")
-            ]),
-            Section(title: "Panels", rows: [
+            Section(title: "Workspaces and panels", rows: [
+                Row(keys: "⇧⌘N · ⇧⌘O", what: "New workspace · add repositories"),
+                Row(keys: "⌥⌘A", what: "Archive the workspace — keeps every worktree"),
                 Row(keys: "⌥⌘S · ⌥⌘I", what: "Sidebar · inspector"),
-                Row(keys: "drag the inner edge", what: "Resize a panel")
+                Row(keys: "drag the inner edge", what: "Resize a panel"),
+                Row(keys: "⌘/", what: "This list")
             ])
         ]
     }

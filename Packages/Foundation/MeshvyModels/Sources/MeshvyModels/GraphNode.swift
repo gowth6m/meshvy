@@ -85,6 +85,58 @@ public struct CanvasNode: Identifiable {
 
     public var frame: CGRect { CGRect(origin: position, size: size) }
 
+    /// Whether this node hosts a live AppKit view — a PTY or a web page.
+    ///
+    /// The distinction is the one the canvas keeps asking about, so it is
+    /// answered here once rather than by a `switch` in each gesture. Live nodes
+    /// are never unmounted, they keep their own clicks and keyboard focus, and
+    /// their body is not something a drag may take hold of.
+    public var hostsLiveContent: Bool {
+        switch kind {
+        case .terminal, .workspace, .browser: return true
+        case .session, .subAgent: return false
+        }
+    }
+
+    /// How much of this node's top is chrome rather than live content.
+    ///
+    /// It is the part the scroll wheel must not reach through on its way to a
+    /// terminal's scrollback or a page, and the part a drag may always take
+    /// hold of. One answer, derived from the same constants the views lay
+    /// themselves out with, so the two can never disagree about where a node's
+    /// own surface begins.
+    public var chromeHeight: CGFloat {
+        let rule = BoardMetrics.Chrome.rule
+        switch kind {
+        case .terminal(let terminal):
+            // A plain shell draws no status strip: it has no agent to report.
+            return terminal.sessionID == nil
+                ? BoardMetrics.Chrome.header + rule
+                : BoardMetrics.Chrome.header + rule + BoardMetrics.Chrome.statusStrip + rule
+        case .workspace(let workspace):
+            let top = BoardMetrics.Chrome.workspaceHeader + BoardMetrics.Chrome.repoStrip + rule
+            // The strip only appears once something is running in the node.
+            guard workspace.orchestrator != nil else { return top }
+            return top + BoardMetrics.Chrome.statusStrip + rule
+        case .browser:
+            return BoardMetrics.Chrome.header + rule + BoardMetrics.Chrome.addressBar + rule
+        case .session, .subAgent:
+            // A card is all content; there is nothing live underneath to guard.
+            return 0
+        }
+    }
+
+    /// How small this node may be dragged. Every node is resizable, and no two
+    /// kinds stop in the same place — see `BoardMetrics`.
+    public var minimumSize: CGSize {
+        switch kind {
+        case .terminal: return BoardMetrics.minimumTerminal
+        case .browser: return BoardMetrics.minimumBrowser
+        case .workspace: return BoardMetrics.minimumWorkspace
+        case .session, .subAgent: return BoardMetrics.minimumCard
+        }
+    }
+
     public var searchText: String {
         switch kind {
         case .session(let s, _, let live):
