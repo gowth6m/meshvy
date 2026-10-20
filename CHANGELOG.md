@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-20
+
 - **The board works the way a canvas works.** Every node — a session card, a
   sub-agent, a terminal, a browser, the workspace itself — can now be moved,
   resized and linked by the same gestures, and what each gesture does is
