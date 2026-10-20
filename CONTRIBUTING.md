@@ -51,13 +51,33 @@ BIN=dist/Meshvy.app/Contents/MacOS/Meshvy   # or .build/debug/Meshvy
 
 $BIN --formattest            # decodes a board saved by an older version
 $BIN --difftest .            # parses a real `git diff` (needs a dirty tree)
+$BIN --canvastest            # the board's own handling (needs a workspace open)
 $BIN --perftest              # loads your biggest transcript, times it
 $BIN --launchtest            # boots far enough to compose a board
 $BIN --hooktest              # drives the real `claude`, checks status hooks
 $BIN --selftest <repo>...    # builds a workspace, runs agents, tears it down
 ```
 
-The last two cost money, because they run actual agents. CI runs the first two.
+The last two cost money, because they run actual agents. CI runs the first two;
+the rest want a developer machine.
+
+`--canvastest` is the one to reach for if you are on Command Line Tools only,
+because it covers the same ground as `MeshvyCoreTests` and then keeps going
+into the store, the `Workspace` model and `layout.json` — which is the half a
+suite that never executes cannot tell you anything about. It needs a board, so
+give it a throwaway one and a throwaway home to keep it in; every
+`NSHomeDirectory()` lookup moves with the latter, so your own workspaces are
+out of its reach:
+
+```sh
+SB="$PWD/.build/sandbox"
+CFFIXED_USER_HOME="$SB" $BIN --selftest /path/to/repo --keep --name Scratch
+CFFIXED_USER_HOME="$SB" $BIN --canvastest
+```
+
+Keep that sandbox under the git-ignored `.build/` rather than `/tmp`:
+Foundation reports `/tmp/...` where git reports `/private/tmp/...`, so worktree
+paths stop matching and every repository card shows a dash for its branch.
 
 ## How the code is laid out
 

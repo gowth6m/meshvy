@@ -30,6 +30,20 @@ extension MeshvyStore {
         persistLayout()
     }
 
+    /// Frames whatever is selected. On a board bigger than the screen this is
+    /// the quickest way back to the thing you were working on, and it is what
+    /// every other canvas binds to the same key.
+    public func zoomToSelection() {
+        // `boardNode(for:)` and not `graph.node`: a repository has no node of
+        // its own — it is a chip on the workspace node — so looking it up in
+        // the graph finds nothing, and an empty selection would quietly frame
+        // the whole board instead of the thing you selected.
+        let frames = selected.compactMap { boardNode(for: $0)?.frame }
+        guard let rect = CGRect.bounding(frames.isEmpty ? graph.nodes.map(\.frame) : frames) else { return }
+        withAnimation(.easeOut(duration: 0.25)) { viewport.fit(rect, margin: 120) }
+        persistLayout()
+    }
+
     public func focusMatches() {
         let targets = isSearching ? graph.nodes.filter { matches($0.id) } : graph.nodes
         guard let rect = CGRect.bounding(targets.map(\.frame)) else { return }

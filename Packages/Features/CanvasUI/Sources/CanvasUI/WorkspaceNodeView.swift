@@ -2,6 +2,7 @@ import AgentsUI
 import AppKit
 import AppState
 import DesignSystem
+import MeshvyCore
 import MeshvyModels
 import SwiftUI
 import TerminalKit
@@ -21,20 +22,17 @@ public struct WorkspaceNodeView: View {
     @Bindable public var store: MeshvyStore
     public var zoom: Zoom
     public var isSelected: Bool
-    public var onResize: (CGSize) -> Void
 
     public init(
         workspace: Workspace,
         store: MeshvyStore,
         zoom: Zoom,
-        isSelected: Bool,
-        onResize: @escaping (CGSize) -> Void
+        isSelected: Bool
     ) {
         self.workspace = workspace
         self.store = store
         self.zoom = zoom
         self.isSelected = isSelected
-        self.onResize = onResize
     }
 
     private var orchestrator: TerminalNode? { workspace.orchestrator }
@@ -59,15 +57,18 @@ public struct WorkspaceNodeView: View {
                 AgentStatusStrip(activity: activity, fallback: workspace.root, zoom: zoom)
                 Divider().overlay(Theme.hairline)
             }
+            // Same band as every other node: see `TerminalNodeView`.
             body(for: liveSession)
+                .padding(.horizontal, zoom.s(CanvasGeometry.borderGrab))
+                .padding(.bottom, zoom.s(CanvasGeometry.borderGrab))
         }
         .background(
-            RoundedRectangle(cornerRadius: zoom.s(14), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .fill(Theme.surfaceSunken)
         )
-        .clipShape(RoundedRectangle(cornerRadius: zoom.s(14), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: zoom.s(14), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .stroke(
                     activity?.state == .blocked ? Theme.needsYou
                         : (isSelected ? Theme.accent : Theme.accent.opacity(isRunning ? 0.5 : 0.25)),
@@ -75,7 +76,6 @@ public struct WorkspaceNodeView: View {
                 )
         )
         .shadow(color: .black.opacity(0.5), radius: zoom.s(20), y: zoom.s(8))
-        .overlay(alignment: .bottomTrailing) { resizeGrip }
     }
 
     // MARK: Header
@@ -128,7 +128,7 @@ public struct WorkspaceNodeView: View {
             }
         }
         .padding(.horizontal, zoom.s(12))
-        .frame(height: zoom.s(42))
+        .frame(height: zoom.c(BoardMetrics.Chrome.workspaceHeader))
     }
 
     /// Which repositories belong to this workspace, and how each one is doing.
@@ -182,7 +182,11 @@ public struct WorkspaceNodeView: View {
                 .foregroundStyle(Theme.textTertiary)
         }
         .padding(.horizontal, zoom.s(12))
-        .padding(.bottom, zoom.s(9))
+        // A fixed height rather than whatever the chips add up to: the canvas
+        // works out where this node's live terminal starts from the same
+        // number, and a strip that grew with its content would move that line
+        // without telling it. See `CanvasNode.chromeHeight`.
+        .frame(height: zoom.c(BoardMetrics.Chrome.repoStrip))
     }
 
     // MARK: Body
@@ -191,7 +195,7 @@ public struct WorkspaceNodeView: View {
     private func body(for session: TerminalSession?) -> some View {
         if let session, isSnapshot {
             TerminalSnapshotText(session: session, zoom: zoom)
-        } else if let session, zoom.scale > 0.45 {
+        } else if let session, zoom.showsLiveContent {
             TerminalSurface(session: session, scale: zoom.scale)
         } else if session != nil {
             zoomedOutPlaceholder
@@ -262,29 +266,10 @@ public struct WorkspaceNodeView: View {
             .padding(.horizontal, zoom.s(14))
             .padding(.vertical, zoom.s(7))
             .background(
-                RoundedRectangle(cornerRadius: zoom.s(7), style: .continuous)
+                RoundedRectangle(cornerRadius: zoom.s(6), style: .continuous)
                     .fill(prominent ? Theme.accent : Theme.fill)
             )
         }
         .buttonStyle(.plain)
-    }
-
-    private var resizeGrip: some View {
-        Image(systemName: "arrow.down.right")
-            .font(zoom.font(8, .bold))
-            .foregroundStyle(Theme.textTertiary)
-            .padding(zoom.s(5))
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        onResize(CGSize(
-                            width: max(420, workspace.boardWidth + value.translation.width / zoom.scale),
-                            height: max(260, workspace.boardHeight + value.translation.height / zoom.scale)
-                        ))
-                    }
-                    .onEnded { _ in store.commitTerminalMove() }
-            )
-            .opacity(isRunning ? 1 : 0)
     }
 }

@@ -2,6 +2,65 @@
 
 ## [Unreleased]
 
+- **The board works the way a canvas works.** Every node — a session card, a
+  sub-agent, a terminal, a browser, the workspace itself — can now be moved,
+  resized and linked by the same gestures, and what each gesture does is
+  visible before you make it:
+  - **Resize anything.** Eight handles on whatever is selected, the same on
+    every kind. They replace three bespoke corner grips, each with its own
+    minimum size kept in its own file, one of which was invisible unless an
+    orchestrator happened to be running — and session and sub-agent cards,
+    which could not be resized at all. Card sizes are saved with the rest of
+    the layout. Dragging a handle draws the new size as an outline and applies
+    it when you let go: a terminal that followed the pointer would send
+    `SIGWINCH` to the process in it sixty times a second, and a full-screen
+    agent repaints on every one.
+  - **Link by hovering an edge.** Come within reach of any node's side and a
+    `+` appears on each of its four edges; drag one onto another node. It
+    needed the node to be selected first before, and there was one handle, on
+    the right, which is why nothing about a node said it could be linked. The
+    line you drew can be taken off again from the node's own menu — `unlink`
+    existed and was reachable from nowhere.
+  - **Move anything, by its header or by the band just inside its edge.** One
+    rule for all five kinds, and the number it is measured against is now the
+    same one the node lays its own header out with. Everything inside a
+    terminal or a page stays the node's own: its clicks, its text selection and
+    its keyboard.
+  - **Several at once.** Drag a box across empty board to select a group, ⇧ to
+    add to it, then move, nudge or close all of it together. Dragging a node
+    lines it up with its neighbours and draws the guide; ⌘ turns that off.
+  - **A tool palette.** Select, hand, and one each for an agent, a shell and a
+    browser — with `V H A S B` on the tools themselves. Drawing a new agent
+    used to be a ⌘-drag nobody could discover, and a shell or a browser could
+    only be made from a menu two levels deep.
+  - **Whatever you last touched is on top.** Cards and terminals were two
+    separate layers, so a card could never be in front of a terminal however
+    recently you had used it.
+  - **The scroll dwell is gone.** A terminal took the wheel after the pointer
+    rested on it for half a second, announced by a floating "hold still to
+    scroll". The node you clicked into keeps the wheel; the board pans
+    everywhere else.
+  - ⌘⌫ closes what is selected — never plain ⌫, which belongs to whatever you
+    are typing into. Arrows nudge, ⌘2 frames the selection, esc goes back to
+    the select tool. Closing several at once asks **once**, naming how many
+    and how many are running: the obvious shape — let each node ask for
+    itself — would have raised four questions, kept the last, and closed one
+    of the four.
+- **Corners are one ramp, and concentric.** Every surface had picked its own
+  radius — a node rounded by 12 except the workspace node, which rounded by 14;
+  a palette by 11; a popover by 10 — and the selection frame held a flat 16
+  against a node drawing 12 × the zoom, so at 60% it was twice as round as the
+  thing it was hugging and the two curves pulled apart at every corner while
+  staying parallel down the sides. There are now two values and a rule:
+  a surface rounds by about a fifth of its shorter side, and anything drawn
+  around or inside another shape takes that shape's radius plus or minus the
+  gap between them. Nodes round by 10 and the frame around one by 10 × the zoom
+  plus its 4pt offset; the palette rounds by 8 and the tools inside it by 5.
+- **A node's header no longer prints over itself when zoomed out.** Geometry
+  follows the zoom exactly and type does not, so below about 40% the workspace
+  node's name was laid over its own branch line and the repository chips.
+  Bands that hold type are now at least as tall as the type in them.
+
 - **Nothing you could lose goes without a question.** "Delete and discard
   changes" removed every checkout with `--force` and ran `git branch -D` in
   each repository — one click deep in a context menu, unpushed commits and all.

@@ -59,6 +59,34 @@ struct FileStoreTests {
         #expect(store.load()?.grouping == "repo")
     }
 
+    /// The hazard ADR 4 documents, pinned to the one field added since: a
+    /// layout written before node sizes existed must still decode, because
+    /// `FileStore.load` swallows the throw and the app reads nil as "no saved
+    /// layout" — losing the camera, the panel widths and every pinned node.
+    @Test("a layout written before node sizes existed still decodes")
+    func layoutWithoutSizes() throws {
+        let (store, cleanup) = scratch(SavedLayout.self)
+        defer { cleanup() }
+        try Data("""
+        {"version":1,"pinned":{"s:abc":{"x":1,"y":2}},"cameraX":3,"cameraY":4,"scale":0.5,\
+        "grouping":"link","showEndedSessions":true,"invertScroll":false,"sidebarWidth":262,\
+        "inspectorWidth":430,"permissionMode":"acceptEdits","notificationsEnabled":false}
+        """.utf8).write(to: store.url)
+        let loaded = store.load()
+        #expect(loaded?.pinned["s:abc"]?.x == 1)
+        #expect(loaded?.sizes == nil)
+    }
+
+    @Test("a card's size survives a round trip")
+    func sizesRoundTrip() {
+        let (store, cleanup) = scratch(SavedLayout.self)
+        defer { cleanup() }
+        var layout = SavedLayout()
+        layout.sizes = ["s:abc": .init(width: 320, height: 180)]
+        store.save(layout)
+        #expect(store.load()?.sizes?["s:abc"]?.width == 320)
+    }
+
     @Test("the support directory exists once asked for")
     func supportDirectory() {
         let directory = FileStore<SavedLayout>.supportDirectory()

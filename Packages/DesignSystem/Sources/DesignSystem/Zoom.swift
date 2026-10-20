@@ -32,6 +32,39 @@ public struct Zoom {
     /// Type, on the compressed curve.
     public func t(_ value: CGFloat) -> CGFloat { value * typeScale }
 
+    /// Below this, a node stops drawing its live content — a terminal's glyphs
+    /// and a web page are both unreadable by then — and shows what it is
+    /// instead. Named here because three node views and `Zoom.c` all turn on it.
+    public static let liveContentScale: CGFloat = 0.5
+
+    /// Whether this zoom is one at which a node still draws what is inside it.
+    public var showsLiveContent: Bool { scale > Zoom.liveContentScale }
+
+    /// A band of chrome that has to hold type: a header, a status strip, an
+    /// address bar.
+    ///
+    /// Two things pull on this number in opposite directions.
+    ///
+    /// Geometry follows the zoom exactly and type does not, so a header scaled
+    /// by `s` eventually becomes shorter than the words in it — at 30% it is
+    /// 13pt tall holding 19pt of them, which is why the workspace node's name
+    /// used to print across its own branch line.
+    ///
+    /// But the band's height also decides how much of the node is left for the
+    /// live view inside it, and `FlippedContainer` lays that view out at its
+    /// *world* size. A band that grows faster than the zoom shrinks the
+    /// terminal in world units as you zoom out — so SwiftTerm recomputes its
+    /// grid and `SIGWINCH`es the agent on every step of a pinch.
+    ///
+    /// Both are satisfied by where the two problems live: a node stops drawing
+    /// its live content below `liveContentScale`, and type only outgrows its
+    /// band below roughly the same point. So above it the band follows the
+    /// geometry exactly and the grid never moves; below it the band takes
+    /// whichever is larger, and the only thing it can crowd is a placeholder.
+    public func c(_ value: CGFloat) -> CGFloat {
+        showsLiveContent ? s(value) : max(s(value), t(value))
+    }
+
     public func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         Theme.ui(max(1, size * typeScale), weight)
     }

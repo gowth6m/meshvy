@@ -2,6 +2,7 @@ import AgentsUI
 import AppKit
 import AppState
 import DesignSystem
+import MeshvyCore
 import MeshvyModels
 import SwiftUI
 import TerminalKit
@@ -22,28 +23,24 @@ public struct TerminalNodeView: View {
     public var zoom: Zoom
     public var isSelected: Bool
     public var isDimmed: Bool
-    public var onResize: (CGSize) -> Void
 
     public init(
         node: TerminalNode,
         store: MeshvyStore,
         zoom: Zoom,
         isSelected: Bool,
-        isDimmed: Bool,
-        onResize: @escaping (CGSize) -> Void
+        isDimmed: Bool
     ) {
         self.node = node
         self.store = store
         self.zoom = zoom
         self.isSelected = isSelected
         self.isDimmed = isDimmed
-        self.onResize = onResize
     }
 
     private var session: TerminalSession? { store.terminals.session(for: node.id) }
     private var isRunning: Bool { session?.isRunning ?? false }
     private var activity: AgentActivity? { store.activity(for: node) }
-    private var isArmed: Bool { store.armedTerminal == node.id }
 
     private var accent: SwiftUI.Color {
         // An agent that needs you takes over the card's accent, so a board you
@@ -68,15 +65,22 @@ public struct TerminalNodeView: View {
                 )
                 Divider().overlay(Theme.hairline)
             }
+            // The live surface stops short of the node's own edge, so the band
+            // a drag picks the node up by is the node's and not the terminal's.
+            // Without it the only way to move a terminal was its header: every
+            // other pixel belongs to an AppKit view, which takes the press
+            // before SwiftUI ever sees it.
             content
+                .padding(.horizontal, zoom.s(CanvasGeometry.borderGrab))
+                .padding(.bottom, zoom.s(CanvasGeometry.borderGrab))
         }
         .background(
-            RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .fill(Theme.canvasDeep)
         )
-        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: zoom.s(Theme.nodeCorner), style: .continuous)
+            RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
                 .stroke(
                     isSelected ? Theme.accent : accent.opacity(isRunning ? 0.45 : 0.2),
                     lineWidth: isSelected ? max(1, zoom.s(1.8)) : max(0.5, zoom.s(1))
@@ -84,8 +88,6 @@ public struct TerminalNodeView: View {
         )
         .shadow(color: .black.opacity(isSelected ? 0.55 : 0.35), radius: zoom.s(isSelected ? 18 : 10), y: zoom.s(5))
         .opacity(isDimmed ? 0.25 : 1)
-        .overlay(alignment: .bottomTrailing) { resizeGrip }
-        .overlay(alignment: .bottom) { scrollHint }
     }
 
     private var header: some View {
@@ -143,7 +145,7 @@ public struct TerminalNodeView: View {
             .help(node.sessionID != nil && isRunning ? "Close terminal and stop the agent" : "Close terminal")
         }
         .padding(.horizontal, zoom.s(10))
-        .frame(height: zoom.s(28))
+        .frame(height: zoom.c(BoardMetrics.Chrome.header))
         .background(Theme.chrome)
     }
 
@@ -155,7 +157,7 @@ public struct TerminalNodeView: View {
             // Below roughly half scale the glyphs are unreadable anyway, and the
             // emulator does not scale — show the folder instead and keep the
             // process running untouched in the registry.
-            if zoom.scale > 0.5 {
+            if zoom.showsLiveContent {
                 TerminalSurface(session: session, scale: zoom.scale)
             } else {
                 placeholder
@@ -178,44 +180,5 @@ public struct TerminalNodeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvasDeep)
-    }
-
-    /// The wheel pans the canvas by default, so a terminal has to be dwelled on
-    /// before it gets the scrollback. That is invisible unless it says so —
-    /// shown only while the pointer is over this terminal and the dwell has not
-    /// completed, then it goes away.
-    @ViewBuilder
-    private var scrollHint: some View {
-        if store.hoveredTerminal == node.id, !isArmed, zoom.scale > 0.5 {
-            // "Still", because it is a pause and not a press: "hold to
-            // scroll" read as press-and-hold, which does something else.
-            Text("hold still to scroll")
-                .font(zoom.font(8.5, .medium))
-                .foregroundStyle(Theme.textTertiary)
-                .padding(.horizontal, zoom.s(6))
-                .padding(.vertical, zoom.s(2))
-                .background(Capsule().fill(Theme.chrome.opacity(0.9)))
-                .padding(.bottom, zoom.s(6))
-                .transition(.opacity)
-                .allowsHitTesting(false)
-        }
-    }
-
-    private var resizeGrip: some View {
-        Image(systemName: "arrow.down.right")
-            .font(zoom.font(8, .bold))
-            .foregroundStyle(Theme.textTertiary)
-            .padding(zoom.s(4))
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        onResize(CGSize(
-                            width: max(320, node.size.width + value.translation.width / zoom.scale),
-                            height: max(200, node.size.height + value.translation.height / zoom.scale)
-                        ))
-                    }
-                    .onEnded { _ in store.commitTerminalMove() }
-            )
     }
 }

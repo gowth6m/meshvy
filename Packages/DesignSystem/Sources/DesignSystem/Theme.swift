@@ -133,8 +133,30 @@ public enum Theme {
     public static let markAccent = Color(hex: NightOwl.mint)
 
     // MARK: Metrics
-    public static let nodeCorner: CGFloat = 12
-    public static let groupCorner: CGFloat = 20
+
+    /// Corner radii, as one ramp rather than a number per view.
+    ///
+    /// Two rules, and the second is the one that was being broken. A surface
+    /// rounds by roughly a fifth of its shorter side, so a 38pt palette and a
+    /// 500pt node do not share a radius. And **anything drawn around or inside
+    /// another shape is concentric with it**: a frame `g` points outside a
+    /// node rounds by the node's radius *plus* `g`, and a button `p` points
+    /// inside a panel rounds by the panel's radius *minus* `p`.
+    ///
+    /// Get the second one wrong and the two curves pull apart at the corners
+    /// while staying parallel down the sides, which is exactly what a
+    /// selection frame did here: it held a flat 16 against a node that was
+    /// drawing 12 × the zoom, so at 60% the frame was twice as round as the
+    /// thing it was supposed to be hugging.
+    public enum Corner {
+        /// A node on the board. Scaled by the zoom at the point of use — it is
+        /// a size in world units, not chrome about the camera.
+        public static let node: CGFloat = 10
+        /// A surface floating over the board: the tool palette, the selection
+        /// bar, a popover. Not scaled; these are chrome.
+        public static let panel: CGFloat = 8
+    }
+
     public static let accentRail: CGFloat = 3
 
     // MARK: Type

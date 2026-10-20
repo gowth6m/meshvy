@@ -113,6 +113,8 @@ struct MeshvyCommands: Commands {
                 .keyboardShortcut("-", modifiers: .command)
             Button("Actual Size") { store.zoomToActualSize() }
                 .keyboardShortcut("1", modifiers: .command)
+            Button("Zoom to Selection") { store.zoomToSelection() }
+                .keyboardShortcut("2", modifiers: .command)
             Divider()
             // Toggles rather than buttons, so the menu says which way each one
             // is set instead of leaving you to flip it and look.
@@ -174,6 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UpdateTest.run(install: arguments.contains("--install"))
         } else if arguments.contains("--zoomtest") {
             ZoomTest.run()
+        } else if arguments.contains("--canvastest") {
+            CanvasTest.run()
         } else if let repo = BridgeTest.repo(arguments: arguments) {
             BridgeTest.run(repo: repo)
         } else if let path = DiffTest.path(arguments: arguments) {

@@ -659,6 +659,16 @@ struct SnapshotRequest {
     /// for itself: the workspace after an agent has run, the browser when the
     /// shot is only about a browser, otherwise a checkout with changes in it.
     var select: Selection?
+    /// Stage the board's own pointer state for a shot of it: the link handles
+    /// on the node named here, and the whole selection rather than one node.
+    ///
+    /// The renderer has no pointer, so hover and multiple selection — the two
+    /// states the board's new chrome only appears in — could not otherwise be
+    /// photographed at all. They live on the store for exactly this reason.
+    var hover: String?
+    var multi: Bool
+    /// Which tool to put in hand, by name.
+    var tool: String?
     /// Hand every free terminal and browser back to the layout before
     /// rendering. An agent lands wherever there was room, so without this the
     /// same shot frames differently every time it is taken.
@@ -690,6 +700,9 @@ struct SnapshotRequest {
         browserURL = value("--browser")
         shellRepo = value("--shell")
         link = arguments.contains("--link")
+        hover = value("--hover")
+        multi = arguments.contains("--multi")
+        tool = value("--tool")
         select = value("--select").flatMap(Selection.init(rawValue:))
         tidy = arguments.contains("--tidy")
     }
@@ -785,6 +798,7 @@ enum Snapshot {
 
         store.paletteOpen = request.palette
         store.shortcutsOpen = request.shortcuts
+        applyPointer(store: store, request: request)
 
         guard request.withAgent else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
@@ -806,6 +820,29 @@ enum Snapshot {
         for terminal in workspace.terminals { store.moveTerminal(terminal.id, to: .zero) }
         for browser in workspace.browsers { store.moveBrowser(browser.id, to: .zero) }
         store.commitTerminalMove()
+    }
+
+    /// Stages the pointer: which tool is in hand, what is selected, and which
+    /// node is being hovered — so a documentation shot can show the handles a
+    /// real pointer would have brought out.
+    private static func applyPointer(store: MeshvyStore, request: SnapshotRequest) {
+        if let name = request.tool, let tool = BoardTool(rawValue: name) { store.use(tool) }
+        if request.multi {
+            store.select(all: store.graph.nodes.map(\.id))
+        }
+        guard let wanted = request.hover else { return }
+        // By kind, or by the start of a node's title — whichever the shot needs.
+        let node = store.graph.nodes.first { node in
+            switch node.kind {
+            case .workspace: return wanted == "workspace"
+            case .browser(let browser): return wanted == "browser" || browser.title.hasPrefix(wanted)
+            case .terminal(let terminal): return wanted == "terminal" || terminal.title.hasPrefix(wanted)
+            case .session: return wanted == "session"
+            case .subAgent: return wanted == "subagent"
+            }
+        }
+        guard let node else { return }
+        store.hover(node.id, edge: .right)
     }
 
     /// Puts the inspector on whatever the shot is about: what `--select` asked
