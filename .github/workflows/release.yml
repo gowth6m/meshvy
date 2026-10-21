@@ -173,7 +173,17 @@ jobs:
             echo '```'
           } > /tmp/notes.md
 
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Meshvy $VERSION" \
-            --notes-file /tmp/notes.md \
-            dist/*.dmg dist/*.zip dist/*SHA256.txt
+          # Drafting a release on GitHub creates the tag and the release page
+          # before this runs, so fill that page in rather than fail on it.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "Meshvy $VERSION" \
+              --notes-file /tmp/notes.md
+            gh release upload "$GITHUB_REF_NAME" --clobber \
+              dist/*.dmg dist/*.zip dist/*SHA256.txt
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Meshvy $VERSION" \
+              --notes-file /tmp/notes.md \
+              dist/*.dmg dist/*.zip dist/*SHA256.txt
+          fi
