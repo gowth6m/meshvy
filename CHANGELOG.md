@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-22
+
 - **A workspace works the way a project does in Claude Code.** The agent on the
   workspace node is now the **coordinator**: the main chat where you ask for
   things. It hands each piece of work to a **thread** — a titled agent with its
