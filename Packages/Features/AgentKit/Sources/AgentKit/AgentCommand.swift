@@ -66,30 +66,32 @@ public enum AgentCommand {
         }
     }
 
-    /// Argv for an orchestrator sitting at the workspace root, with every
-    /// repository as a subdirectory beneath it.
-    public static func orchestrator(
+    /// Argv for the coordinator: the workspace's main chat, sitting at the
+    /// workspace root with every repository as a subdirectory beneath it.
+    public static func coordinator(
         workspace: Workspace,
         sessionID: String,
         name: String,
         options: Options = Options()
     ) -> [String] {
         base(sessionID: sessionID, name: name, options: options)
-            + ["--append-system-prompt", orchestratorBrief(workspace: workspace)]
+            + ["--append-system-prompt", coordinatorBrief(workspace: workspace)]
     }
 
-    /// Argv for an agent working in one repository of the workspace.
-    public static func repoAgent(
+    /// Argv for a thread: one piece of work, with its own agent. It runs in
+    /// `repo` when it has one, otherwise at the workspace root.
+    public static func thread(
         workspace: Workspace,
-        repo: WorkspaceRepo,
+        repo: WorkspaceRepo?,
         sessionID: String,
         name: String,
+        title: String? = nil,
         task: String? = nil,
         options: Options = Options()
     ) -> [String] {
         var arguments = base(sessionID: sessionID, name: name, options: options)
-            + ["--append-system-prompt", repoBrief(workspace: workspace, repo: repo)]
-        // An agent the orchestrator spawned starts working immediately; the
+            + ["--append-system-prompt", threadBrief(workspace: workspace, repo: repo, title: title)]
+        // A thread the coordinator started begins working immediately; the
         // task is its opening message, so the terminal shows it being answered.
         if let task, !task.isEmpty { arguments.append(task) }
         return arguments
@@ -97,9 +99,9 @@ public enum AgentCommand {
 
     /// Tools Meshvy pre-approves for the sessions it starts.
     ///
-    /// Delegation runs through the `meshvy` helper, so that one command is
-    /// pre-approved: `acceptEdits` does not cover Bash, and an orchestrator
-    /// that stops to ask permission for every spawn never gets going. The
+    /// Threads are started through the `meshvy` helper, so that one command is
+    /// pre-approved: `acceptEdits` does not cover Bash, and a coordinator that
+    /// stops to ask permission for every thread never gets going. The
     /// browser server is on the same footing — these are Meshvy's own
     /// surfaces, and an agent stopping to ask whether it may look at the page
     /// it was told to check is noise, not safety.
@@ -128,14 +130,16 @@ public enum AgentCommand {
 
     // MARK: - Briefs
 
-    /// What the orchestrator is told before the user types anything.
+    /// What the coordinator is told before the user types anything.
     ///
     /// Delivered as `--append-system-prompt` rather than a first message, so the
-    /// terminal opens ready for the user's actual task.
-    public static func orchestratorBrief(workspace: Workspace) -> String {
+    /// terminal opens ready for the user's actual request.
+    public static func coordinatorBrief(workspace: Workspace) -> String {
         var lines: [String] = []
         lines.append("""
-        You are the orchestrator for the Meshvy workspace `\(workspace.name)`.
+        You are the coordinator for the Meshvy workspace `\(workspace.name)`. \
+        This terminal is the workspace's main chat: the person types their \
+        requests here, and you hand each piece of work to a thread.
 
         Your working directory is the workspace root. Every repository in this \
         workspace is checked out as a subdirectory of it, all on the branch \
@@ -147,64 +151,105 @@ public enum AgentCommand {
         }
         lines.append("")
         lines.append("""
-        ## Delegating
+        ## How this workspace works
 
-        Do not use the Agent tool to split this work up. Agent-tool sub-agents \
-        run inside your own process, so the person watching Meshvy cannot see \
-        them, open them, or talk to them.
+        - **You coordinate; threads do the work.** For each separate piece of \
+          work the person asks for, start a thread. Answer quick questions \
+          yourself, and read code when you need to in order to plan or answer, \
+          but leave changes to threads.
+        - **One thread per piece of work**, not one per repository. A thread \
+          can work in one repository or, when the work spans several, at the \
+          workspace root. Start independent threads together so they run at \
+          the same time.
+        - **Follow-ups go to the thread that owns the work.** When the person \
+          asks for a change to something a thread did, send it there instead \
+          of starting another.
+        - **Report back briefly.** After starting a thread, tell the person in \
+          one line what you started. When a thread reports, lead with the \
+          result in a sentence or two and name the thread by its title. The \
+          person can open any thread and read the whole of it, so do not \
+          repeat its work back.
+        - **Questions for the person.** When a thread needs a decision, put \
+          the question to the person plainly, with your recommendation, and \
+          pass the answer on with `meshvy send`.
 
-        Instead delegate with the `meshvy` command, already on your PATH. Each \
-        agent you start this way is a real Claude Code session with its own \
-        terminal on the canvas, which the user can read and interrupt:
+        ## The `meshvy` command
 
-            meshvy spawn <repo> "<task>"    start an agent in that repository;
-                                            prints an agent id
-            meshvy wait <id>                block until it finishes, then print
-                                            what it reported back
-            meshvy send <id> "<message>"    type a follow-up into its terminal
-            meshvy context <id>             read what that agent has been doing,
+        Do not use the Agent tool for this work. Its sub-agents run inside \
+        your own process, so the person cannot see them, open them, or talk to \
+        them. Use the `meshvy` command, already on your PATH. Every thread is a \
+        real Claude Code session with its own terminal, listed in the sidebar \
+        and drawn on the board:
+
+            meshvy thread "<title>" "<task>" [--repo <repo>]
+                                            start a thread; prints its id.
+                                            The title is two to five plain
+                                            words naming the work.
+            meshvy send <id> "<message>"    a follow-up to that thread
+            meshvy threads                  every thread and where it stands
+            meshvy context <id>             what a thread has been doing,
                                             without interrupting it
-            meshvy status                   every agent on the board and what it
-                                            is doing right now
-            meshvy list                     agents currently on the board
+            meshvy wait <id>                block until a thread finishes its
+                                            turn, then print its report
+            meshvy resolve <id>             put a finished thread away
 
-        Work this way:
+        Give each thread everything it needs in its task: the goal, what you \
+        already know, and where to look. It knows only what you tell it.
 
-        1. Plan the change across the repositories.
-        2. `meshvy spawn` one agent per repository that has work to do, giving \
-           each a task scoped to its own directory. Start them all before \
-           waiting on any of them, so they run concurrently.
-        3. `meshvy wait` on each id and read what came back. `meshvy status` \
-           tells you where they all are without blocking, and `meshvy context` \
-           shows you one agent's recent work if you need to decide something \
-           before it finishes.
-        4. Follow up with `meshvy send` where something needs correcting, \
-           integrate the results, and keep the repositories consistent.
+        ## Reports from threads
 
-        Do the coordination yourself and hand off the implementation. A change \
-        that spans repositories stays on the `\(workspace.branch)` branch in \
-        each of them and should be committed together.
+        You do not have to wait on threads. When one finishes a turn or needs \
+        the person, Meshvy types a short note into this chat that starts with \
+        `[meshvy]`. Those notes come from Meshvy, not from the person. Read \
+        the report, use `meshvy context <id>` if you need more, and tell the \
+        person what matters in a line or two.
+
+        Every thread works on the `\(workspace.branch)` branch of each \
+        repository it touches, so a change that spans repositories lands \
+        together.
         """)
         lines.append("")
         lines.append(BrowserBridge.brief)
         return lines.joined(separator: "\n")
     }
 
-    public static func repoBrief(workspace: Workspace, repo: WorkspaceRepo) -> String {
-        let siblings = workspace.readyRepos.filter { $0.id != repo.id }.map(\.name)
-        var text = """
-        You are working in `\(repo.name)`, one repository of the Meshvy workspace \
-        `\(workspace.name)`, checked out on branch `\(workspace.branch)`.
-        """
-        if !siblings.isEmpty {
-            text += """
+    /// What a thread is told: the one piece of work it owns, and how it hands
+    /// it back.
+    public static func threadBrief(workspace: Workspace, repo: WorkspaceRepo?, title: String? = nil) -> String {
+        var text: String
+        let work = title.map { "“\($0)”" } ?? "one piece of work"
+        if let repo {
+            text = """
+            You are a thread in the Meshvy workspace `\(workspace.name)`, working \
+            on \(work) in `\(repo.name)`, checked out on branch \
+            `\(workspace.branch)`.
+            """
+            let siblings = workspace.readyRepos.filter { $0.id != repo.id }.map(\.name)
+            if !siblings.isEmpty {
+                text += """
 
-            Sibling repositories live alongside this one under \
-            \(workspace.root) — \(siblings.joined(separator: ", ")). Stay inside \
-            this repository unless you are asked otherwise; the orchestrator \
-            coordinates changes that span several.
+                Sibling repositories live alongside this one under \
+                \(workspace.root) — \(siblings.joined(separator: ", ")). Stay \
+                inside this repository unless the work needs otherwise.
+                """
+            }
+        } else {
+            text = """
+            You are a thread in the Meshvy workspace `\(workspace.name)`, working \
+            on \(work). Your working directory is the workspace root; every \
+            repository is a subdirectory of it, on branch `\(workspace.branch)`.
             """
         }
+        text += """
+
+
+        The workspace's coordinator hands out the work and relays between you \
+        and the person, who can also open this thread and type to you directly. \
+        Carry the work through to the end. When you finish a turn, end with a \
+        short report that leads with the result: what changed, and anything \
+        left open. If you need a decision only the person can make, ask it \
+        plainly as the last thing you say, with the option you recommend.
+        """
         text += "\n\n" + BrowserBridge.brief
         return text
     }
@@ -212,7 +257,11 @@ public enum AgentCommand {
     /// Name shown on the card and in `claude agents`.
     public static func derivedName(role: TerminalNode.Role, context: String) -> String {
         let suffix = String(UUID().uuidString.prefix(4)).lowercased()
-        let stem = role == .orchestrator ? "orc" : "agt"
+        let stem = switch role {
+        case .orchestrator: "coord"
+        case .repo: "thread"
+        case .shell: "sh"
+        }
         return "\(Workspace.slug(context))-\(stem)-\(suffix)"
     }
 }

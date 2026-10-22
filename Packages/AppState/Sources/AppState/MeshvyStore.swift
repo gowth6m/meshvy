@@ -16,7 +16,7 @@ import WorkspaceKit
 /// Everything the board renders from, plus the refresh machinery.
 ///
 /// A workspace is a set of worktrees — one per repository, all on the same
-/// branch, under `~/.meshvy/<slug>/`. That folder is the parent an orchestrator
+/// branch, under `~/.meshvy/<slug>/`. That folder is the parent a coordinator
 /// works from. A fresh install has no workspaces, so the board starts empty.
 @MainActor
 @Observable
@@ -50,7 +50,7 @@ public final class MeshvyStore {
     /// Live git state for the active workspace's checkouts, keyed by path.
     public internal(set) var worktrees: [String: Worktree] = [:]
     public internal(set) var live: [String: LiveSession] = [:]
-    /// Sub-agents the orchestrator has dispatched, read from its transcript.
+    /// Sub-agents the coordinator has dispatched, read from its transcript.
     public internal(set) var subAgents: [SubAgent] = []
     /// What each agent is doing, keyed by session id. Fed by the agent's own
     /// hooks — see `AgentHooks`.

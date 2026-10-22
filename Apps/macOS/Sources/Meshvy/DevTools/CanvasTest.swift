@@ -229,7 +229,7 @@ enum CanvasTest {
         guard let workspaceID = store.activeWorkspace?.id else { exit(1) }
         let runningBefore = store.activeWorkspace?.boardHeight ?? 0
         store.place(.workspace(workspaceID), frame: CGRect(x: 0, y: 0, width: 900, height: 333))
-        check(!store.isOrchestratorRunning
+        check(!store.isCoordinatorRunning
               && near(store.activeWorkspace?.idleBoardHeight ?? 0, 333)
               && near(store.activeWorkspace?.boardHeight ?? 0, runningBefore),
               "resizing the collapsed workspace node sets its idle height and leaves the running one alone")

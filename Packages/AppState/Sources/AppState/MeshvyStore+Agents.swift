@@ -7,15 +7,19 @@ import MeshvyModels
 import TerminalKit
 
 // Terminals, the agent bridge, hook-driven status, and retuning a running session.
+//
+// A workspace works the way a project does in Claude Code. The coordinator is
+// its one main chat: you type requests there, it starts a thread for each piece
+// of work, sends follow-ups to the thread that owns it, and reports back
+// briefly. A thread is one piece of work with its own agent and terminal; when
+// it finishes a turn or needs you, Meshvy tells the coordinator.
 extension MeshvyStore {
-    // MARK: - Terminals
-
     // MARK: - Agent bridge
     //
     // Claude's Agent tool runs sub-agents in-process, so they have no terminal
-    // to show. Instead the orchestrator is told to delegate with the `meshvy`
-    // helper, which drops a request here and gets a real agent back — its own
-    // process, its own PTY, its own node on the canvas.
+    // to show. Instead the coordinator starts threads with the `meshvy` helper,
+    // which drops a request here and gets a real agent back — its own process,
+    // its own PTY, its own node on the canvas.
 
     public func startBridge(for workspace: Workspace) {
         AgentBridge.install(for: workspace)
@@ -55,43 +59,142 @@ extension MeshvyStore {
             // Remove first: a request that throws must not be retried forever.
             try? FileManager.default.removeItem(at: url)
             switch request.kind {
-            case "spawn": handleSpawn(request, in: workspace)
+            case "thread", "spawn": handleThreadRequest(request, in: workspace)
             case "send": handleSend(request)
+            case "resolve": handleResolve(request)
             default: continue
             }
         }
     }
 
-    public func handleSpawn(_ request: AgentBridge.Request, in workspace: Workspace) {
-        guard let repoName = request.repo,
-              let repo = workspace.repos.first(where: { $0.name == repoName }) else {
-            show(.init(kind: .failure, title: "Agent asked for an unknown repo", detail: request.repo))
-            return
+    /// The coordinator starting a thread.
+    public func handleThreadRequest(_ request: AgentBridge.Request, in workspace: Workspace) {
+        var repo: WorkspaceRepo?
+        if let repoName = request.repo, !repoName.isEmpty {
+            repo = workspace.repos.first { $0.name == repoName }
+            guard repo != nil else {
+                show(.init(kind: .failure, title: "The coordinator asked for an unknown repo", detail: repoName))
+                return
+            }
         }
         guard let node = openTerminal(
             role: .repo,
-            repoID: repo.id,
+            repoID: repo?.id,
+            title: request.title,
             openingTask: request.task,
-            bridgeID: request.id
+            bridgeID: request.id,
+            // The coordinator is mid-turn, very likely with you watching it; a
+            // new thread is news, not a reason to take the board away from it.
+            reveal: false
         ) else { return }
 
+        show(.init(
+            kind: .success,
+            title: "New thread: \(node.title)",
+            detail: repo.map { "in \($0.name)" },
+            action: ("Show", { [weak self] in self?.reveal(.terminal(node.id)) })
+        ))
+    }
+
+    /// Writes what `meshvy` needs to find a thread again: its session, so
+    /// `wait` and `context` can read its transcript.
+    func recordThread(_ node: TerminalNode, repo: WorkspaceRepo?, in workspace: Workspace) {
+        guard let bridgeID = node.bridgeID else { return }
         AgentBridge.record(
             .init(
-                id: request.id,
+                id: bridgeID,
+                title: node.title,
                 sessionId: node.sessionID,
-                repo: repo.name,
+                repo: repo?.name,
                 cwd: node.cwd,
                 transcriptHint: node.sessionID,
                 startedAt: Date().timeIntervalSince1970
             ),
             in: workspace
         )
-        show(.init(
-            kind: .success,
-            title: "Orchestrator started an agent in \(repo.name)",
-            detail: request.task,
-            action: ("Show", { [weak self] in self?.reveal(.terminal(node.id)) })
-        ))
+    }
+
+    // MARK: - Threads
+
+    /// What a thread is called until its first message names it.
+    public static let untitledThread = "New thread"
+
+    /// Where one thread stands. See `ThreadState`.
+    public func threadState(for node: TerminalNode) -> ThreadState {
+        ThreadState.of(
+            activity: activity(for: node),
+            isRunning: terminals.isRunning(node.id),
+            isResolved: node.isResolved
+        )
+    }
+
+    /// Threads still part of the work in hand, whatever wants you first.
+    public var openThreads: [TerminalNode] {
+        let open: [TerminalNode] = (activeWorkspace?.threads ?? []).filter { !$0.isResolved }
+        var rank: [UUID: Int] = [:]
+        for node in open { rank[node.id] = threadState(for: node).rank }
+        return open.sorted { lhs, rhs in
+            let left = rank[lhs.id] ?? 0
+            let right = rank[rhs.id] ?? 0
+            if left != right { return left < right }
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    /// Threads put away, most recent first.
+    public var resolvedThreads: [TerminalNode] {
+        let resolved: [TerminalNode] = (activeWorkspace?.threads ?? []).filter(\.isResolved)
+        return resolved.sorted { lhs, rhs in
+            let left: Date = lhs.resolvedAt ?? .distantPast
+            let right: Date = rhs.resolvedAt ?? .distantPast
+            return left > right
+        }
+    }
+
+    /// Plain shells — not threads, and not part of the coordinator's work.
+    public var shells: [TerminalNode] {
+        (activeWorkspace?.terminals ?? []).filter { $0.role == .shell }
+    }
+
+    /// Starts an empty thread at the workspace root, for work you want to
+    /// drive yourself rather than through the coordinator.
+    @discardableResult
+    public func newThread(repoID: String? = nil) -> TerminalNode? {
+        openTerminal(role: .repo, repoID: repoID)
+    }
+
+    /// Puts a finished thread away. Nothing is stopped and nothing leaves the
+    /// board; it only leaves the list of open threads.
+    public func resolveThread(_ id: UUID) {
+        updateTerminal(id) { $0.resolvedAt = Date() }
+        unread.remove(id)
+        notifier.badge(agentsNeedingYou.count)
+        publishStatus()
+    }
+
+    public func reopenThread(_ id: UUID) {
+        updateTerminal(id) { $0.resolvedAt = nil }
+        publishStatus()
+    }
+
+    func handleResolve(_ request: AgentBridge.Request) {
+        guard let target = request.to,
+              let node = activeWorkspace?.terminals.first(where: { $0.bridgeID == target }) else { return }
+        resolveThread(node.id)
+    }
+
+    /// Tells the coordinator a thread has something to say, so it can relay
+    /// it to you without ever having had to sit and wait on the thread.
+    ///
+    /// Typed into the coordinator's terminal as one line, the way `meshvy
+    /// send` types into a thread. Claude Code queues what is typed mid-turn,
+    /// so a coordinator in the middle of something reads it when it is done.
+    func reportToCoordinator(_ node: TerminalNode, state: ThreadState, message: String?) {
+        guard node.isThread, let id = node.bridgeID,
+              let coordinator = activeWorkspace?.orchestrator,
+              let session = terminals.session(for: coordinator.id), session.isRunning
+        else { return }
+        session.send(AgentBridge.report(id: id, title: node.title, state: state, message: message) + "\r")
     }
 
     // MARK: - Agent status
@@ -112,17 +215,21 @@ extension MeshvyStore {
         AgentBridge.publishStatus(statusRows(), in: workspace)
     }
 
-    /// What every agent is doing, in the shape `meshvy status` prints.
+    func publishStatus() {
+        guard let workspace = activeWorkspace else { return }
+        AgentBridge.publishStatus(statusRows(), in: workspace)
+    }
+
+    /// Every thread and where it stands, in the shape `meshvy threads` prints.
     public func statusRows() -> [AgentBridge.StatusRow] {
         guard let workspace = activeWorkspace else { return [] }
-        return workspace.allTerminals.compactMap { node in
-            guard let record = activity(for: node) else { return nil }
-            return AgentBridge.StatusRow(
+        return workspace.threads.map { node in
+            AgentBridge.StatusRow(
                 id: node.bridgeID,
                 title: node.title,
                 repo: workspace.repos.first { $0.id == node.repoID }?.name,
-                state: record.state.rawValue,
-                line: record.line
+                state: threadState(for: node).label.lowercased(),
+                line: node.isResolved ? nil : activity(for: node)?.line
             )
         }
     }
@@ -152,9 +259,29 @@ extension MeshvyStore {
         }
         activity[event.sessionID] = record
 
-        guard previous != record.state,
-              let node = terminalNode(forSession: event.sessionID) else { return }
+        guard var node = terminalNode(forSession: event.sessionID) else { return }
+        // Writing to a resolved thread — you, or the coordinator — reopens
+        // it, the way a reply reopens a resolved thread anywhere else.
+        if event.startsTurn, node.isResolved {
+            reopenThread(node.id)
+            node.resolvedAt = nil
+        }
+        // A thread you started by hand is named by the first thing you ask it,
+        // the way a new conversation anywhere else takes its title.
+        if event.startsTurn, node.isThread, node.title == MeshvyStore.untitledThread,
+           let prompt = event.prompt, !prompt.isEmpty, !prompt.hasPrefix("/") {
+            let title = String(prompt.prefix(48))
+            updateTerminal(node.id) { $0.title = title }
+            node.title = title
+            if let workspace = activeWorkspace {
+                recordThread(node, repo: workspace.repos.first { $0.id == node.repoID }, in: workspace)
+            }
+        }
+        guard previous != record.state else { return }
         announce(record, node: node)
+        if record.state == .done || record.state == .blocked {
+            reportToCoordinator(node, state: threadState(for: node), message: record.message)
+        }
     }
 
     /// A question appearing, or a turn ending, is the moment worth a nudge —
@@ -169,7 +296,7 @@ extension MeshvyStore {
         notifier.post(
             title: record.state == .blocked
                 ? "\(node.title) needs you"
-                : "\(node.title) finished",
+                : (node.isThread ? "\(node.title) is ready" : "\(node.title) finished"),
             body: record.message,
             node: id
         )
@@ -199,7 +326,7 @@ extension MeshvyStore {
         return workspace.allTerminals.first { $0.sessionID == sessionID }
     }
 
-    /// The orchestrator is hosted by the workspace node rather than having a
+    /// The coordinator is hosted by the workspace node rather than having a
     /// card of its own, so a terminal does not always map to `.terminal`.
     public func canvasID(for node: TerminalNode) -> NodeID {
         if let workspace = activeWorkspace, workspace.orchestrator?.id == node.id {
@@ -228,7 +355,7 @@ extension MeshvyStore {
     public func revealNextNeedingYou() {
         let ids = agentsNeedingYou.map { canvasID(for: $0) }
         guard !ids.isEmpty else {
-            show(.init(kind: .info, title: "No agent is waiting on you", detail: nil))
+            show(.init(kind: .info, title: "Nothing is waiting on you", detail: nil))
             return
         }
         let current = selection.flatMap { ids.firstIndex(of: $0) }
@@ -247,19 +374,21 @@ extension MeshvyStore {
         notifier.badge(agentsNeedingYou.count)
     }
 
-    /// One agent typing into another's terminal.
+    /// The coordinator, or a thread, typing a follow-up into another thread.
     public func handleSend(_ request: AgentBridge.Request) {
         guard let target = request.to, let message = request.message,
               let workspace = activeWorkspace else { return }
         let node = workspace.terminals.first { $0.bridgeID == target }
             ?? (workspace.orchestrator?.bridgeID == target ? workspace.orchestrator : nil)
         guard let node, let session = terminals.session(for: node.id) else { return }
+        if node.isResolved { reopenThread(node.id) }
         session.send(message + "\r")
     }
 
-    /// Starts Claude Code on the workspace node itself. Its working directory
-    /// is the workspace root, so every repository is a subdirectory it can see.
-    public func startOrchestrator() {
+    /// Starts the coordinator on the workspace node itself. Its working
+    /// directory is the workspace root, so every repository is a subdirectory
+    /// it can see.
+    public func startCoordinator() {
         guard var workspace = activeWorkspace else { return }
         if let existing = workspace.orchestrator, terminals.isRunning(existing.id) {
             reveal(.workspace(workspace.id))
@@ -288,10 +417,10 @@ extension MeshvyStore {
         let options = agentOptions(for: workspace)
         let session = terminals.start(
             node: node,
-            command: AgentCommand.orchestrator(
+            command: AgentCommand.coordinator(
                 workspace: workspace, sessionID: sessionID, name: name, options: options
             ),
-            // Puts `meshvy` on the orchestrator's PATH so it can delegate.
+            // Puts `meshvy` on the coordinator's PATH so it can start threads.
             environment: ["PATH": workspace.binDirectory + ":" + currentPath()]
         )
         watchExit(of: node, session: session)
@@ -302,7 +431,7 @@ extension MeshvyStore {
         refreshSubAgents()
     }
 
-    public func stopOrchestrator() {
+    public func stopCoordinator() {
         guard var workspace = activeWorkspace, let node = workspace.orchestrator else { return }
         terminals.discard(node.id)
         unread.remove(node.id)
@@ -313,13 +442,13 @@ extension MeshvyStore {
         notifier.badge(agentsNeedingYou.count)
     }
 
-    public var isOrchestratorRunning: Bool {
+    public var isCoordinatorRunning: Bool {
         guard let node = activeWorkspace?.orchestrator else { return false }
         return terminals.isRunning(node.id)
     }
 
     /// What every session Meshvy starts is launched with. One place, so the
-    /// orchestrator and the agents it spawns can never drift apart.
+    /// coordinator and its threads can never drift apart.
     public func agentOptions(for workspace: Workspace) -> AgentCommand.Options {
         AgentCommand.Options(
             model: models.selectedModelID,
@@ -424,16 +553,19 @@ extension MeshvyStore {
         ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
     }
 
-    /// Opens a terminal for one repository, or a plain shell.
+    /// Opens a thread or a plain shell, in one repository or at the workspace
+    /// root.
     @discardableResult
     public func openTerminal(
         role: TerminalNode.Role,
         repoID: String? = nil,
+        title: String? = nil,
         openingTask: String? = nil,
-        bridgeID: String? = nil
+        bridgeID: String? = nil,
+        reveal shouldReveal: Bool = true
     ) -> TerminalNode? {
         guard var workspace = activeWorkspace else { return nil }
-        guard role != .orchestrator else { startOrchestrator(); return workspace.orchestrator }
+        guard role != .orchestrator else { startCoordinator(); return workspace.orchestrator }
 
         let repo = repoID.flatMap { id in workspace.repos.first { $0.id == id } }
         let cwd = repo?.worktreePath ?? workspace.root
@@ -444,38 +576,50 @@ extension MeshvyStore {
 
         let sessionID = role == .shell ? nil : UUID().uuidString.lowercased()
         let name = AgentCommand.derivedName(role: role, context: repo?.name ?? workspace.name)
+        let threadTitle = title.map { String($0.prefix(60)) }
+            ?? openingTask.map { String($0.prefix(48)) }
+            ?? MeshvyStore.untitledThread
         var node = TerminalNode(
             role: role,
-            title: openingTask.map { String($0.prefix(48)) }
-                ?? (role == .shell ? (repo?.name ?? workspace.name) : name),
+            title: role == .shell ? (repo?.name ?? workspace.name) : threadTitle,
             cwd: cwd,
             repoID: repo?.id,
             sessionID: sessionID
         )
         node.size = CGSize(width: 580, height: 340)
-        node.bridgeID = bridgeID
+        // Every thread can be addressed, whoever started it: the coordinator
+        // hears about all of them, and has to be able to answer.
+        node.bridgeID = role == .shell ? nil : (bridgeID ?? AgentBridge.newID())
         node.openingTask = openingTask
         node.permissionMode = permissionMode
         node.model = models.selectedModelID
         node.effort = agentEffort
 
         let command: [String]
+        var environment: [String: String] = [:]
         if role == .shell {
             command = []
         } else {
-            guard let repo else { return nil }
-            command = AgentCommand.repoAgent(
+            AgentBridge.install(for: workspace)
+            command = AgentCommand.thread(
                 workspace: workspace, repo: repo, sessionID: sessionID!, name: name,
+                title: node.title,
                 task: openingTask,
                 options: agentOptions(for: workspace)
             )
+            // A thread can read its siblings' work with `meshvy context`.
+            environment["PATH"] = workspace.binDirectory + ":" + currentPath()
         }
 
-        watchExit(of: node, session: terminals.start(node: node, command: command))
+        watchExit(of: node, session: terminals.start(node: node, command: command, environment: environment))
         workspace.terminals.append(node)
         update(workspace)
-        selection = .terminal(node.id)
-        reveal(.terminal(node.id))
+        if role != .shell { recordThread(node, repo: repo, in: workspace) }
+        publishStatus()
+        if shouldReveal {
+            selection = .terminal(node.id)
+            reveal(.terminal(node.id))
+        }
         return node
     }
 
@@ -499,7 +643,7 @@ extension MeshvyStore {
 
         // An agent gone within seconds of starting never got going — most
         // often because `claude` is not on the PATH a login shell sees. The
-        // orchestrator's node folds back to its start prompt the moment its
+        // coordinator's node folds back to its start prompt the moment its
         // process ends, taking whatever the shell printed with it, so the
         // reason is kept on a banner instead of vanishing with the terminal.
         guard node.sessionID != nil, let code, code != 0, seconds < 15 else { return }

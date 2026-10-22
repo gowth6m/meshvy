@@ -46,7 +46,7 @@ public enum NodeKind {
     case terminal(TerminalNode)
     /// The parent node: the workspace itself, hosting its orchestrator.
     case workspace(Workspace)
-    /// A sub-agent the orchestrator dispatched with the Agent tool.
+    /// A sub-agent the coordinator dispatched with the Agent tool.
     case subAgent(SubAgent)
     /// A browser showing the running application, drivable by an agent.
     case browser(BrowserNode)
@@ -171,7 +171,7 @@ public struct CanvasEdge: Identifiable {
         case ranIn
         /// A terminal opened by hand in one of the workspace's repositories.
         case owns
-        /// The orchestrator dispatched this agent.
+        /// The coordinator dispatched this agent.
         case dispatched
         /// A browser is pointed at what the workspace is running.
         case watches

@@ -16,7 +16,7 @@ extension MeshvyStore {
     public func requestClose(_ terminalID: UUID) {
         guard let workspace = activeWorkspace else { return }
         if workspace.orchestrator?.id == terminalID {
-            requestStopOrchestrator()
+            requestStopCoordinator()
             return
         }
         guard let node = workspace.terminals.first(where: { $0.id == terminalID }),
@@ -34,19 +34,19 @@ extension MeshvyStore {
         )
     }
 
-    /// Stops the orchestrator, asking first while it is running.
-    public func requestStopOrchestrator() {
-        guard isOrchestratorRunning, let workspace = activeWorkspace else {
-            stopOrchestrator()
+    /// Stops the coordinator, asking first while it is running.
+    public func requestStopCoordinator() {
+        guard isCoordinatorRunning, let workspace = activeWorkspace else {
+            stopCoordinator()
             return
         }
         let working = workspace.orchestrator.flatMap { activity(for: $0) }?.state == .working
         confirmation = Confirmation(
-            title: "Stop the orchestrator?",
+            title: "Stop the coordinator?",
             message: (working ? "It is in the middle of a turn. " : "")
-                + "Claude Code on “\(workspace.name)” ends. Agents it started keep running in their own terminals.",
-            action: "Stop the orchestrator",
-            run: { [weak self] in self?.stopOrchestrator() }
+                + "The main chat for “\(workspace.name)” ends. Its threads keep running in their own terminals.",
+            action: "Stop the coordinator",
+            run: { [weak self] in self?.stopCoordinator() }
         )
     }
 

@@ -27,7 +27,7 @@ public struct ShortcutsSheet: View {
         [
             Section(title: "The board", rows: [
                 Row(keys: "V · H", what: "Select · hand. Esc always comes back to Select"),
-                Row(keys: "A · S · B", what: "Draw a new agent · shell · browser, then drag out its size"),
+                Row(keys: "A · S · B", what: "Draw a new thread · shell · browser, then drag out its size"),
                 Row(keys: "drag empty space", what: "Draw a box around nodes to select them; ⇧ adds to the selection"),
                 Row(keys: "space · scroll", what: "Pan. ⌘-scroll or pinch to zoom"),
                 Row(keys: "⌘0 · ⌘1", what: "Fit to content · actual size"),
@@ -44,10 +44,10 @@ public struct ShortcutsSheet: View {
                 Row(keys: "double-click a card", what: "Centre it")
             ]),
             Section(title: "Agents", rows: [
-                Row(keys: "⇧⌘T", what: "Start or focus the orchestrator"),
+                Row(keys: "⇧⌘T", what: "Start or focus the coordinator"),
                 Row(keys: "⌘T", what: "New shell"),
                 Row(keys: "⇧⇥", what: "Cycle the permission mode inside a running session"),
-                Row(keys: "⌥⌘N", what: "Jump to the next agent that needs you"),
+                Row(keys: "⌥⌘N", what: "Jump to the next thread that needs you"),
                 Row(keys: "the pill on a card", what: "Model, effort and permission mode — remembered for the next one")
             ]),
             Section(title: "Terminals and browsers", rows: [

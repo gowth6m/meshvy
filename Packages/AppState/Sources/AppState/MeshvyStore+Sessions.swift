@@ -78,7 +78,7 @@ extension MeshvyStore {
             DirectoryWatcher(paths: [home + "/.claude/projects"], debounce: 1.5) { [weak self] in
                 Task { @MainActor in
                     self?.reindexChangedTranscripts()
-                    // The orchestrator's dispatches land in the same transcript,
+                    // The coordinator's dispatches land in the same transcript,
                     // so a write there may mean a new sub-agent.
                     self?.refreshSubAgents()
                 }

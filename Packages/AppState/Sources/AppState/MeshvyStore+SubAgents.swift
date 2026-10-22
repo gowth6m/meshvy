@@ -1,11 +1,11 @@
 import AppKit
 import Foundation
 
-// Sub-agents the orchestrator dispatched with the Agent tool.
+// Sub-agents the coordinator dispatched with the Agent tool.
 extension MeshvyStore {
     // MARK: - Sub-agents
 
-    /// Re-reads the orchestrator's transcript for Agent-tool dispatches. Cheap
+    /// Re-reads the coordinator's transcript for Agent-tool dispatches. Cheap
     /// enough to run on every transcript write while it is working.
     public func refreshSubAgents() {
         guard let sessionID = activeWorkspace?.orchestrator?.sessionID,
@@ -46,25 +46,28 @@ extension MeshvyStore {
     public func restartTerminal(_ id: UUID) {
         guard let workspace = activeWorkspace else { return }
         if workspace.orchestrator?.id == id {
-            stopOrchestrator()
-            startOrchestrator()
+            stopCoordinator()
+            startCoordinator()
             return
         }
         guard let node = workspace.terminals.first(where: { $0.id == id }) else { return }
         closeTerminal(id)
-        openTerminal(role: node.role, repoID: node.repoID)
+        // A thread comes back as itself: same title, and the same id, so the
+        // coordinator can still reach it. Its old conversation does not come
+        // with it — the new session starts fresh.
+        openTerminal(role: node.role, repoID: node.repoID, title: node.title, bridgeID: node.bridgeID)
     }
 
     /// Resizes the workspace node itself.
     ///
     /// Which height this sets depends on what is in the node: it collapses to a
-    /// start prompt when no orchestrator is running, and the two states keep
+    /// start prompt when no coordinator is running, and the two states keep
     /// their own height. Without that, dragging the collapsed node taller wrote
     /// a number nothing read, and the node sprang back the moment you let go.
     public func resizeWorkspaceNode(to size: CGSize) {
         guard var workspace = activeWorkspace else { return }
         workspace.boardWidth = size.width
-        if isOrchestratorRunning { workspace.boardHeight = size.height }
+        if isCoordinatorRunning { workspace.boardHeight = size.height }
         else { workspace.idleBoardHeight = size.height }
         guard let position = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return }
         workspaces[position] = workspace

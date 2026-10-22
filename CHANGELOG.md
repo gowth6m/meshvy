@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+- **A workspace works the way a project does in Claude Code.** The agent on the
+  workspace node is now the **coordinator**: the main chat where you ask for
+  things. It hands each piece of work to a **thread** — a titled agent with its
+  own terminal — sends follow-ups to the thread that owns the work, and reports
+  back in a line or two. See [ADR 8](Docs/Architecture/0008-coordinator-and-threads.md).
+  - **Threads report back on their own.** When a thread finishes a turn or
+    needs a decision, Meshvy types a one-line `[meshvy]` note into the
+    coordinator, so it no longer has to block on `meshvy wait` to find out.
+  - **One thread per piece of work, not per repository.** `meshvy thread
+    "<title>" "<task>" [--repo <repo>]` starts one in a repository or at the
+    workspace root. `meshvy threads`, `meshvy resolve` are new; `spawn` and
+    `status` still work.
+  - **The sidebar is the project.** Coordinator first, then Threads with where
+    each one stands — Needs you, Ready, Working, Idle, Stopped — sorted by
+    what wants you, then Resolved folded away. Shells have their own short
+    list. `+` on Threads starts one you drive yourself, named by the first
+    thing you ask it.
+  - **Resolve a finished thread** from the sidebar, the inspector or its
+    card's menu. Nothing stops and nothing is deleted; writing to it again
+    reopens it.
+  - "Orchestrator" is "Coordinator" and "Agent" is "Thread" everywhere you can
+    see them. Saved boards decode unchanged.
+
 ## [0.12.0] - 2026-10-20
 
 - **The board works the way a canvas works.** Every node — a session card, a

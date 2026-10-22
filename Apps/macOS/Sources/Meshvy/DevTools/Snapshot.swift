@@ -100,7 +100,7 @@ enum SelfTest {
     }
 }
 
-/// Opens an orchestrator terminal in the active workspace and waits for the
+/// Opens a coordinator terminal in the active workspace and waits for the
 /// agent to register itself. `Meshvy --launchtest`.
 @MainActor
 enum LaunchTest {
@@ -115,10 +115,10 @@ enum LaunchTest {
 
         print("root: \(workspace.root)")
         print("--- brief ---")
-        print(AgentCommand.orchestratorBrief(workspace: workspace))
+        print(AgentCommand.coordinatorBrief(workspace: workspace))
         print("--- end brief ---")
 
-        store.startOrchestrator()
+        store.startCoordinator()
         guard let node = store.activeWorkspace?.orchestrator else {
             print("LAUNCHTEST FAILED: orchestrator did not start"); exit(1)
         }
@@ -171,11 +171,11 @@ enum LaunchTest {
     private static func dispatchTask(store: MeshvyStore) {
         guard let terminal = store.activeWorkspace?.orchestrator,
               let session = store.terminals.session(for: terminal.id) else {
-            print("LAUNCHTEST FAILED: no orchestrator session"); exit(1)
+            print("LAUNCHTEST FAILED: no coordinator session"); exit(1)
         }
-        let task = "Run: meshvy spawn api \"reply with the single word API and stop\" "
-            + "and then: meshvy spawn web \"reply with the single word WEB and stop\". "
-            + "Use the Bash tool. Do not use the Agent tool. Report the two agent ids."
+        let task = "Run: meshvy thread \"Say API\" \"reply with the single word API and stop\" --repo api "
+            + "and then: meshvy thread \"Say WEB\" \"reply with the single word WEB and stop\" --repo web. "
+            + "Use the Bash tool. Do not use the Agent tool. Report the two thread ids."
         print("sending task…")
         session.send(task)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -328,7 +328,7 @@ enum DiffTest {
     }
 }
 
-/// Exercises the agent bridge without an LLM: writes a spawn request the way
+/// Exercises the agent bridge without an LLM: writes a thread request the way
 /// the `meshvy` helper would, and checks a real terminal node appears.
 /// `Meshvy --bridgetest <repo>`.
 @MainActor
@@ -346,7 +346,7 @@ enum BridgeTest {
 
         let id = "test\(Int(Date().timeIntervalSince1970) % 100000)"
         let request = AgentBridge.Request(
-            id: id, kind: "spawn", repo: repo,
+            id: id, kind: "thread", title: "Bridge test", repo: repo,
             task: "reply with the single word BRIDGE and stop"
         )
         let path = workspace.requestsDirectory + "/\(id).json"
@@ -636,14 +636,14 @@ struct SnapshotRequest {
     var waitSeconds: Double
     var zoom: Double?
     var zoomToFit: Bool
-    /// Start the orchestrator and give it this task before rendering, so a
+    /// Start the coordinator and give it this task before rendering, so a
     /// documentation shot shows a terminal with real output in it.
     var orchestratorTask: String?
     /// Overlays to open before rendering, so the panels that only exist on a
     /// keystroke can be captured too.
     var palette: Bool
     var shortcuts: Bool
-    /// Start the orchestrator and wait for it to report, so the status chrome
+    /// Start the coordinator and wait for it to report, so the status chrome
     /// has something to show.
     var withAgent: Bool
     /// Open a browser node at this URL before rendering, so a board shot has the
@@ -735,7 +735,7 @@ enum Snapshot {
         }
 
         // Before the camera is placed, so the board is framed with it on, and
-        // before the orchestrator, so the page has the agent's whole run to
+        // before the coordinator, so the page has the agent's whole run to
         // load.
         if let url = request.browserURL {
             // Point the node the last shot left behind at this URL rather than
@@ -775,10 +775,10 @@ enum Snapshot {
             }
         }
 
-        // Bring an orchestrator up when one was asked for; its terminal is the
+        // Bring a coordinator up when one was asked for; its terminal is the
         // centre of a documentation shot.
-        if let task = request.orchestratorTask, !store.isOrchestratorRunning {
-            store.startOrchestrator()
+        if let task = request.orchestratorTask, !store.isCoordinatorRunning {
+            store.startCoordinator()
             settleOrchestrator(store: store, task: task, request: request, attempts: 360)
             return
         }
@@ -806,7 +806,7 @@ enum Snapshot {
             }
             return
         }
-        store.startOrchestrator()
+        store.startCoordinator()
         if let id = store.activeWorkspace?.id { store.select(.workspace(id)); store.reveal(.workspace(id)) }
         waitForAgent(store: store, request: request, attempts: 60)
     }
@@ -881,7 +881,7 @@ enum Snapshot {
         }
     }
 
-    /// Holds the render until the orchestrator's hooks have said something, so
+    /// Holds the render until the coordinator's hooks have said something, so
     /// `--agent` captures a board with live status on it rather than a blank card.
     private static func waitForAgent(store: MeshvyStore, request: SnapshotRequest, attempts: Int) {
         if !store.activity.isEmpty || attempts <= 0 {

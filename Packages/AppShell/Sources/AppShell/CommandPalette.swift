@@ -301,28 +301,35 @@ public enum PaletteCommands {
 
         if store.hasWorkspace {
             items.append(item(
-                "act:orchestrator",
-                store.isOrchestratorRunning ? "Go to orchestrator" : "Start orchestrator",
-                "point.3.connected.trianglepath.dotted",
+                "act:coordinator",
+                store.isCoordinatorRunning ? "Go to the coordinator" : "Start the coordinator",
+                TerminalNode.Role.orchestrator.icon,
                 subtitle: store.activeWorkspace?.root.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
-                keywords: "claude code agent start run",
+                keywords: "claude code coordinator orchestrator main chat start run",
                 tint: Theme.accent,
                 shortcut: "⇧⌘T"
             ) {
-                if store.isOrchestratorRunning, let id = store.activeWorkspace?.id {
+                if store.isCoordinatorRunning, let id = store.activeWorkspace?.id {
                     store.reveal(.workspace(id))
                 } else {
-                    store.startOrchestrator()
+                    store.startCoordinator()
                 }
             })
 
+            items.append(item(
+                "act:thread", "New thread", TerminalNode.Role.repo.icon,
+                subtitle: "Work you drive yourself, at the workspace root",
+                keywords: "claude agent thread task",
+                tint: Theme.worktree
+            ) { store.newThread() })
+
             for repo in store.activeWorkspace?.readyRepos ?? [] {
                 items.append(item(
-                    "act:agent:" + repo.id, "New agent in \(repo.name)", "hammer.fill",
+                    "act:agent:" + repo.id, "New thread in \(repo.name)", TerminalNode.Role.repo.icon,
                     subtitle: repo.worktreePath.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
-                    keywords: "claude terminal agent repo " + repo.name,
+                    keywords: "claude terminal agent thread repo " + repo.name,
                     tint: Theme.worktree
-                ) { store.openTerminal(role: .repo, repoID: repo.id) })
+                ) { store.newThread(repoID: repo.id) })
                 items.append(item(
                     "act:shell:" + repo.id, "New shell in \(repo.name)", "terminal.fill",
                     keywords: "bash zsh terminal " + repo.name

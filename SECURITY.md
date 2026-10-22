@@ -24,7 +24,7 @@ broad permissions, on purpose.**
 
 It starts real `claude` processes in real PTYs, in git worktrees cut from your
 repositories, and by default it pre-approves some of what they do so an
-orchestrator is not stopped every few seconds for permission. An agent doing
+coordinator is not stopped every few seconds for permission. An agent doing
 something destructive to a workspace is the tool working as designed, not a
 vulnerability. The things that *would* be vulnerabilities are below.
 

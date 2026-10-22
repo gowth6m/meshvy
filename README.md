@@ -8,14 +8,15 @@ whole operation in front of you — in a native macOS app.
 
 Meshvy starts empty. You add the repositories you work on together as a
 **workspace**; it cuts one branch across all of them and checks each out side
-by side under `~/.meshvy/`. Open Claude Code on the workspace node and every
-repository is a subdirectory beneath it, so one orchestrator can put a real
-agent — with its own terminal — on each of them.
+by side under `~/.meshvy/`. It works the way a project does in Claude Code: the
+workspace node hosts one **coordinator**, the main chat where you ask for
+things, and it hands each piece of work to a **thread** — a real agent with its
+own terminal — and tells you briefly how each one went.
 
 ![The board](Docs/board.png)
 
-One workspace across three repositories, the orchestrator delegating an agent
-to two of them, and the app they are all changing running on the board beside
+One workspace across three repositories, the coordinator with a thread working
+in two of them, and the app they are all changing running on the board beside
 them. Every screenshot here is the app drawing itself — see
 [Shots](#shots).
 
@@ -95,23 +96,50 @@ Creating it is one step: name it, pick the repositories, choose the base branch
 to cut from. Another branch means another workspace.
 
 **The workspace node** is the parent on the canvas. It names the branch, shows
-a chip per repository, and hosts the orchestrator's Claude Code session in its
-own body — the working directory *is* that folder. A repository has no node of
-its own: its chip is where it lives on the board.
+a chip per repository, and hosts the coordinator in its own body — the working
+directory *is* that folder. A repository has no node of its own: its chip is
+where it lives on the board.
 
-**Delegated agents are real terminals.** When the orchestrator splits work up,
-each teammate is a full Claude Code session with its own terminal node you can
-read, interrupt and type into. It delegates through a `meshvy` helper that
+### Coordinator and threads
+
+A workspace is organised the way a project is in Claude Code.
+
+- **The coordinator is the main chat.** It runs on the workspace node, and it
+  is where you type what you want. It plans, answers quick questions, and hands
+  each separate piece of work to a thread instead of doing it itself.
+- **A thread is one piece of work** with its own Claude Code agent and its own
+  terminal on the board. It has a short title, works in one repository or at
+  the workspace root when the work spans several, and carries the work through
+  to the end. You can open any thread and type to it directly.
+- **Follow-ups go to the thread that owns the work.** Ask the coordinator for a
+  change to something a thread did and it sends it there rather than starting
+  another.
+- **Threads report back.** When a thread finishes a turn or needs a decision,
+  Meshvy tells the coordinator, which tells you in a line or two. You never
+  have to watch every terminal.
+- **Finished threads are resolved.** Resolving puts a thread away without
+  stopping or deleting anything; writing to it again reopens it.
+
+The sidebar reads in that order: the **Coordinator** first, then **Threads**,
+each with where it stands — *Needs you*, *Ready*, *Working*, *Idle* or
+*Stopped*, whatever wants you sorted first — and the resolved ones folded
+away underneath. `+` on the Threads header starts one you drive yourself.
+
+The coordinator starts and talks to threads with a `meshvy` helper that
 Meshvy puts on its PATH:
 
 ```sh
-meshvy spawn <repo> "<task>"   # start an agent there; prints an agent id
-meshvy wait <id>               # block until it finishes, print what it reported
-meshvy send <id> "<message>"   # type a follow-up into its terminal
-meshvy context <id>            # read what another agent has been doing
-meshvy status                  # every agent on the board and its state
-meshvy list
+meshvy thread "<title>" "<task>" [--repo <repo>]   # start a thread; prints its id
+meshvy send <id> "<message>"   # a follow-up to that thread
+meshvy threads                 # every thread and where it stands
+meshvy context <id>            # read what a thread has been doing
+meshvy wait <id>               # block until it finishes its turn, print its report
+meshvy resolve <id>            # put a finished thread away
 ```
+
+Reports from threads arrive in the coordinator's chat as a single line
+starting with `[meshvy]`, so it knows they are not from you. `meshvy spawn
+<repo> "<task>"` and `meshvy status`, from before threads, still work.
 
 Claude's own Agent tool is deliberately avoided for this: its sub-agents run
 *inside* the parent process, with no pid and no pty, so there is nothing a
@@ -119,9 +147,9 @@ terminal can attach to and you cannot watch or steer them. If one gets used
 anyway it still appears as a card read from the parent's transcript, so no work
 is invisible.
 
-**Terminals** come in three kinds — the workspace orchestrator, a per-repo
-agent, and a plain shell. Right-click a repository, on the workspace node or in
-the sidebar, for the last two.
+**Terminals** come in three kinds — the coordinator, a thread, and a plain
+shell. Right-click a repository, on the workspace node or in the sidebar, for
+the last two.
 
 **Browser nodes** put the running application on the board next to the agents
 building it — see [The browser](#the-browser).
@@ -176,18 +204,19 @@ how an agent addresses that node.
 
 ## What's on the board
 
-Five kinds of node, and every edge runs back to the workspace: an agent was
+Five kinds of node, and every edge runs back to the workspace: a thread was
 *dispatched* by it, a session *ran in* it, a browser *watches* what it is
 building.
 
-**The workspace node** hosts the orchestrator's session in its own body and
+**The workspace node** hosts the coordinator in its own body and
 names every repository under it, a chip each, marked when it has uncommitted
 work. Repositories are not nodes — the board is for what runs in them. Click a
-chip for that repository's [changes](#changes); right-click it to open an agent,
+chip for that repository's [changes](#changes); right-click it to start a thread,
 a shell or a browser there.
 
-**Terminal nodes** are the agents and the shells — each a real pty you can
-read, interrupt and type into.
+**Terminal nodes** are the threads and the shells — each a real pty you can
+read, interrupt and type into. A thread's header carries where it stands, and a
+resolved one stays where it was, dimmed.
 
 **Browser nodes** are the running application, purple so they are findable on a
 board of agents.
@@ -214,7 +243,7 @@ sidebar — to see every file it has touched against HEAD: modified, added,
 deleted, renamed, untracked, with per-file `+/−` counts and a unified diff
 showing both line numbers. Select the workspace node instead and you get
 the same list across every repository at once, which is the view you want after
-an orchestrator run.
+a coordinator run.
 
 ![Changes](Docs/changes.png)
 
@@ -231,11 +260,11 @@ line it matched — the one thing the canvas cannot tell you.
 
 | | |
 |---|---|
-| Tools | Select V · Hand H · Agent A · Shell S · Browser B |
+| Tools | Select V · Hand H · Thread A · Shell S · Browser B |
 | Command palette | ⌘K |
 | New workspace | ⇧⌘N |
 | Add repositories | ⇧⌘O |
-| Start / focus orchestrator | ⇧⌘T |
+| Start / focus the coordinator | ⇧⌘T |
 | Shell at the workspace root | ⌘T |
 | New browser | ⌘B |
 | Archive the workspace | ⌥⌘A |
@@ -287,7 +316,7 @@ archived:
 ### First run in a new workspace
 
 Claude Code asks you to trust a folder it has not seen, so the first
-orchestrator in a workspace shows its trust prompt — press Enter. Meshvy
+coordinator in a workspace shows its trust prompt — press Enter. Meshvy
 deliberately does not pre-answer it: that would mean writing to
 `~/.claude.json`, which every running Claude Code also writes, and a
 read-modify-write there could clobber their changes.
@@ -442,10 +471,10 @@ belongs.
 ```sh
 Meshvy --snapshot out.png                    # see Shots below for the flags
 Meshvy --selftest <repoA> <repoB> [--keep] [--name N] [--branch B]
-Meshvy --bridgetest <repo>                   # spawn an agent through the bridge, no LLM
+Meshvy --bridgetest <repo>                   # start a thread through the bridge, no LLM
 Meshvy --browsertest [--keep]                # a real page, the MCP server, and the app
 Meshvy --hooktest [--keep]                   # the hook events a session reports
-Meshvy --launchtest                          # live orchestrator that delegates
+Meshvy --launchtest                          # live coordinator that starts threads
 Meshvy --zoomtest                            # terminal magnifies without reflowing
 Meshvy --difftest <worktree>                 # change list and a parsed diff
 Meshvy --formattest                          # an older board still decodes
@@ -478,7 +507,7 @@ captured in an offscreen window just before the render.
 | `--width` · `--height` | the window to render, in points; the PNG is 2× |
 | `--zoom 0.8` | fixed scale on the selection, instead of fitting the board |
 | `--browser <url>` | put a browser node on the board, pointed there |
-| `--orchestrator "<task>"` | start an agent, give it this, and wait for the turn to end |
+| `--orchestrator "<task>"` | start the coordinator, give it this, and wait for the turn to end |
 | `--select workspace\|browser\|repo` | what the inspector should be showing |
 | `--tidy` | hand the free terminals and browsers back to the layout first |
 | `--palette` · `--shortcuts` | the overlays that only exist on a keystroke |
@@ -488,7 +517,7 @@ captured in an offscreen window just before the render.
 `make-shots.sh` builds the board the images are taken against rather than using
 whatever is on your machine: three throwaway repositories from `Docs/demo/`,
 one workspace cut across them, a dev server for the web one, and a real
-orchestrator run that delegates an agent to two of them. It puts everything
+coordinator run that starts a thread in two of them. It puts everything
 back afterwards — the worktrees, the scratch repos, and its own entry in your
 board. The agents are real, so a full run costs what the agents cost.
 

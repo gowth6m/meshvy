@@ -3,9 +3,9 @@ import MeshvyCore
 import MeshvyModels
 import SwiftUI
 
-/// A sub-agent the orchestrator dispatched, shown as its own node.
+/// A sub-agent the coordinator dispatched, shown as its own node.
 ///
-/// These are Agent-tool calls inside the orchestrator's session, not separate
+/// These are Agent-tool calls inside the coordinator's session, not separate
 /// processes, so everything here is read out of the parent's transcript.
 public struct SubAgentNodeView: View {
     public var agent: SubAgent

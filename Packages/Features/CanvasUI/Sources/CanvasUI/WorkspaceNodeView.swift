@@ -11,11 +11,11 @@ import TerminalKit
 // terminal is reached through `TerminalSession.surface` as a plain NSView.
 
 /// The parent node. It names the workspace, lists the repositories that belong
-/// to it, and hosts the orchestrator's Claude Code session in its body.
+/// to it, and hosts the coordinator — the workspace's main chat — in its body.
 ///
-/// Opening Claude Code here rather than in a floating window is the point: the
-/// orchestrator's working directory *is* this workspace, and every repository
-/// shown in the header is a subdirectory of it.
+/// Opening the coordinator here rather than in a floating window is the point:
+/// its working directory *is* this workspace, every repository shown in the
+/// header is a subdirectory of it, and every thread it starts hangs off it.
 public struct WorkspaceNodeView: View {
     @Environment(\.meshvySnapshotMode) private var isSnapshot
     public var workspace: Workspace
@@ -114,17 +114,17 @@ public struct WorkspaceNodeView: View {
                 } else {
                     HStack(spacing: zoom.s(4)) {
                         Circle().fill(Theme.clean).frame(width: zoom.s(6), height: zoom.s(6))
-                        Text("Claude Code")
+                        Text("Coordinator")
                             .font(zoom.font(10, .semibold))
                             .foregroundStyle(Theme.clean)
                     }
                 }
-                Button { store.requestStopOrchestrator() } label: {
+                Button { store.requestStopCoordinator() } label: {
                     Image(systemName: "stop.circle").font(zoom.font(11))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.textTertiary)
-                .help("Stop the orchestrator")
+                .help("Stop the coordinator")
             }
         }
         .padding(.horizontal, zoom.s(12))
@@ -163,7 +163,7 @@ public struct WorkspaceNodeView: View {
                 .buttonStyle(.plain)
                 .help(repo.failure ?? repo.worktreePath)
                 .contextMenu {
-                    Button("Open agent terminal here") { store.openTerminal(role: .repo, repoID: repo.id) }
+                    Button("New thread here") { store.newThread(repoID: repo.id) }
                     Button("Open shell here") { store.openTerminal(role: .shell, repoID: repo.id) }
                     Button("Open a browser here") { store.openBrowser(repoID: repo.id) }
                     Divider()
@@ -207,7 +207,7 @@ public struct WorkspaceNodeView: View {
     private var zoomedOutPlaceholder: some View {
         VStack(spacing: zoom.s(5)) {
             Image(systemName: "terminal.fill").font(zoom.font(15)).foregroundStyle(Theme.accent.opacity(0.6))
-            Text("Claude Code running — zoom in to read")
+            Text("Coordinator running — zoom in to read")
                 .font(zoom.font(10))
                 .foregroundStyle(Theme.textTertiary)
         }
@@ -221,16 +221,16 @@ public struct WorkspaceNodeView: View {
 
     private var startPrompt: some View {
         VStack(spacing: zoom.s(10)) {
-            Image(systemName: claudeMissing ? "exclamationmark.triangle" : "point.3.connected.trianglepath.dotted")
+            Image(systemName: claudeMissing ? "exclamationmark.triangle" : TerminalNode.Role.orchestrator.icon)
                 .font(zoom.font(22, .light))
                 .foregroundStyle(claudeMissing ? Theme.dirty : Theme.accent.opacity(0.8))
             VStack(spacing: zoom.s(3)) {
-                Text(claudeMissing ? "Claude Code is not installed" : "Open Claude Code here")
+                Text(claudeMissing ? "Claude Code is not installed" : "Start the coordinator")
                     .font(zoom.font(12.5, .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(claudeMissing
-                    ? "Meshvy runs the claude CLI, and a login shell here cannot find it. Install it and sign in once, then start the orchestrator."
-                    : "Runs at the workspace root, with all \(workspace.repos.count) repos beneath it, and hands work to an agent in each.")
+                    ? "Meshvy runs the claude CLI, and a login shell here cannot find it. Install it and sign in once, then start the coordinator."
+                    : "This is the workspace's main chat. Tell it what you want; it starts a thread for each piece of work and reports back here.")
                     .font(zoom.font(10.5))
                     .foregroundStyle(Theme.textTertiary)
                     .multilineTextAlignment(.center)
@@ -243,9 +243,9 @@ public struct WorkspaceNodeView: View {
                         store.openClaudeCodeInstallPage()
                     }
                     // The check could be wrong; the terminal will say so if not.
-                    promptButton("play.fill", "Start anyway", prominent: false) { store.startOrchestrator() }
+                    promptButton("play.fill", "Start anyway", prominent: false) { store.startCoordinator() }
                 } else {
-                    promptButton("play.fill", "Start orchestrator", prominent: true) { store.startOrchestrator() }
+                    promptButton("play.fill", "Start coordinator", prominent: true) { store.startCoordinator() }
                 }
             }
         }
