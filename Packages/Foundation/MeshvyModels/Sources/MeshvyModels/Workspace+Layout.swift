@@ -16,7 +16,7 @@ extension Workspace {
     /// Spawn and send requests dropped by the `meshvy` helper.
     public var requestsDirectory: String { meshvyDirectory + "/requests" }
 
-    /// One file per agent the orchestrator has delegated to.
+    /// One file per agent the coordinator has delegated to.
     public var agentsDirectory: String { meshvyDirectory + "/agents" }
 
     /// Helpers put on an agent's `PATH`.

@@ -5,9 +5,15 @@ import MeshvyCore
 import MeshvyModels
 import SwiftUI
 
-/// Left rail: every workspace, with its repositories nested underneath.
+/// Left rail: the open workspace's coordinator and threads, then every
+/// workspace with its repositories nested underneath.
 ///
-/// Workspaces are the organising unit, so they are all listed here — not just
+/// The top half reads like a project in Claude Code. The coordinator is the
+/// one main chat, where you ask for things; each piece of work it hands out is
+/// a thread, listed under it with where it stands, whatever needs you first.
+/// Finished threads are resolved out of the way.
+///
+/// Workspaces are the organising unit, so they are all listed below — not just
 /// the open one. Clicking a repository puts its changes in the inspector and
 /// pans to the workspace node its chip sits on; clicking a different workspace
 /// switches the board.
@@ -15,6 +21,7 @@ public struct Sidebar: View {
     @Bindable public var store: MeshvyStore
     @Binding public var sheet: MeshvySheet?
     @State private var collapsed: Set<UUID> = []
+    @State private var showResolved = false
     @FocusState private var searchFocused: Bool
 
     public var body: some View {
@@ -23,7 +30,9 @@ public struct Sidebar: View {
             Divider().overlay(Theme.hairline)
             ScrollableStack(alignment: .leading) {
                 VStack(alignment: .leading, spacing: 2) {
-                    runningSection
+                    coordinatorSection
+                    threadsSection
+                    shellsSection
                     browsersSection
                     SectionHeader(
                         title: "Workspaces",
@@ -112,79 +121,218 @@ public struct Sidebar: View {
         DispatchQueue.main.async { searchFocused = true }
     }
 
-    /// Every live terminal, orchestrator included, ordered by how much it wants
-    /// your attention. On a board of a dozen agents this is the list you read
-    /// first — the canvas tells you where they are, this tells you who is stuck.
+    // MARK: - Coordinator and threads
+
+    /// The workspace's main chat. Always the first row, running or not, so
+    /// where to ask for something is never in question.
     @ViewBuilder
-    private var runningSection: some View {
-        let running = (store.activeWorkspace?.allTerminals ?? [])
-            .filter { store.terminals.isRunning($0.id) }
-            .sorted { lhs, rhs in
-                let left = store.activity(for: lhs)?.state.precedence ?? -1
-                let right = store.activity(for: rhs)?.state.precedence ?? -1
-                return left == right ? lhs.createdAt < rhs.createdAt : left > right
+    private var coordinatorSection: some View {
+        if let workspace = store.activeWorkspace {
+            let node = workspace.orchestrator
+            let isRunning = store.isCoordinatorRunning
+            let activity = node.flatMap { store.activity(for: $0) }
+            let id = NodeID.workspace(workspace.id)
+            SectionHeader(title: "Coordinator", count: nil, tint: Theme.accent)
+            SidebarRow(
+                isSelected: store.selection == id,
+                action: { isRunning ? store.reveal(id) : store.startCoordinator() }
+            ) {
+                HStack(spacing: 7) {
+                    Image(systemName: TerminalNode.Role.orchestrator.icon)
+                        .font(Theme.ui(10))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 13)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Main chat")
+                            .font(Theme.ui(11.5, .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        Text(isRunning
+                            ? (activity?.line ?? "Ask for something; it starts the threads")
+                            : "Not running — click to start")
+                            .font(Theme.ui(9.5))
+                            .foregroundStyle(activity?.state == .blocked ? Theme.needsYou : Theme.textTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 0)
+                    if let node, store.isUnread(node.id) {
+                        UnreadDot(zoom: Zoom(scale: 1))
+                    } else if !isRunning {
+                        Image(systemName: "play.fill")
+                            .font(Theme.ui(8.5, .bold))
+                            .foregroundStyle(Theme.accent)
+                    } else if let state = activity?.state, state.badge != nil {
+                        AgentBadge(state: state, zoom: Zoom(scale: 1))
+                    }
+                }
             }
-        if !running.isEmpty {
-            SectionHeader(
-                title: "Agents",
-                count: running.count,
-                tint: Theme.busy,
-                trailing: store.agentsNeedingYou.isEmpty
-                    ? nil : "\(store.agentsNeedingYou.count) waiting"
-            )
-            ForEach(running) { terminal in
-                agentRow(terminal)
+            .help(isRunning
+                ? "The coordinator: tell it what you want, and it starts a thread for each piece of work"
+                : "Start the coordinator (⇧⌘T)")
+            .contextMenu {
+                if isRunning, let node {
+                    Button("Restart") { store.restartTerminal(node.id) }
+                    Divider()
+                    Button("Stop the coordinator", role: .destructive) { store.requestStopCoordinator() }
+                } else {
+                    Button("Start the coordinator") { store.startCoordinator() }
+                }
             }
             Spacer().frame(height: 14)
         }
     }
 
-    private func agentRow(_ terminal: TerminalNode) -> some View {
-        let id = store.canvasID(for: terminal)
-        let activity = store.activity(for: terminal)
-        let tint: Color = switch activity?.state {
-        case .working: Theme.busy
-        case .blocked: Theme.needsYou
-        case .done: Theme.clean
-        default: Theme.textTertiary
+    /// One row per piece of work, whatever wants you first. Resolved threads
+    /// fold into one line at the bottom.
+    @ViewBuilder
+    private var threadsSection: some View {
+        if store.hasWorkspace {
+            let open = store.openThreads
+            let resolved = store.resolvedThreads
+            let waiting = open.filter { store.threadState(for: $0) == .needsYou }.count
+            SectionHeader(
+                title: "Threads",
+                count: open.count,
+                tint: Theme.worktree,
+                trailing: waiting == 0 ? nil : "\(waiting) need\(waiting == 1 ? "s" : "") you",
+                action: ("plus", "New thread you drive yourself", { store.newThread() })
+            )
+            ForEach(open) { thread in
+                threadRow(thread)
+            }
+            if open.isEmpty {
+                Text(store.isCoordinatorRunning
+                    ? "Ask the coordinator for something and its threads appear here."
+                    : "Start the coordinator, then ask it for something. Each piece of work becomes a thread here.")
+                    .font(Theme.ui(10.5))
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+            }
+            if !resolved.isEmpty {
+                Button {
+                    showResolved.toggle()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: showResolved ? "chevron.down" : "chevron.right")
+                            .font(Theme.ui(8, .bold))
+                            .frame(width: 10)
+                        Text("Resolved")
+                            .font(Theme.ui(10.5, .medium))
+                        Text("\(resolved.count)")
+                            .font(Theme.mono(9.5, .semibold))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if showResolved {
+                    ForEach(resolved) { thread in
+                        threadRow(thread)
+                    }
+                }
+            }
+            Spacer().frame(height: 14)
         }
+    }
+
+    private func threadRow(_ thread: TerminalNode) -> some View {
+        let id = store.canvasID(for: thread)
+        let state = store.threadState(for: thread)
+        let activity = store.activity(for: thread)
+        let place = store.activeWorkspace?.repos.first { $0.id == thread.repoID }?.name ?? "workspace"
         return SidebarRow(isSelected: store.selection == id, action: { store.reveal(id) }) {
-            HStack(spacing: 7) {
-                Image(systemName: terminal.role.icon)
-                    .font(Theme.ui(9.5))
-                    .foregroundStyle(terminal.role == .orchestrator ? Theme.accent : Theme.worktree)
-                    .frame(width: 13)
+            HStack(alignment: .top, spacing: 7) {
+                Group {
+                    if store.isUnread(thread.id) {
+                        UnreadDot(zoom: Zoom(scale: 1))
+                    } else {
+                        Image(systemName: state.icon)
+                            .font(Theme.ui(9.5))
+                            .foregroundStyle(ThreadStatePill.tint(state))
+                    }
+                }
+                .frame(width: 13, height: 15)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(terminal.title)
+                    Text(thread.title)
                         .font(Theme.ui(11.5, .medium))
-                        .foregroundStyle(Theme.textPrimary)
+                        .foregroundStyle(thread.isResolved ? Theme.textSecondary : Theme.textPrimary)
                         .lineLimit(1)
-                    Text(activity?.line ?? activity?.state.label ?? terminal.role.label)
-                        .font(Theme.mono(9.5))
-                        .foregroundStyle(tint)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    HStack(spacing: 4) {
+                        Text(state.label)
+                            .foregroundStyle(ThreadStatePill.tint(state))
+                        Text("·")
+                        Text(activity?.line ?? place)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .font(Theme.ui(9.5))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                if store.isUnread(terminal.id) {
-                    UnreadDot(zoom: Zoom(scale: 1))
-                } else {
-                    Circle().fill(tint).frame(width: 5, height: 5)
-                }
             }
         }
-        // The same verbs the node itself offers, so stopping an agent does not
-        // mean finding it on the board first.
+        .help(thread.openingTask ?? thread.title)
+        // The same verbs the node itself offers, so dealing with a thread does
+        // not mean finding it on the board first.
         .contextMenu {
-            Button("Restart") { store.restartTerminal(terminal.id) }
-            Button("Reveal folder in Finder") { store.revealInFinder(terminal.cwd) }
-            Button("Copy folder path") { store.copyToClipboard(terminal.cwd) }
-            Divider()
-            if terminal.role == .orchestrator {
-                Button("Stop the orchestrator", role: .destructive) { store.requestStopOrchestrator() }
+            if thread.isResolved {
+                Button("Reopen") { store.reopenThread(thread.id) }
             } else {
-                Button("Close terminal", role: .destructive) { store.requestClose(terminal.id) }
+                Button("Resolve") { store.resolveThread(thread.id) }
             }
+            Button("Restart") { store.restartTerminal(thread.id) }
+            Divider()
+            if let bridgeID = thread.bridgeID {
+                Button("Copy thread id") { store.copyToClipboard(bridgeID) }
+            }
+            Button("Reveal folder in Finder") { store.revealInFinder(thread.cwd) }
+            Divider()
+            Button("Close thread", role: .destructive) { store.requestClose(thread.id) }
+        }
+    }
+
+    /// Plain shells are not threads — nobody reports from them — so they get
+    /// their own short list, and only while one is open.
+    @ViewBuilder
+    private var shellsSection: some View {
+        let shells = store.shells
+        if !shells.isEmpty {
+            SectionHeader(title: "Shells", count: shells.count, tint: Theme.textTertiary)
+            ForEach(shells) { shell in
+                SidebarRow(
+                    isSelected: store.selection == .terminal(shell.id),
+                    action: { store.reveal(.terminal(shell.id)) }
+                ) {
+                    HStack(spacing: 7) {
+                        Image(systemName: shell.role.icon)
+                            .font(Theme.ui(9.5))
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 13)
+                        Text(shell.title)
+                            .font(Theme.ui(11.5))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        if !store.terminals.isRunning(shell.id) {
+                            Text("exited").font(Theme.ui(9.5)).foregroundStyle(Theme.textTertiary)
+                        }
+                    }
+                }
+                .contextMenu {
+                    Button("Restart") { store.restartTerminal(shell.id) }
+                    Button("Reveal folder in Finder") { store.revealInFinder(shell.cwd) }
+                    Divider()
+                    Button("Close shell", role: .destructive) { store.requestClose(shell.id) }
+                }
+            }
+            Spacer().frame(height: 14)
         }
     }
 
@@ -337,9 +485,9 @@ public struct Sidebar: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                Button("Open orchestrator terminal") {
+                Button("Open the coordinator") {
                     store.activate(workspace.id)
-                    store.openTerminal(role: .orchestrator)
+                    store.startCoordinator()
                 }
                 Button("Add repositories…") {
                     store.activate(workspace.id)
@@ -412,7 +560,7 @@ public struct Sidebar: View {
             .padding(.leading, 16)
         }
         .contextMenu {
-            Button("Open agent terminal here") { store.openTerminal(role: .repo, repoID: repo.id) }
+            Button("New thread here") { store.newThread(repoID: repo.id) }
             Button("Open shell here") { store.openTerminal(role: .shell, repoID: repo.id) }
             Button("Open a browser here") { store.openBrowser(repoID: repo.id) }
             Divider()
@@ -432,10 +580,10 @@ public struct Sidebar: View {
 
 private struct SectionHeader: View {
     public var title: String
-    public var count: Int
+    public var count: Int?
     public var tint: SwiftUI.Color
-    public var trailing: String?
-    public var action: (icon: String, help: String, run: () -> Void)?
+    public var trailing: String? = nil
+    public var action: (icon: String, help: String, run: () -> Void)? = nil
 
     public var body: some View {
         HStack(spacing: 5) {
@@ -443,9 +591,11 @@ private struct SectionHeader: View {
                 .font(Theme.ui(9.5, .heavy))
                 .tracking(0.7)
                 .foregroundStyle(tint)
-            Text("\(count)")
-                .font(Theme.mono(9.5, .semibold))
-                .foregroundStyle(Theme.textTertiary)
+            if let count {
+                Text("\(count)")
+                    .font(Theme.mono(9.5, .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+            }
             Spacer(minLength: 0)
             if let trailing {
                 Text(trailing).font(Theme.ui(9.5)).foregroundStyle(Theme.textTertiary)

@@ -62,7 +62,7 @@ public struct InspectorView: View {
     /// What each kind of selection shows here, so the panel teaches the board
     /// rather than waiting for a click. It used to name sessions and
     /// repositories only — not the workspace or its agents, which are what
-    /// matter most once an orchestrator has run.
+    /// matter most once a coordinator has run.
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "square.on.square.dashed")
@@ -74,7 +74,7 @@ public struct InspectorView: View {
             VStack(alignment: .leading, spacing: 7) {
                 hint("rectangle.3.group.fill", Theme.accent, "The workspace", "every change, across every repo")
                 hint("square.on.square", Theme.worktree, "A repository", "its changed files and their diffs")
-                hint("hammer.fill", Theme.busy, "An agent", "what it is doing, and its settings")
+                hint(TerminalNode.Role.repo.icon, Theme.busy, "A thread", "where it stands, and its settings")
                 hint("globe", Theme.branch, "A browser", "what the page has logged")
             }
             .padding(.vertical, 2)
@@ -228,9 +228,9 @@ public struct InspectorView: View {
                         .font(Theme.ui(15, .bold))
                         .foregroundStyle(Theme.textPrimary)
                     Spacer(minLength: 0)
-                    Text(store.isOrchestratorRunning ? "running" : "idle")
+                    Text(store.isCoordinatorRunning ? "running" : "idle")
                         .font(Theme.ui(10, .heavy))
-                        .foregroundStyle(store.isOrchestratorRunning ? Theme.clean : Theme.textTertiary)
+                        .foregroundStyle(store.isCoordinatorRunning ? Theme.clean : Theme.textTertiary)
                 }
 
                 FieldGrid(rows: [
@@ -245,16 +245,16 @@ public struct InspectorView: View {
                 ])
 
                 HStack(spacing: 6) {
-                    if store.isOrchestratorRunning {
-                        ChromeButton(icon: "stop.circle", label: "Stop", help: "Stop the orchestrator") {
-                            store.requestStopOrchestrator()
+                    if store.isCoordinatorRunning {
+                        ChromeButton(icon: "stop.circle", label: "Stop", help: "Stop the coordinator") {
+                            store.requestStopCoordinator()
                         }
                     } else {
                         ChromeButton(
-                            icon: "play.fill", label: "Start Claude Code",
-                            help: "Start the orchestrator at the workspace root (⇧⌘T)"
+                            icon: "play.fill", label: "Start coordinator",
+                            help: "Start the coordinator at the workspace root (⇧⌘T)"
                         ) {
-                            store.startOrchestrator()
+                            store.startCoordinator()
                         }
                     }
                     ChromeButton(icon: "plus", label: "Repos", help: "Add repositories (⇧⌘O)") { sheet = .addRepos }
@@ -544,7 +544,10 @@ public struct InspectorView: View {
                 agentState(activity)
             }
             FieldGrid(rows: [
-                .init(label: "Role", value: terminal.role.label),
+                .init(
+                    label: terminal.isThread ? "Thread" : "Role",
+                    value: terminal.isThread ? store.threadState(for: terminal).label : terminal.role.label
+                ),
                 .init(
                     label: "Permission mode",
                     value: (terminal.permissionMode ?? store.permissionMode).label
@@ -571,6 +574,17 @@ public struct InspectorView: View {
                 }
                 ChromeButton(icon: "folder", help: "Reveal the folder in Finder") { store.revealInFinder(terminal.cwd) }
                 Spacer(minLength: 0)
+                if terminal.isThread {
+                    if terminal.isResolved {
+                        ChromeButton(icon: "arrow.uturn.backward", label: "Reopen", help: "Put it back in the list of open threads") {
+                            store.reopenThread(terminal.id)
+                        }
+                    } else {
+                        ChromeButton(icon: "checkmark.seal", label: "Resolve", help: "The work is done: put it away") {
+                            store.resolveThread(terminal.id)
+                        }
+                    }
+                }
                 // Labelled: an unexplained cross that ends an agent mid-task
                 // is the last button that should be a guess.
                 ChromeButton(icon: "xmark", label: "Close", help: "Close the terminal") {
@@ -637,8 +651,8 @@ public struct InspectorView: View {
                 }
 
                 HStack(spacing: 6) {
-                    ChromeButton(icon: "hammer.fill", label: "Agent", help: "Start a Claude Code agent in this repository") {
-                        store.openTerminal(role: .repo, repoID: repoID)
+                    ChromeButton(icon: TerminalNode.Role.repo.icon, label: "Thread", help: "Start a thread in this repository") {
+                        store.newThread(repoID: repoID)
                     }
                     ChromeButton(icon: "terminal", label: "Shell", help: "Open a shell in this repository") {
                         store.openTerminal(role: .shell, repoID: repoID)

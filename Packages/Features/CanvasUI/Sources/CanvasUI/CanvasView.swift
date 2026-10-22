@@ -613,15 +613,16 @@ public struct CanvasView: View {
 
     // MARK: - Creating
 
-    /// An agent has to work somewhere, and a rectangle cannot say where. One
-    /// repository in the workspace answers itself; more than one asks.
+    /// A thread has to work somewhere, and a rectangle cannot say where. One
+    /// repository in the workspace answers itself; more than one asks, with
+    /// the workspace root as the answer for work that spans them.
     private func offerAgent(in frame: CGRect) {
         let repos = store.activeWorkspace?.readyRepos ?? []
         guard !repos.isEmpty else {
             store.show(.init(
                 kind: .info,
                 title: "No repositories yet",
-                detail: "Add one to the workspace and an agent will have somewhere to work."
+                detail: "Add one to the workspace and a thread will have somewhere to work."
             ))
             return
         }
@@ -639,22 +640,28 @@ public struct CanvasView: View {
         store.select(.terminal(node.id))
     }
 
+    /// The whole workspace first, then each repository.
+    private var spawnChoices: [WorkspaceRepo?] {
+        [nil] + (store.activeWorkspace?.readyRepos ?? []).map { Optional($0) }
+    }
+
     /// Where a drawn rectangle is waiting for a repository to be named.
     @ViewBuilder
     private var spawnPicker: some View {
         if let frame = pendingSpawn {
             let projected = store.viewport.project(frame)
             VStack(alignment: .leading, spacing: 4) {
-                Text("NEW AGENT IN")
+                Text("NEW THREAD IN")
                     .font(Theme.ui(9, .heavy)).tracking(0.7)
                     .foregroundStyle(Theme.textTertiary)
                     .padding(.bottom, 2)
-                ForEach(store.activeWorkspace?.readyRepos ?? []) { repo in
+                ForEach(spawnChoices, id: \.?.id) { repo in
                     Button { pendingSpawn = nil; open(role: .repo, repo: repo, in: frame) } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: "hammer.fill")
+                            Image(systemName: repo == nil ? "rectangle.3.group" : "square.on.square")
                                 .font(Theme.ui(9)).foregroundStyle(Theme.worktree)
-                            Text(repo.name).font(Theme.ui(11.5)).foregroundStyle(Theme.textPrimary)
+                            Text(repo?.name ?? "Whole workspace")
+                                .font(Theme.ui(11.5)).foregroundStyle(Theme.textPrimary)
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 8).padding(.vertical, 5)
@@ -886,16 +893,24 @@ public struct CanvasView: View {
     private func menu(for node: CanvasNode, links: [WorkspaceLink]) -> some View {
         switch node.kind {
         case .workspace(let workspace):
-            if store.isOrchestratorRunning {
-                Button("Restart Claude Code") { store.restartTerminal(workspace.orchestrator!.id) }
-                Button("Stop Claude Code") { store.requestStopOrchestrator() }
+            if store.isCoordinatorRunning {
+                Button("Restart the coordinator") { store.restartTerminal(workspace.orchestrator!.id) }
+                Button("Stop the coordinator") { store.requestStopCoordinator() }
             } else {
-                Button("Start Claude Code") { store.startOrchestrator() }
+                Button("Start the coordinator") { store.startCoordinator() }
             }
             Divider()
             Button("Add repositories…") { sheet = .addRepos }
             Button("Reveal folder in Finder") { store.revealInFinder(workspace.root) }
         case .terminal(let terminal):
+            if terminal.isThread {
+                if terminal.isResolved {
+                    Button("Reopen thread") { store.reopenThread(terminal.id) }
+                } else {
+                    Button("Resolve thread") { store.resolveThread(terminal.id) }
+                }
+                Divider()
+            }
             Button("Restart") { store.restartTerminal(terminal.id) }
             Button("Reveal folder in Finder") { store.revealInFinder(terminal.cwd) }
             Button("Copy folder path") { store.copyToClipboard(terminal.cwd) }

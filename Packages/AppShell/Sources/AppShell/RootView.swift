@@ -128,7 +128,7 @@ public struct RootView: View {
             store.updates.check(announceNoUpdate: true)
             sheet = .update
         }
-        .onReceive(of: .meshvyOpenOrchestrator) { if store.hasWorkspace { store.startOrchestrator() } }
+        .onReceive(of: .meshvyOpenCoordinator) { if store.hasWorkspace { store.startCoordinator() } }
         .onReceive(of: .meshvyOpenShell) { if store.hasWorkspace { store.openTerminal(role: .shell) } }
         .onReceive(of: .meshvyOpenBrowser) { if store.hasWorkspace { store.openBrowser() } }
         .onReceive(of: .meshvyArchiveWorkspace) {
@@ -172,8 +172,8 @@ public struct EmptyStateView: View {
                         "Each is checked out side by side under ~/.meshvy. Your own clones are left alone."
                     )
                     step(
-                        3, "Start the orchestrator",
-                        "Claude Code at the workspace root, handing work to an agent in each repository."
+                        3, "Talk to the coordinator",
+                        "Tell it what you want. It starts a thread for each piece of work and reports back."
                     )
                 }
                 .frame(maxWidth: 400, alignment: .leading)
@@ -347,16 +347,16 @@ private struct TopBar: View {
             if store.hasWorkspace {
                 archiveButton
                 AccentButton(
-                    icon: store.isOrchestratorRunning ? "point.3.connected.trianglepath.dotted" : "play.fill",
-                    label: store.isOrchestratorRunning ? "Go to orchestrator" : "Start Claude Code"
+                    icon: store.isCoordinatorRunning ? TerminalNode.Role.orchestrator.icon : "play.fill",
+                    label: store.isCoordinatorRunning ? "Coordinator" : "Start coordinator"
                 ) {
-                    if store.isOrchestratorRunning, let id = store.activeWorkspace?.id {
+                    if store.isCoordinatorRunning, let id = store.activeWorkspace?.id {
                         store.reveal(.workspace(id))
                     } else {
-                        store.startOrchestrator()
+                        store.startCoordinator()
                     }
                 }
-                .help("Claude Code runs on the workspace node, with every repo beneath it")
+                .help("The workspace's main chat: it takes your requests and starts a thread for each piece of work")
                 .padding(.leading, 3)
 
                 AgentSettingsPicker(store: store)
@@ -724,7 +724,7 @@ extension Notification.Name {
     public static let meshvyAddRepos = Notification.Name("meshvy.addRepos")
     public static let meshvyCheckForUpdates = Notification.Name("meshvy.checkForUpdates")
     public static let meshvyUninstall = Notification.Name("meshvy.uninstall")
-    public static let meshvyOpenOrchestrator = Notification.Name("meshvy.openOrchestrator")
+    public static let meshvyOpenCoordinator = Notification.Name("meshvy.openCoordinator")
     public static let meshvyOpenShell = Notification.Name("meshvy.openShell")
     public static let meshvyOpenBrowser = Notification.Name("meshvy.openBrowser")
     public static let meshvyArchiveWorkspace = Notification.Name("meshvy.archiveWorkspace")

@@ -26,7 +26,7 @@ extension MeshvyStore {
             sized: sized,
             claimedSessions: terminals.claimedSessionIDs,
             showEnded: showEndedSessions,
-            orchestratorRunning: isOrchestratorRunning
+            coordinatorRunning: isCoordinatorRunning
         ))
         recomputeMatches()
         // A node that has left the board cannot stay selected — an agent that
@@ -68,6 +68,8 @@ extension MeshvyStore {
             "\(workspace.readyRepos.count) \(workspace.readyRepos.count == 1 ? "repo" : "repos") on \(workspace.branch)",
             "\(sessions) \(sessions == 1 ? "session" : "sessions")"
         ]
+        let open = openThreads.count
+        if open > 0 { parts.append("\(open) open \(open == 1 ? "thread" : "threads")") }
         if running > 0 { parts.append("\(running) \(running == 1 ? "terminal" : "terminals") running") }
         let working = workspace.allTerminals.filter { activity(for: $0)?.state == .working }.count
         if working > 0 { parts.append("\(working) working") }
@@ -445,7 +447,7 @@ extension MeshvyStore {
     // MARK: - Links
     //
     // Every other edge on the board is derived: a terminal owns the checkout it
-    // runs in, the orchestrator dispatched the agent it spawned. A link is the
+    // runs in, the coordinator dispatched the agent it spawned. A link is the
     // one the board cannot work out, so it is stored on the workspace — and,
     // when the far end is an agent that is running, delivered to it.
 

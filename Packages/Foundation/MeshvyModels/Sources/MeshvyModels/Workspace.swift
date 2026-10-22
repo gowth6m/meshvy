@@ -5,7 +5,7 @@ import MeshvyCore
 /// A workspace is a set of worktrees — one per repository — all cut from the
 /// same base on the same branch, living side by side under one folder.
 ///
-/// That folder is the parent the orchestrator works from: the repositories are
+/// That folder is the parent the coordinator works from: the repositories are
 /// literally its subdirectories, so an agent started there can see and change
 /// all of them without any extra plumbing.
 public struct Workspace: Identifiable, Codable, Hashable {
@@ -18,17 +18,18 @@ public struct Workspace: Identifiable, Codable, Hashable {
     /// `~/.meshvy/<slug>` — contains one subdirectory per repository.
     public var root: String
     public var repos: [WorkspaceRepo] = []
-    /// The Claude Code session that sits on top of the whole workspace. It is
-    /// hosted by the workspace node itself rather than floating separately.
+    /// The coordinator: the Claude Code session that is the workspace's main
+    /// chat. It is hosted by the workspace node itself rather than floating
+    /// separately. (Named `orchestrator` on disk, from before threads.)
     public var orchestrator: TerminalNode?
-    /// Per-repo agents and plain shells, placed freely on the board.
+    /// Threads and plain shells, placed freely on the board.
     public var terminals: [TerminalNode] = []
     /// Browser nodes on the board — a page you can watch and an agent can drive.
     public var browsers: [BrowserNode] = []
     /// Links drawn by hand between two nodes. The composer derives every other
     /// edge from the shape of the workspace; these are the ones you decide.
     public var links: [WorkspaceLink] = []
-    /// Size of the workspace node on the board while an orchestrator is
+    /// Size of the workspace node on the board while a coordinator is
     /// running in it.
     public var boardWidth: Double = 780
     public var boardHeight: Double = 520
@@ -46,9 +47,11 @@ public struct Workspace: Identifiable, Codable, Hashable {
 
     public var readyRepos: [WorkspaceRepo] { repos.filter(\.isReady) }
     public var isArchived: Bool { archivedAt != nil }
-    /// Every terminal on the board, orchestrator included.
+    /// Every terminal on the board, coordinator included.
     public var allTerminals: [TerminalNode] { (orchestrator.map { [$0] } ?? []) + terminals }
-    /// Height the node collapses to when no orchestrator is running, before
+    /// Every thread, open or resolved, oldest first.
+    public var threads: [TerminalNode] { terminals.filter(\.isThread) }
+    /// Height the node collapses to when no coordinator is running, before
     /// anyone has resized it.
     public static let idleHeight: Double = 186
     public var worktreePaths: [String] { readyRepos.map(\.worktreePath) }
@@ -109,7 +112,7 @@ public struct Workspace: Identifiable, Codable, Hashable {
 /// target should have.
 ///
 /// Every other edge on the board is derived — a terminal owns the checkout it
-/// runs in, the orchestrator dispatched the agent it spawned. This is the one
+/// runs in, the coordinator dispatched the agent it spawned. This is the one
 /// kind the board cannot work out for itself, so it is stored.
 public struct WorkspaceLink: Codable, Hashable, Identifiable {
     public var from: NodeID
@@ -277,26 +280,32 @@ public enum AgentEffort: String, Codable, CaseIterable, Identifiable {
 /// Position and size are persisted so a board keeps its shape; the running
 /// process is not — terminals are re-opened on demand rather than resurrected.
 public struct TerminalNode: Identifiable, Codable, Hashable {
+    /// The raw values predate the coordinator-and-threads model and are kept
+    /// as they are, so every board saved before it still decodes.
     public enum Role: String, Codable {
-        /// Runs at the workspace root, with every repository beneath it.
+        /// The coordinator: the workspace's one main chat. Runs at the
+        /// workspace root, takes your requests and hands each piece of work to
+        /// a thread.
         case orchestrator
-        /// Runs in one repository's checkout.
+        /// A thread: one piece of work, with its own agent. Runs in one
+        /// repository's checkout, or at the workspace root when the work spans
+        /// several.
         case repo
         /// A plain shell, no agent.
         case shell
 
         public var label: String {
             switch self {
-            case .orchestrator: return "Orchestrator"
-            case .repo: return "Agent"
+            case .orchestrator: return "Coordinator"
+            case .repo: return "Thread"
             case .shell: return "Shell"
             }
         }
 
         public var icon: String {
             switch self {
-            case .orchestrator: return "point.3.connected.trianglepath.dotted"
-            case .repo: return "hammer.fill"
+            case .orchestrator: return "bubble.left.and.bubble.right.fill"
+            case .repo: return "text.bubble.fill"
             case .shell: return "terminal.fill"
             }
         }
@@ -311,8 +320,8 @@ public struct TerminalNode: Identifiable, Codable, Hashable {
     /// Session id pre-assigned to the `claude` process, so the board can match
     /// the transcript to this node instead of drawing a duplicate card.
     public var sessionID: String?
-    /// Set when the orchestrator spawned this agent through the bridge, so
-    /// `meshvy send` can address it.
+    /// The short id `meshvy send`, `meshvy context` and the coordinator's
+    /// reports address this thread by. Every thread has one, whoever started it.
     public var bridgeID: String?
     /// The instruction it was started with.
     public var openingTask: String?
@@ -323,6 +332,10 @@ public struct TerminalNode: Identifiable, Codable, Hashable {
     public var model: String?
     /// Effort it was launched with, and what `/effort` has since set it to.
     public var effort: AgentEffort?
+    /// Set when a thread's work is finished and it has been put away. It stays
+    /// on disk and on the board; it only leaves the list of open threads, and
+    /// writing to it again reopens it.
+    public var resolvedAt: Date?
     public var x: Double = 0
     public var y: Double = 0
     public var width: Double = 620
@@ -338,6 +351,9 @@ public struct TerminalNode: Identifiable, Codable, Hashable {
         get { CGSize(width: width, height: height) }
         set { width = newValue.width; height = newValue.height }
     }
+
+    public var isThread: Bool { role == .repo }
+    public var isResolved: Bool { resolvedAt != nil }
 
     public init(
         id: UUID = UUID(), role: Role, title: String, cwd: String,
@@ -365,6 +381,7 @@ public struct TerminalNode: Identifiable, Codable, Hashable {
         permissionMode = fields.optional(PermissionMode.self, .permissionMode)
         model = fields.optional(String.self, .model)
         effort = fields.optional(AgentEffort.self, .effort)
+        resolvedAt = fields.optional(Date.self, .resolvedAt)
         x = fields.value(.x, or: 0)
         y = fields.value(.y, or: 0)
         width = fields.value(.width, or: 620)
@@ -382,24 +399,24 @@ public enum AgentRole: String, Codable, CaseIterable, Identifiable {
 
     public var label: String {
         switch self {
-        case .orchestrator: return "Orchestrator"
-        case .worker: return "Worker"
+        case .orchestrator: return "Coordinator"
+        case .worker: return "Thread"
         }
     }
 
     public var detail: String {
         switch self {
         case .orchestrator:
-            return "Plans across every repo in the workspace and dispatches sub-agents to do the work."
+            return "Takes your requests, starts a thread for each piece of work, and reports back."
         case .worker:
-            return "Carries out one scoped task."
+            return "Carries one piece of work through to the end."
         }
     }
 
     public var icon: String {
         switch self {
-        case .orchestrator: return "point.3.connected.trianglepath.dotted"
-        case .worker: return "hammer"
+        case .orchestrator: return "bubble.left.and.bubble.right.fill"
+        case .worker: return "text.bubble.fill"
         }
     }
 }

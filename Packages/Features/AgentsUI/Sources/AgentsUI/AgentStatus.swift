@@ -312,3 +312,43 @@ public enum AgentSettingsSummary {
         return Format.model(id) ?? store.models.displayName(for: id)
     }
 }
+
+/// Where a thread stands, as one small pill: the thing you scan the thread
+/// list and the board for. Same shape as `AgentBadge`, so the two read as one
+/// family, but always present — a thread's state is its headline.
+public struct ThreadStatePill: View {
+    public var state: ThreadState
+    public var zoom: Zoom
+
+    public init(state: ThreadState, zoom: Zoom = Zoom(scale: 1)) {
+        self.state = state
+        self.zoom = zoom
+    }
+
+    public static func tint(_ state: ThreadState) -> Color {
+        switch state {
+        case .needsYou: return Theme.needsYou
+        case .working: return Theme.busy
+        case .ready: return Theme.clean
+        case .idle, .stopped, .resolved: return Theme.textTertiary
+        }
+    }
+
+    public var body: some View {
+        let tint = Self.tint(state)
+        HStack(spacing: zoom.s(3)) {
+            Image(systemName: state.icon).font(zoom.font(7.5, .bold))
+            Text(state.label.uppercased())
+                .font(zoom.font(7.5, .heavy))
+                .tracking(zoom.s(0.5))
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, zoom.s(5))
+        .padding(.vertical, zoom.s(2))
+        .background(
+            RoundedRectangle(cornerRadius: zoom.s(3.5), style: .continuous)
+                .fill(tint.opacity(0.14))
+        )
+        .fixedSize()
+    }
+}

@@ -87,7 +87,8 @@ public struct TerminalNodeView: View {
                 )
         )
         .shadow(color: .black.opacity(isSelected ? 0.55 : 0.35), radius: zoom.s(isSelected ? 18 : 10), y: zoom.s(5))
-        .opacity(isDimmed ? 0.25 : 1)
+        // A resolved thread stays where it was, quieter, until it is needed.
+        .opacity(isDimmed ? 0.25 : (node.isResolved ? 0.6 : 1))
     }
 
     private var header: some View {
@@ -103,7 +104,11 @@ public struct TerminalNodeView: View {
                 .font(zoom.font(11.5, .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
-            if let state = activity?.state, state.badge != nil {
+            if node.isThread {
+                // A thread's headline is where it stands, the same pill the
+                // sidebar lists it with.
+                ThreadStatePill(state: store.threadState(for: node), zoom: zoom)
+            } else if let state = activity?.state, state.badge != nil {
                 AgentBadge(state: state, zoom: zoom)
             } else {
                 Text(node.role.label.uppercased())
@@ -142,7 +147,7 @@ public struct TerminalNodeView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.textTertiary)
-            .help(node.sessionID != nil && isRunning ? "Close terminal and stop the agent" : "Close terminal")
+            .help(node.isThread && isRunning ? "Close the thread and stop its agent" : "Close terminal")
         }
         .padding(.horizontal, zoom.s(10))
         .frame(height: zoom.c(BoardMetrics.Chrome.header))

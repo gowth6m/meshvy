@@ -5,11 +5,11 @@ import MeshvyModels
 
 /// Lays out one workspace as a tree.
 ///
-/// The workspace itself is the parent node — it hosts the orchestrator's Claude
+/// The workspace itself is the parent node — it hosts the coordinator's Claude
 /// Code session and names the repositories that belong to it. A repository is a
 /// chip on the parent, not a node of its own: the board is for what runs in
 /// them. Past sessions sit in a row beneath the parent, a column for each
-/// repository they ran in, and every agent the orchestrator dispatches appears
+/// repository they ran in, and every agent the coordinator dispatches appears
 /// as its own node to the side, linked back to the parent.
 public struct BoardComposer {
     public init() {}
@@ -26,7 +26,7 @@ public struct BoardComposer {
         /// Sessions already shown by a terminal node, so no duplicate card.
         public var claimedSessions: Set<String>
         public var showEnded: Bool
-        public var orchestratorRunning: Bool
+        public var coordinatorRunning: Bool
 
         public init(
             workspace: Workspace,
@@ -38,7 +38,7 @@ public struct BoardComposer {
             sized: [String: CGSize] = [:],
             claimedSessions: Set<String>,
             showEnded: Bool,
-            orchestratorRunning: Bool
+            coordinatorRunning: Bool
         ) {
             self.workspace = workspace
             self.sessions = sessions
@@ -49,7 +49,7 @@ public struct BoardComposer {
             self.sized = sized
             self.claimedSessions = claimedSessions
             self.showEnded = showEnded
-            self.orchestratorRunning = orchestratorRunning
+            self.coordinatorRunning = coordinatorRunning
         }
     }
 
@@ -65,7 +65,7 @@ public struct BoardComposer {
         // 1. The parent.
         let parentSize = CGSize(
             width: workspace.boardWidth,
-            height: input.orchestratorRunning ? workspace.boardHeight : workspace.idleBoardHeight
+            height: input.coordinatorRunning ? workspace.boardHeight : workspace.idleBoardHeight
         )
         graph.nodes.append(CanvasNode(
             id: parent,
@@ -117,7 +117,7 @@ public struct BoardComposer {
             columnX += columnWidth + gap
         }
 
-        // 3. Sub-agents the orchestrator dispatched, to the right of the parent.
+        // 3. Sub-agents the coordinator dispatched, to the right of the parent.
         var agentY: CGFloat = 0
         let agentX = parentSize.width + rowGap
         for agent in input.subAgents {
@@ -151,7 +151,7 @@ public struct BoardComposer {
                 size: terminal.size,
                 repoID: terminal.repoID
             ))
-            // An agent the orchestrator spawned is its child; draw that so the
+            // An agent the coordinator spawned is its child; draw that so the
             // delegation tree is visible. One you opened in a repository yourself
             // still belongs to the workspace, and the repository is a chip on
             // the parent rather than a node, so its edge runs to the parent too.

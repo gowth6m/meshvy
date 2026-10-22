@@ -102,6 +102,8 @@ public enum AgentHooks {
         public var tool: String?
         public var detail: String?
         public var message: String?
+        /// What was typed to start the turn — the first line of it.
+        public var prompt: String?
         /// A turn starting, so the turn counter moves.
         public var startsTurn = false
         /// A tool call starting, so the tool counter moves.
@@ -114,6 +116,7 @@ public enum AgentHooks {
             tool: String? = nil,
             detail: String? = nil,
             message: String? = nil,
+            prompt: String? = nil,
             startsTurn: Bool = false,
             startsTool: Bool = false
         ) {
@@ -123,6 +126,7 @@ public enum AgentHooks {
             self.tool = tool
             self.detail = detail
             self.message = message
+            self.prompt = prompt
             self.startsTurn = startsTurn
             self.startsTool = startsTool
         }
@@ -175,6 +179,7 @@ public enum AgentHooks {
         case "UserPromptSubmit":
             event.state = .working
             event.startsTurn = true
+            event.prompt = (payload["prompt"] as? String).map { AgentHooks.firstLine($0) }
         case "PreToolUse":
             event.state = .working
             event.startsTool = true

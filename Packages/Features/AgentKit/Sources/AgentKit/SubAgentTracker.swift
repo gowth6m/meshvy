@@ -5,7 +5,7 @@ import MeshvyModels
 
 /// Reads sub-agents out of a live transcript.
 ///
-/// Called repeatedly while an orchestrator works, so it parses only the tail of
+/// Called repeatedly while a coordinator works, so it parses only the tail of
 /// the file and only the lines that can possibly matter.
 public struct SubAgentTracker {
     public init() {}
@@ -56,7 +56,7 @@ public struct SubAgentTracker {
                     guard let id = block["id"] as? String else { continue }
                     let input = block["input"] as? [String: Any] ?? [:]
                     let prompt = input["prompt"] as? String ?? ""
-                    // The orchestrator usually supplies a description; fall back
+                    // The coordinator usually supplies a description; fall back
                     // to the head of the prompt, and to a label when it gave
                     // neither.
                     let derived = prompt.isEmpty ? "Sub-agent" : String(prompt.prefix(60))

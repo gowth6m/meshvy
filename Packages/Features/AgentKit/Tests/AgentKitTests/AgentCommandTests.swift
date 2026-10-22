@@ -9,7 +9,7 @@ struct AgentCommandTests {
     private let workspace = Workspace(name: "Payments revamp", branch: "payments-revamp", root: "/tmp/ws")
 
     private func argv(_ options: AgentCommand.Options = .init()) -> [String] {
-        AgentCommand.orchestrator(workspace: workspace, sessionID: "sid-1", name: "orc", options: options)
+        AgentCommand.coordinator(workspace: workspace, sessionID: "sid-1", name: "orc", options: options)
     }
 
     /// Value following `flag` in an argv, or nil when the flag is absent.
@@ -85,18 +85,28 @@ struct AgentCommandTests {
         #expect(AgentCommand.allowedTools.contains("Bash(meshvy:*)"))
     }
 
-    @Test("the orchestrator is briefed with the workspace's repositories")
-    func orchestratorBrief() {
-        let brief = AgentCommand.orchestratorBrief(workspace: workspace)
+    @Test("the coordinator is briefed with the workspace's repositories")
+    func coordinatorBrief() {
+        let brief = AgentCommand.coordinatorBrief(workspace: workspace)
         #expect(brief.contains("Payments revamp"))
         #expect(brief.contains("payments-revamp"))
     }
 
+    // The whole model rests on the coordinator handing work out rather than
+    // doing it, and on it knowing the reports typed into it are not the person.
+    @Test("the coordinator is told to start threads and how reports arrive")
+    func coordinatorBriefModel() {
+        let brief = AgentCommand.coordinatorBrief(workspace: workspace)
+        #expect(brief.contains("meshvy thread"))
+        #expect(brief.contains("meshvy send"))
+        #expect(brief.contains("[meshvy]"))
+    }
+
     @Test("a derived name is branch-safe and says what the agent is")
     func derivedName() {
-        let orchestrator = AgentCommand.derivedName(role: .orchestrator, context: "Payments revamp")
-        #expect(orchestrator.hasPrefix("payments-revamp-orc-"))
-        #expect(AgentCommand.derivedName(role: .repo, context: "Web").hasPrefix("web-agt-"))
+        let coordinator = AgentCommand.derivedName(role: .orchestrator, context: "Payments revamp")
+        #expect(coordinator.hasPrefix("payments-revamp-coord-"))
+        #expect(AgentCommand.derivedName(role: .repo, context: "Web").hasPrefix("web-thread-"))
     }
 
     @Test("derived names do not collide")
@@ -105,21 +115,59 @@ struct AgentCommandTests {
         #expect(Set(names).count == names.count)
     }
 
-    @Test("an agent given a task gets it as its opening message")
-    func repoAgentTask() {
+    @Test("a thread given a task gets it as its opening message")
+    func threadTask() {
         let repo = WorkspaceRepo(id: "r", name: "api", originPath: "/tmp/api", worktreePath: "/tmp/ws/api")
-        let argv = AgentCommand.repoAgent(
+        let argv = AgentCommand.thread(
             workspace: workspace, repo: repo, sessionID: "s", name: "n", task: "Fix the login bug"
         )
         #expect(argv.last == "Fix the login bug")
     }
 
-    @Test("an agent with no task gets no trailing message")
-    func repoAgentNoTask() {
+    @Test("a thread with no task gets no trailing message")
+    func threadNoTask() {
         let repo = WorkspaceRepo(id: "r", name: "api", originPath: "/tmp/api", worktreePath: "/tmp/ws/api")
-        let argv = AgentCommand.repoAgent(workspace: workspace, repo: repo, sessionID: "s", name: "n")
+        let argv = AgentCommand.thread(workspace: workspace, repo: repo, sessionID: "s", name: "n")
         #expect(argv.last != "")
         #expect(!argv.contains(""))
+    }
+
+    @Test("a thread with no repository works from the workspace root")
+    func threadAtRoot() {
+        let brief = AgentCommand.threadBrief(workspace: workspace, repo: nil, title: "Rename the field")
+        #expect(brief.contains("workspace root"))
+        #expect(brief.contains("Rename the field"))
+    }
+}
+
+@Suite("AgentBridge")
+struct AgentBridgeTests {
+    // Typed into the coordinator's terminal, so a newline would submit it
+    // half-written.
+    @Test("a report is one line, whatever the thread said")
+    func reportIsOneLine() {
+        let line = AgentBridge.report(
+            id: "abc123", title: "Fix login", state: .ready, message: "Done.\nTests pass.\r\nShipped."
+        )
+        #expect(!line.contains("\n"))
+        #expect(!line.contains("\r"))
+        #expect(line.hasPrefix("[meshvy]"))
+        #expect(line.contains("abc123"))
+        #expect(line.contains("Fix login"))
+    }
+
+    @Test("a thread waiting on the person says so")
+    func reportNeedsYou() {
+        let line = AgentBridge.report(id: "x", title: "T", state: .needsYou, message: "Allow Bash?")
+        #expect(line.contains("needs the person"))
+        #expect(line.contains("Allow Bash?"))
+    }
+
+    @Test("thread ids are short and distinct")
+    func ids() {
+        let ids = (0..<50).map { _ in AgentBridge.newID() }
+        #expect(Set(ids).count == ids.count)
+        #expect(ids.allSatisfy { $0.count == 10 })
     }
 }
 

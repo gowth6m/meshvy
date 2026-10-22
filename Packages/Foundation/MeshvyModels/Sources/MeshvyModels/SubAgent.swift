@@ -1,6 +1,6 @@
 import Foundation
 
-/// A sub-agent the orchestrator dispatched with the Agent tool.
+/// A sub-agent the coordinator dispatched with the Agent tool.
 ///
 /// These never appear in `~/.claude/sessions` — the Agent tool runs them inside
 /// the parent session, so the only record is a `tool_use` block in the parent's
@@ -15,7 +15,7 @@ public struct SubAgent: Identifiable, Hashable {
 
     /// The tool-use id, stable for the life of the call.
     public var id: String
-    /// Short label the orchestrator gave the task.
+    /// Short label the coordinator gave the task.
     public var title: String
     /// Which agent definition was used, e.g. `general-purpose`.
     public var kind: String

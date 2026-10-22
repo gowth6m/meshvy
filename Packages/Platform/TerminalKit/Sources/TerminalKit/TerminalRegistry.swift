@@ -72,7 +72,7 @@ public final class TerminalSession: NSObject, Identifiable, LocalProcessTerminal
         )
     }
 
-    /// Sends text as if typed. Used to give an orchestrator a follow-up task.
+    /// Sends text as if typed. Used to give a coordinator a follow-up task.
     public func send(_ text: String) {
         view.send(txt: text)
     }

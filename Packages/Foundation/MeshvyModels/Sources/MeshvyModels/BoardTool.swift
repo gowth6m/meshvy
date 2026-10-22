@@ -13,7 +13,7 @@ public enum BoardTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     case select
     /// Pan, for people who would rather drag the board than the scroll wheel.
     case hand
-    /// Draw a new Claude Code agent.
+    /// Draw a new thread: a Claude Code agent for one piece of work.
     case agent
     /// Draw a new plain shell.
     case shell
@@ -36,7 +36,7 @@ public enum BoardTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         switch self {
         case .select: return "Select"
         case .hand: return "Hand"
-        case .agent: return "Agent"
+        case .agent: return "Thread"
         case .shell: return "Shell"
         case .browser: return "Browser"
         }
@@ -60,7 +60,7 @@ public enum BoardTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         switch self {
         case .select: return "cursorarrow"
         case .hand: return "hand.raised"
-        case .agent: return "hammer.fill"
+        case .agent: return TerminalNode.Role.repo.icon
         case .shell: return "terminal.fill"
         case .browser: return "globe"
         }
@@ -70,7 +70,7 @@ public enum BoardTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         switch self {
         case .select: return "Select, move, resize and link"
         case .hand: return "Drag the board — or hold space with any tool"
-        case .agent: return "Drag out a Claude Code agent"
+        case .agent: return "Drag out a new thread"
         case .shell: return "Drag out a plain shell"
         case .browser: return "Drag out a browser"
         }

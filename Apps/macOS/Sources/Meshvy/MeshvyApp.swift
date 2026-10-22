@@ -41,8 +41,8 @@ struct MeshvyCommands: Commands {
                 NotificationCenter.default.post(name: .meshvyNewWorkspace, object: nil)
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
-            Button("Open Orchestrator Terminal") {
-                NotificationCenter.default.post(name: .meshvyOpenOrchestrator, object: nil)
+            Button("Open the Coordinator") {
+                NotificationCenter.default.post(name: .meshvyOpenCoordinator, object: nil)
             }
             .keyboardShortcut("t", modifiers: [.command, .shift])
             Button("Open Shell") {
