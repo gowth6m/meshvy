@@ -130,8 +130,11 @@ public struct Sidebar: View {
         if let workspace = store.activeWorkspace {
             let node = workspace.orchestrator
             let isRunning = store.isCoordinatorRunning
-            let activity = node.flatMap { store.activity(for: $0) }
+            let activity: AgentActivity? = node.flatMap { store.activity(for: $0) }
             let id = NodeID.workspace(workspace.id)
+            let subtitle: String = isRunning
+                ? (activity?.line ?? "Ask for something; it starts the threads")
+                : "Not running — click to start"
             SectionHeader(title: "Coordinator", count: nil, tint: Theme.accent)
             SidebarRow(
                 isSelected: store.selection == id,
@@ -147,9 +150,7 @@ public struct Sidebar: View {
                             .font(Theme.ui(11.5, .semibold))
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
-                        Text(isRunning
-                            ? (activity?.line ?? "Ask for something; it starts the threads")
-                            : "Not running — click to start")
+                        Text(subtitle)
                             .font(Theme.ui(9.5))
                             .foregroundStyle(activity?.state == .blocked ? Theme.needsYou : Theme.textTertiary)
                             .lineLimit(1)
@@ -190,7 +191,7 @@ public struct Sidebar: View {
         if store.hasWorkspace {
             let open = store.openThreads
             let resolved = store.resolvedThreads
-            let waiting = open.filter { store.threadState(for: $0) == .needsYou }.count
+            let waiting: Int = open.filter { store.threadState(for: $0) == .needsYou }.count
             SectionHeader(
                 title: "Threads",
                 count: open.count,
@@ -245,7 +246,8 @@ public struct Sidebar: View {
         let id = store.canvasID(for: thread)
         let state = store.threadState(for: thread)
         let activity = store.activity(for: thread)
-        let place = store.activeWorkspace?.repos.first { $0.id == thread.repoID }?.name ?? "workspace"
+        let repo: WorkspaceRepo? = store.activeWorkspace?.repos.first { $0.id == thread.repoID }
+        let place: String = activity?.line ?? repo?.name ?? "workspace"
         return SidebarRow(isSelected: store.selection == id, action: { store.reveal(id) }) {
             HStack(alignment: .top, spacing: 7) {
                 Group {
@@ -267,7 +269,7 @@ public struct Sidebar: View {
                         Text(state.label)
                             .foregroundStyle(ThreadStatePill.tint(state))
                         Text("·")
-                        Text(activity?.line ?? place)
+                        Text(place)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }

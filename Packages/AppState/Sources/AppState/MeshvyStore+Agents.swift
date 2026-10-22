@@ -130,18 +130,25 @@ extension MeshvyStore {
 
     /// Threads still part of the work in hand, whatever wants you first.
     public var openThreads: [TerminalNode] {
-        (activeWorkspace?.threads ?? [])
-            .filter { !$0.isResolved }
-            .map { ($0, threadState(for: $0).rank) }
-            .sorted { $0.1 == $1.1 ? $0.0.createdAt > $1.0.createdAt : $0.1 < $1.1 }
-            .map(\.0)
+        let open: [TerminalNode] = (activeWorkspace?.threads ?? []).filter { !$0.isResolved }
+        var rank: [UUID: Int] = [:]
+        for node in open { rank[node.id] = threadState(for: node).rank }
+        return open.sorted { lhs, rhs in
+            let left = rank[lhs.id] ?? 0
+            let right = rank[rhs.id] ?? 0
+            if left != right { return left < right }
+            return lhs.createdAt > rhs.createdAt
+        }
     }
 
     /// Threads put away, most recent first.
     public var resolvedThreads: [TerminalNode] {
-        (activeWorkspace?.threads ?? [])
-            .filter(\.isResolved)
-            .sorted { ($0.resolvedAt ?? .distantPast) > ($1.resolvedAt ?? .distantPast) }
+        let resolved: [TerminalNode] = (activeWorkspace?.threads ?? []).filter(\.isResolved)
+        return resolved.sorted { lhs, rhs in
+            let left: Date = lhs.resolvedAt ?? .distantPast
+            let right: Date = rhs.resolvedAt ?? .distantPast
+            return left > right
+        }
     }
 
     /// Plain shells — not threads, and not part of the coordinator's work.
