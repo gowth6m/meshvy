@@ -39,6 +39,11 @@ struct NodeFrame: View {
     /// Said instead of the ring when the link already exists — `store.link`
     /// refuses a duplicate silently, and a silent refusal reads as a bug.
     var isAlreadyLinked: Bool
+    /// The handle being dragged right now, if it is one of this node's. It
+    /// stays on screen even when the node has grown too small for it to be
+    /// drawn otherwise: a handle taken out from under the pointer cancels its
+    /// own drag.
+    var activeHandle: NodeHandle?
 
     /// Translation in canvas points, and whether the gesture has ended.
     var onResize: (NodeHandle, CGSize, Bool) -> Void
@@ -68,7 +73,7 @@ struct NodeFrame: View {
             // asked for — and the absence of handles says so, where a frame
             // with handles that only resized one member would not.
             if isSelected, !isGroup {
-                ForEach(fit.handles, id: \.self) { handle in
+                ForEach(handles, id: \.self) { handle in
                     resizeHandle(handle)
                 }
             }
@@ -86,8 +91,16 @@ struct NodeFrame: View {
 
     }
 
+    private var handles: [NodeHandle] {
+        var shown = fit.handles
+        if let activeHandle, !shown.contains(activeHandle) { shown.append(activeHandle) }
+        return shown
+    }
+
     private var linkHandlesVisible: Bool {
-        guard fit.showsLinkHandles else { return false }
+        // Not mid-resize: the node is moving under them, and a + sliding along
+        // with the edge you are dragging is noise.
+        guard fit.showsLinkHandles, activeHandle == nil else { return false }
         return hoveredEdge != nil || linkingFrom != nil
     }
 

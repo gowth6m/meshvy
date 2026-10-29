@@ -23,19 +23,24 @@ public struct TerminalNodeView: View {
     public var zoom: Zoom
     public var isSelected: Bool
     public var isDimmed: Bool
+    /// While a handle is being dragged the node follows it, but the grid in it
+    /// waits for the release. See `TerminalSurface.holdsGrid`.
+    public var isResizing: Bool
 
     public init(
         node: TerminalNode,
         store: MeshvyStore,
         zoom: Zoom,
         isSelected: Bool,
-        isDimmed: Bool
+        isDimmed: Bool,
+        isResizing: Bool = false
     ) {
         self.node = node
         self.store = store
         self.zoom = zoom
         self.isSelected = isSelected
         self.isDimmed = isDimmed
+        self.isResizing = isResizing
     }
 
     private var session: TerminalSession? { store.terminals.session(for: node.id) }
@@ -163,7 +168,7 @@ public struct TerminalNodeView: View {
             // emulator does not scale — show the folder instead and keep the
             // process running untouched in the registry.
             if zoom.showsLiveContent {
-                TerminalSurface(session: session, scale: zoom.scale)
+                TerminalSurface(session: session, scale: zoom.scale, holdsGrid: isResizing)
             } else {
                 placeholder
             }

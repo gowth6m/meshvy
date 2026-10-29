@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+- **Moving, resizing and selecting on the board are dependable again.**
+  - **Resizing follows the pointer.** Dragging a handle used to draw a dashed
+    outline and leave the node where it was until you let go, which read as a
+    resize that was not working. The node now takes its new size as you drag;
+    a terminal inside it keeps its grid until the release and reflows once, so
+    the agent in it is still only redrawn one time.
+  - **The board can no longer stop answering the pointer.** A drag SwiftUI
+    dropped without ending (a handle that stopped fitting, a tool changed
+    mid-draw) left the board ignoring every move, hover and click after it.
+    The next press, or the first hover with the button up, now finishes it.
+  - **A node with nothing live in it can be picked up anywhere.** The
+    workspace node showing its start prompt, and a terminal with no session,
+    could only be moved by a seven-point strip around the edge.
+  - **Link handles stay put under the pointer.** The hover let go of a node
+    before the pointer reached the outer half of its `+`, so the handle
+    flickered off as you went to grab it.
+  - **Clicking one node of a group selects just that node**, once the click
+    does not turn into a drag. A drag from it still moves the whole group.
+  - A node smaller than its minimum (a shell drawn small) no longer jumps
+    when a handle is first dragged, and a node drawn with a tool now starts
+    at least as big as it can be resized to.
+
 ## [0.13.0] - 2026-10-22
 
 - **A workspace works the way a project does in Claude Code.** The agent on the

@@ -29,6 +29,14 @@ public enum CanvasGeometry {
     /// for the link handles. Generous, because this is the gesture the user
     /// asked to be easy.
     public static let edgeReach: CGFloat = 22
+    /// How far outside a node the pointer still belongs to it, for hovering.
+    ///
+    /// Further than `edgeReach`, because the link handles sit further out than
+    /// that: a handle is drawn `linkOffset` beyond the selection frame and is
+    /// `linkTouch` across, so its outer half lay past the point where the hover
+    /// let go of the node — and reaching for it took it away, the handle
+    /// flickering off exactly as the pointer arrived on it.
+    public static var linkReach: CGFloat { frameInset + linkOffset + linkTouch / 2 + 2 }
     /// Alignment guides catch within this many screen points. Converted to
     /// world units by the caller, so the pull feels the same at every zoom.
     public static let snapThreshold: CGFloat = 7
@@ -91,25 +99,33 @@ public enum CanvasGeometry {
     /// Clamped rather than mirrored: dragging the left edge past the right one
     /// stops at the minimum width instead of turning the node inside out, so
     /// there is no moment where a PTY is handed a negative size.
+    ///
+    /// A node already smaller than `minimum` — one drawn small, or saved by a
+    /// version with a lower floor — keeps the size it has as its floor. Holding
+    /// it to the full minimum made the first pixel of any drag snap it out to
+    /// that size, and from a left or top handle it leapt the other way too.
     public static func resize(
         _ rect: CGRect, from handle: NodeHandle, by delta: CGSize, minimum: CGSize
     ) -> CGRect {
+        let floor = CGSize(
+            width: min(minimum.width, rect.width), height: min(minimum.height, rect.height)
+        )
         var result = rect
         if handle.movesLeftEdge {
-            let shift = min(delta.width, rect.width - minimum.width)
+            let shift = min(delta.width, rect.width - floor.width)
             result.origin.x += shift
             result.size.width -= shift
         }
         if handle.movesRightEdge {
-            result.size.width = max(minimum.width, rect.width + delta.width)
+            result.size.width = max(floor.width, rect.width + delta.width)
         }
         if handle.movesTopEdge {
-            let shift = min(delta.height, rect.height - minimum.height)
+            let shift = min(delta.height, rect.height - floor.height)
             result.origin.y += shift
             result.size.height -= shift
         }
         if handle.movesBottomEdge {
-            result.size.height = max(minimum.height, rect.height + delta.height)
+            result.size.height = max(floor.height, rect.height + delta.height)
         }
         return result
     }
@@ -145,10 +161,14 @@ public enum CanvasGeometry {
     /// Only the edge regions count, not the corners — a corner belongs to the
     /// resize handle sitting on it, which is the gesture with the smaller target
     /// and so the one that must win.
+    ///
+    /// `reach` is how deep inside the node the band runs; `outside` is how far
+    /// beyond it, which has to cover the link handles themselves.
     public static func edge(
-        at point: CGPoint, of rect: CGRect, reach: CGFloat = edgeReach, corner: CGFloat = handleTouch
+        at point: CGPoint, of rect: CGRect, reach: CGFloat = edgeReach,
+        outside: CGFloat = linkReach, corner: CGFloat = handleTouch
     ) -> NodeEdge? {
-        let outer = rect.insetBy(dx: -reach, dy: -reach)
+        let outer = rect.insetBy(dx: -outside, dy: -outside)
         guard outer.contains(point) else { return nil }
         // Inside the node proper, only a band near the edge arms a link; deeper
         // in belongs to the content. The band is capped at a third of the node

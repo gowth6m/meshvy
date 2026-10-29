@@ -97,6 +97,20 @@ enum CanvasTest {
         check(minimumsHeld, "no handle can take a node below its minimum size")
         check(farEdgesHeld, "a node that bottoms out stays where it is")
 
+        let undersized = CGRect(x: 100, y: 100, width: 80, height: 60)
+        let nudged = CanvasGeometry.resize(
+            undersized, from: .topLeft, by: CGSize(width: 1, height: 1), minimum: minimum
+        )
+        check(nudged == undersized, "a node under its minimum does not jump on the first pixel of a resize")
+
+        let onHandle = CGPoint(
+            x: rect.maxX + CanvasGeometry.frameInset + CanvasGeometry.linkOffset
+                + CanvasGeometry.linkTouch / 2 - 1,
+            y: rect.midY
+        )
+        check(CanvasGeometry.edge(at: onHandle, of: rect) == .right,
+              "the hover reaches across the whole of a link handle")
+
         let handlesFound = NodeHandle.allCases.allSatisfy {
             CanvasGeometry.handle(at: $0.point(in: rect), of: rect) == $0
         }

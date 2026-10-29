@@ -94,6 +94,24 @@ struct CanvasGeometryTests {
         #expect(!CanvasGeometry.isOnBorder(CGPoint(x: rect.midX, y: rect.minY - 3), of: rect))
     }
 
+    @Test("a node smaller than the minimum does not jump when a handle is first dragged")
+    func undersizedNodeDoesNotJump() {
+        let small = CGRect(x: 100, y: 100, width: 80, height: 60)
+        let nudged = CanvasGeometry.resize(
+            small, from: .topLeft, by: CGSize(width: 1, height: 1), minimum: minimum
+        )
+        #expect(nudged == small)
+        let grown = CanvasGeometry.resize(
+            small, from: .bottomRight, by: CGSize(width: 5, height: 5), minimum: minimum
+        )
+        #expect(grown.size == CGSize(width: 85, height: 65))
+        let pulled = CanvasGeometry.resize(
+            small, from: .left, by: CGSize(width: -10, height: 0), minimum: minimum
+        )
+        #expect(pulled.minX == 90)
+        #expect(pulled.width == 90)
+    }
+
     // MARK: Link edges
 
     @Test("nearing an edge from outside or inside arms that edge")
@@ -109,6 +127,14 @@ struct CanvasGeometryTests {
     func edgeNeedsProximity() {
         #expect(CanvasGeometry.edge(at: rect.center, of: rect) == nil)
         #expect(CanvasGeometry.edge(at: CGPoint(x: rect.maxX + 400, y: rect.midY), of: rect) == nil)
+    }
+
+    @Test("the hover reaches all the way across a link handle, so it cannot vanish under the pointer")
+    func hoverCoversTheLinkHandle() {
+        let outerEdge = CanvasGeometry.frameInset + CanvasGeometry.linkOffset + CanvasGeometry.linkTouch / 2
+        #expect(CanvasGeometry.linkReach > outerEdge)
+        let onHandle = CGPoint(x: rect.maxX + outerEdge - 1, y: rect.midY)
+        #expect(CanvasGeometry.edge(at: onHandle, of: rect) == .right)
     }
 
     @Test("a corner is the resize handle's, so no link starts there")
