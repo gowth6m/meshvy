@@ -97,11 +97,11 @@ enum CanvasTest {
         check(minimumsHeld, "no handle can take a node below its minimum size")
         check(farEdgesHeld, "a node that bottoms out stays where it is")
 
-        let small = CGRect(x: 100, y: 100, width: 80, height: 60)
+        let undersized = CGRect(x: 100, y: 100, width: 80, height: 60)
         let nudged = CanvasGeometry.resize(
-            small, from: .topLeft, by: CGSize(width: 1, height: 1), minimum: minimum
+            undersized, from: .topLeft, by: CGSize(width: 1, height: 1), minimum: minimum
         )
-        check(nudged == small, "a node under its minimum does not jump on the first pixel of a resize")
+        check(nudged == undersized, "a node under its minimum does not jump on the first pixel of a resize")
 
         let onHandle = CGPoint(
             x: rect.maxX + CanvasGeometry.frameInset + CanvasGeometry.linkOffset
