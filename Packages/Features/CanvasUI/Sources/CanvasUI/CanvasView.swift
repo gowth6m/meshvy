@@ -52,8 +52,8 @@ public struct CanvasView: View {
         /// The node the drag started on, every node that is moving with it,
         /// where each started, and what the group is currently lined up with.
         case move(anchor: NodeID, origins: [NodeID: CGPoint], guides: CanvasGeometry.Snap)
-        /// A resize in progress. The node is left alone until the drag ends —
-        /// see `resizeGhost`.
+        /// A resize in progress: the frame it started from, and the one it is
+        /// at now. See `resize`.
         case resize(id: NodeID, handle: NodeHandle, from: CGRect, to: CGRect)
         /// A link being pulled out of an edge, and where the pointer is now.
         case link(from: NodeID, edge: NodeEdge, point: CGPoint)
@@ -74,6 +74,10 @@ public struct CanvasView: View {
     private final class Cursor {
         var point: CGPoint = .zero
         var isInside = false
+        /// A press on one member of a group, waiting to see whether it becomes
+        /// a drag. If it does, the group moves; if the button comes back up
+        /// first, it was a click, and the click selects just that node.
+        var collapse: NodeID?
     }
 
     @State private var cursor = Cursor()
@@ -156,6 +160,9 @@ public struct CanvasView: View {
                 case .active(let point):
                     cursor.point = point
                     cursor.isInside = true
+                    // A drag still in flight with the button up is one SwiftUI
+                    // dropped without ending. See `settleDrag`.
+                    if drag != nil, NSEvent.pressedMouseButtons & 1 == 0 { settleDrag() }
                     updateHover(at: point)
                 case .ended:
                     cursor.isInside = false
@@ -217,26 +224,38 @@ public struct CanvasView: View {
 
     private func nodeBody(_ node: CanvasNode, links: [WorkspaceLink]) -> some View {
         let rect = store.viewport.project(node.frame)
+        let whole = grabsAnywhere(node)
+        // The gestures go on the node's own frame, before it is positioned:
+        // `.position` hands back a view the size of the whole board.
         return body(for: node)
-            .overlay { grabBand(for: node) }
+            .overlay { if !whole { grabBand } }
+            // A node picked up anywhere says so anywhere. Not with an overlay:
+            // one across the whole node sits on top of its buttons — the start
+            // prompt's, a zoomed-out terminal's close button — and takes their
+            // clicks.
+            .pointer(Pointer.move, active: whole)
             .frame(width: rect.width, height: rect.height)
-            .position(x: rect.midX, y: rect.midY)
-            .zIndex(store.stackIndex(of: node.id))
             .gesture(moveGesture(node))
             .modifier(RevealOnDoubleClick(node: node, store: store))
             .contextMenu { menu(for: node, links: links) }
+            .position(x: rect.midX, y: rect.midY)
+            .zIndex(store.stackIndex(of: node.id))
     }
 
     @ViewBuilder
     private func body(for node: CanvasNode) -> some View {
         let dimmed = store.isSearching && !store.matches(node.id)
         let selected = store.isSelected(node.id)
+        let resizing = resizingNode == node.id
         switch node.kind {
         case .workspace(let workspace):
-            WorkspaceNodeView(workspace: workspace, store: store, zoom: zoom, isSelected: selected)
+            WorkspaceNodeView(
+                workspace: workspace, store: store, zoom: zoom, isSelected: selected, isResizing: resizing
+            )
         case .terminal(let terminal):
             TerminalNodeView(
-                node: terminal, store: store, zoom: zoom, isSelected: selected, isDimmed: dimmed
+                node: terminal, store: store, zoom: zoom, isSelected: selected, isDimmed: dimmed,
+                isResizing: resizing
             )
         case .browser(let browser):
             BrowserNodeView(
@@ -252,11 +271,11 @@ public struct CanvasView: View {
         }
     }
 
-    /// Shows an open hand over the part of a node that picks it up. The band
+    /// Shows an open hand over the band a live node is picked up by. The band
     /// is the one gesture on this board with nothing drawn on it, so the
     /// cursor is all there is to say it is there.
-    private func grabBand(for node: CanvasNode) -> some View {
-        let shape = GrabRing(band: grabBandWidth, whole: grabsAnywhere(node))
+    private var grabBand: some View {
+        let shape = GrabRing(band: grabBandWidth, whole: false)
         return shape
             .fill(Color.clear)
             .contentShape(shape)
@@ -284,6 +303,8 @@ public struct CanvasView: View {
         let rect: CGRect = store.viewport.project(node.frame)
         let edge: NodeEdge? = store.hoveredNode == node.id ? store.hoveredEdge : nil
         let pulling: NodeEdge? = linkSource == node.id ? linkEdge : nil
+        var dragging: NodeHandle?
+        if case .resize(let id, let handle, _, _)? = drag, id == node.id { dragging = handle }
         return NodeFrame(
             rect: rect,
             zoom: zoom,
@@ -293,6 +314,7 @@ public struct CanvasView: View {
             linkingFrom: pulling,
             isDropTarget: isTarget,
             isAlreadyLinked: isTarget && isLinkedToSource(node.id),
+            activeHandle: dragging,
             onResize: { handle, translation, ended in
                 resize(node, from: handle, by: translation, ended: ended)
             },
@@ -352,6 +374,7 @@ public struct CanvasView: View {
                     origins[id] = store.graph.node(id)?.position
                 }
                 if origins[node.id] == nil { origins[node.id] = node.position }
+                cursor.collapse = nil
                 drag = .move(anchor: node.id, origins: origins, guides: .none)
                 continueMove(anchor: node.id, origins: origins, by: value.translation)
             }
@@ -378,11 +401,28 @@ public struct CanvasView: View {
 
     /// Whether the whole of a node picks it up, rather than a band around it.
     ///
-    /// True of a card always, and of a live node once the board is zoomed out
-    /// far enough that it has stopped drawing its content — there is nothing
-    /// left to protect, and a band two points wide is no use to anybody.
-    private func grabsAnywhere(_ node: CanvasNode) -> Bool {
-        !node.hostsLiveContent || !zoom.showsLiveContent
+    /// True whenever the node is not drawing a live view: a card always, and a
+    /// live node once the board is zoomed out far enough that it has stopped
+    /// drawing its content — there is nothing left to protect, and a band two
+    /// points wide is no use to anybody.
+    private func grabsAnywhere(_ node: CanvasNode) -> Bool { !drawsLiveView(node) }
+
+    /// Whether a node has an AppKit view on screen right now — the thing the
+    /// move band exists to keep clicks away from.
+    ///
+    /// Asked of what is drawn, not of the kind of node. The workspace node with
+    /// no coordinator running is a start prompt, and a terminal whose session
+    /// is gone is a placeholder: both are plain SwiftUI, and treating them as
+    /// live left a node most of a screen wide that could only be picked up by
+    /// a seven-point strip around its edge.
+    private func drawsLiveView(_ node: CanvasNode) -> Bool {
+        guard zoom.showsLiveContent else { return false }
+        switch node.kind {
+        case .terminal(let terminal): return store.terminals.session(for: terminal.id) != nil
+        case .browser(let browser): return store.browsers.session(for: browser.id) != nil
+        case .workspace: return store.isCoordinatorRunning
+        case .session, .subAgent: return false
+        }
     }
 
     /// How wide the band you pick a node up by is, on screen.
@@ -422,30 +462,46 @@ public struct CanvasView: View {
 
     // MARK: - Resizing
 
-    /// Resizing is shown as an outline and applied when you let go.
+    /// Resizing follows the pointer: the node takes its new frame on every
+    /// frame of the drag, the way anything else you stretch does.
     ///
-    /// Not because it is cheaper to draw, but because of what is inside these
-    /// nodes: changing a terminal's size makes SwiftTerm recompute its grid and
-    /// send `SIGWINCH` to the process in it, and a full-screen program like
-    /// Claude Code repaints every time. Following the pointer would do that
-    /// sixty times a second for the length of the drag. One outline, one
-    /// resize. Cards could take it live, but one rule for every node is worth
-    /// more here than a smoother card.
+    /// What does not follow is the terminal inside it. Changing a terminal's
+    /// size makes SwiftTerm recompute its grid and send `SIGWINCH` to the
+    /// process in it, and a full-screen program like Claude Code repaints every
+    /// time — sixty times a second, for the length of the drag. So the node
+    /// tells its terminal to hold its grid (`TerminalSurface.holdsGrid`) until
+    /// the drag ends, and it reflows once. This used to draw an outline and
+    /// leave the node where it was until release, which read as a resize that
+    /// was not working.
+    ///
+    /// Always measured from the frame the drag started with, never the node's
+    /// current one — that is already moving, and adding the whole translation
+    /// to it again would run away from the pointer.
     private func resize(_ node: CanvasNode, from handle: NodeHandle, by translation: CGSize, ended: Bool) {
+        let start: CGRect
+        if case .resize(let id, _, let from, _)? = drag, id == node.id {
+            start = from
+        } else if ended {
+            // Already settled — see `settleDrag` — so there is nothing to apply.
+            return
+        } else {
+            start = node.frame
+            cursor.collapse = nil
+            if !store.isSelected(node.id) { store.select(node.id) }
+        }
         let world = CGSize(
             width: translation.width / store.viewport.scale,
             height: translation.height / store.viewport.scale
         )
         let target = CanvasGeometry.resize(
-            node.frame, from: handle, by: world, minimum: node.minimumSize
+            start, from: handle, by: world, minimum: node.minimumSize
         )
+        store.place(node.id, frame: target)
         guard ended else {
-            if !store.isSelected(node.id) { store.select(node.id) }
-            drag = .resize(id: node.id, handle: handle, from: node.frame, to: target)
+            drag = .resize(id: node.id, handle: handle, from: start, to: target)
             return
         }
         drag = nil
-        store.place(node.id, frame: target)
         store.commitMove()
     }
 
@@ -485,6 +541,7 @@ public struct CanvasView: View {
 
     private func pullLink(from node: CanvasNode, edge: NodeEdge, to point: CGPoint, ended: Bool) {
         guard ended else {
+            cursor.collapse = nil
             drag = .link(from: node.id, edge: edge, point: point)
             return
         }
@@ -540,6 +597,7 @@ public struct CanvasView: View {
     }
 
     private func begin(_ value: DragGesture.Value) {
+        cursor.collapse = nil
         let start = store.viewport.unproject(value.startLocation)
         if store.tool.isCreation {
             drag = .create(tool: store.tool, from: start, to: store.viewport.unproject(value.location))
@@ -589,6 +647,12 @@ public struct CanvasView: View {
         if rect.width < BoardTool.minimumDrawn.width || rect.height < BoardTool.minimumDrawn.height {
             frame = CGRect(origin: rect.origin, size: tool.defaultSize)
         }
+        // And nothing smaller than the node can be resized to. A shell drawn at
+        // 150 × 110 was a shell no handle could take hold of smoothly: the
+        // first pixel of any resize snapped it out to the minimum.
+        let minimum = tool == .browser ? BoardMetrics.minimumBrowser : BoardMetrics.minimumTerminal
+        frame.size.width = max(frame.width, minimum.width)
+        frame.size.height = max(frame.height, minimum.height)
         switch tool {
         case .browser:
             guard let node = store.openBrowser(reveal: false) else { return }
@@ -710,7 +774,7 @@ public struct CanvasView: View {
         case .create(let tool, let from, let to):
             creationGhost(tool: tool, world: rect(from: from, to: to))
         case .resize(_, _, _, let to):
-            resizeGhost(to)
+            resizeReadout(to)
         case .link(let from, let edge, let point):
             linkPreview(from: from, edge: edge, to: point)
         case .move(_, _, let guides):
@@ -720,24 +784,17 @@ public struct CanvasView: View {
         }
     }
 
-    private func resizeGhost(_ world: CGRect) -> some View {
+    /// The size a node is being stretched to, under its bottom-right corner.
+    /// The node itself is already that size; this says the number.
+    private func resizeReadout(_ world: CGRect) -> some View {
         let projected = store.viewport.project(world)
-        return RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
-            .strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-            .background(
-                RoundedRectangle(cornerRadius: zoom.s(Theme.Corner.node), style: .continuous)
-                    .fill(Theme.accent.opacity(0.07))
-            )
-            .frame(width: projected.width, height: projected.height)
-            .position(x: projected.midX, y: projected.midY)
-            .overlay {
-                Text("\(Int(world.width.rounded())) × \(Int(world.height.rounded()))")
-                    .font(Theme.mono(9.5, .medium))
-                    .foregroundStyle(Theme.onAccent)
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(Capsule().fill(Theme.accent))
-                    .position(x: projected.maxX - 26, y: projected.maxY + 11)
-            }
+        return Text("\(Int(world.width.rounded())) × \(Int(world.height.rounded()))")
+            .font(Theme.mono(9.5, .medium))
+            .foregroundStyle(Theme.onAccent)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Capsule().fill(Theme.accent))
+            .fixedSize()
+            .position(x: projected.maxX - 26, y: projected.maxY + 18)
             .allowsHitTesting(false)
     }
 
@@ -874,7 +931,7 @@ public struct CanvasView: View {
         // reach: with a 26pt gap between nodes and a link handle 20pt out, the
         // handles of a raised node otherwise reach into its neighbour and
         // swallow a press meant for that neighbour's shell prompt.
-        let reach = CanvasGeometry.edgeReach
+        let reach = CanvasGeometry.linkReach
         let candidate = node(at: point)
             ?? topmost { $0.insetBy(dx: -reach, dy: -reach).contains(point) }
         guard let candidate else { return store.hover(nil) }
@@ -984,6 +1041,7 @@ public struct CanvasView: View {
             NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify], handler: wheel),
             NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: flags),
             NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: press),
+            NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp, handler: release),
             NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp], handler: key)
         ].compactMap { $0 }
     }
@@ -1039,10 +1097,8 @@ public struct CanvasView: View {
     private func press(_ event: NSEvent) -> NSEvent? {
         // Belt and braces for the gesture that never ends: a new press means
         // whatever was in flight is over, whether SwiftUI said so or not.
-        switch drag {
-        case .resize, .link: drag = nil
-        default: break
-        }
+        settleDrag()
+        cursor.collapse = nil
         guard boardIsLive(event), cursor.isInside, store.tool == .select else { return event }
         // The palette and the selection bar are drawn over the board but are
         // not part of it: a press on one must not also select whatever node
@@ -1057,7 +1113,7 @@ public struct CanvasView: View {
             handBackKeyboard(event)
             return event
         }
-        if !node.hostsLiveContent { handBackKeyboard(event) }
+        if !drawsLiveView(node) { handBackKeyboard(event) }
         // And a press in the gutter between two nodes — on a link handle, say,
         // which reaches 20pt out — belongs to whatever the hover resolved to,
         // not to whichever frame happens to contain the point.
@@ -1067,11 +1123,57 @@ public struct CanvasView: View {
         } else if !store.isSelected(node.id) {
             store.select(node.id)
         } else {
-            // Already selected, and possibly one of several: keep the group, and
-            // just bring this one to the front.
+            // Already selected, and possibly one of several: keep the group, so
+            // a drag from here moves all of it, and bring this one to the front.
+            // If no drag comes of it, the release narrows the selection to this
+            // node — otherwise a node in a group could never be singled out
+            // again without first clicking away.
             store.raise(node.id)
+            if store.hasMultipleSelected { cursor.collapse = node.id }
         }
         return event
+    }
+
+    /// The button coming back up. A press on one member of a group that never
+    /// became a drag was a click on that node, and selects only it.
+    ///
+    /// Safe to decide before SwiftUI sees the release: a drag starting clears
+    /// `collapse`, and one cannot start on the release itself.
+    private func release(_ event: NSEvent) -> NSEvent? {
+        if let id = cursor.collapse {
+            cursor.collapse = nil
+            if drag == nil, store.isSelected(id) { store.select(id) }
+        }
+        return event
+    }
+
+    /// Ends whatever drag is in flight, keeping what it had done so far.
+    ///
+    /// A `DragGesture` does not always end. The view it is on can be taken
+    /// away mid-drag — a handle that stops fitting, the creation surface going
+    /// when the tool changes, a node rebuilt out from under the pointer — and
+    /// SwiftUI then never calls `onEnded`. `drag` used to stay set for good
+    /// after that, and every gesture on the board returned early on it:
+    /// nothing moved, nothing hovered, nothing could be selected. So this runs
+    /// on the next press, and on the first hover with no button held.
+    ///
+    /// A move or a resize has already been applied frame by frame, so all
+    /// that is left is to save it; a marquee selects what it last covered. A
+    /// link or a node being drawn is dropped — making either on a gesture the
+    /// user may not have finished would be a guess.
+    private func settleDrag() {
+        guard let current = drag else { return }
+        drag = nil
+        switch current {
+        case .move, .resize:
+            store.commitMove()
+        case .pan:
+            store.persistLayout()
+        case .marquee(let from, let to, let additive):
+            finishMarquee(from: from, to: to, additive: additive)
+        case .link, .create:
+            break
+        }
     }
 
     /// Takes first responder off whatever had it, so the board's own keys

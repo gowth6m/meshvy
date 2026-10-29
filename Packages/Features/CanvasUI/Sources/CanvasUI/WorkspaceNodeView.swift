@@ -22,17 +22,21 @@ public struct WorkspaceNodeView: View {
     @Bindable public var store: MeshvyStore
     public var zoom: Zoom
     public var isSelected: Bool
+    /// See `TerminalNodeView.isResizing`.
+    public var isResizing: Bool
 
     public init(
         workspace: Workspace,
         store: MeshvyStore,
         zoom: Zoom,
-        isSelected: Bool
+        isSelected: Bool,
+        isResizing: Bool = false
     ) {
         self.workspace = workspace
         self.store = store
         self.zoom = zoom
         self.isSelected = isSelected
+        self.isResizing = isResizing
     }
 
     private var orchestrator: TerminalNode? { workspace.orchestrator }
@@ -196,7 +200,7 @@ public struct WorkspaceNodeView: View {
         if let session, isSnapshot {
             TerminalSnapshotText(session: session, zoom: zoom)
         } else if let session, zoom.showsLiveContent {
-            TerminalSurface(session: session, scale: zoom.scale)
+            TerminalSurface(session: session, scale: zoom.scale, holdsGrid: isResizing)
         } else if session != nil {
             zoomedOutPlaceholder
         } else {

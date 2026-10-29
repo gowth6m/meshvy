@@ -9,6 +9,12 @@ import AppKit
 /// why that matters to SwiftTerm.
 public final class FlippedContainer: NSView {
     public var scale: CGFloat = 1
+    /// A world size to keep the hosted view at, whatever the container's own
+    /// frame does. Set while a node is being resized: the node follows the
+    /// pointer, and the view inside keeps its size until the drag ends — so a
+    /// terminal reflows once, on release, instead of `SIGWINCH`ing its process
+    /// on every frame of the drag. Whatever does not fit meanwhile is clipped.
+    public var heldSize: CGSize?
 
     public override var isFlipped: Bool { true }
 
@@ -28,6 +34,6 @@ public final class FlippedContainer: NSView {
         // on each zoom step.
         let world = CGSize(width: frame.width / scale, height: frame.height / scale)
         setBoundsSize(world)
-        child.frame = CGRect(origin: .zero, size: world)
+        child.frame = CGRect(origin: .zero, size: heldSize ?? world)
     }
 }

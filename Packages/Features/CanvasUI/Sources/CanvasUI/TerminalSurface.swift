@@ -60,19 +60,26 @@ public struct TerminalSurface: NSViewRepresentable {
     /// quoting the node's own size here stretched the glyphs by whatever that
     /// chrome happened to be.
     public var scale: CGFloat
+    /// True while the node is being resized. The terminal keeps the grid it
+    /// had until this goes false again — see `FlippedContainer.heldSize`.
+    public var holdsGrid: Bool
 
     public init(
         session: TerminalSession,
-        scale: CGFloat
+        scale: CGFloat,
+        holdsGrid: Bool = false
     ) {
         self.session = session
         self.scale = scale
+        self.holdsGrid = holdsGrid
     }
 
     public func makeNSView(context: Context) -> NSView {
         let container = FlippedContainer()
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor(hex: Theme.Hex.canvasDeep).cgColor
+        // A held grid can be bigger than a node being shrunk around it.
+        container.clipsToBounds = true
         container.addSubview(session.surface)
         container.scale = scale
         return container
@@ -85,6 +92,11 @@ public struct TerminalSurface: NSViewRepresentable {
             container.addSubview(session.surface)
         }
         container.scale = scale
+        if !holdsGrid {
+            container.heldSize = nil
+        } else if container.heldSize == nil {
+            container.heldSize = session.surface.frame.size
+        }
         container.needsLayout = true
         container.layoutSubtreeIfNeeded()
     }
