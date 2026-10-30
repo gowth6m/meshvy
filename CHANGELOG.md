@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-30
+
 - **Moving, resizing and selecting on the board are dependable again.**
   - **Resizing follows the pointer.** Dragging a handle used to draw a dashed
     outline and leave the node where it was until you let go, which read as a
