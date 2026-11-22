@@ -108,6 +108,8 @@ public struct WorkspaceNodeView: View {
 
             Spacer(minLength: 0)
 
+            mapButton
+
             if let orchestrator, isRunning {
                 NodeAgentSettingsButton(store: store, node: orchestrator, zoom: zoom)
             }
@@ -133,6 +135,73 @@ public struct WorkspaceNodeView: View {
         }
         .padding(.horizontal, zoom.s(12))
         .frame(height: zoom.c(BoardMetrics.Chrome.workspaceHeader))
+    }
+
+    /// The workspace's map: what the code across its repositories is and how
+    /// it fits together. Opens the map when there is one, and draws it when
+    /// there is not; right-click to bring it up to date.
+    @ViewBuilder
+    private var mapButton: some View {
+        if let progress = store.mapRunProgress {
+            mapProgress(progress)
+        } else {
+            mapOpenButton
+        }
+    }
+
+    /// Claude drawing the map: what it is doing now, and a way to stop it.
+    private func mapProgress(_ progress: String) -> some View {
+        HStack(spacing: zoom.s(5)) {
+            ProgressView().controlSize(.mini)
+            Text(progress)
+                .font(zoom.font(10, .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: zoom.s(220), alignment: .leading)
+            Button { store.stopMapRun() } label: {
+                Image(systemName: "stop.circle").font(zoom.font(11))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.textTertiary)
+            .help("Stop drawing the map")
+        }
+        .help("Claude is drawing the map of this workspace")
+    }
+
+    private var mapOpenButton: some View {
+        let hasMap = store.workspaceHasMap
+        let isOpening = store.isMapOpening
+        return Button {
+            if hasMap { store.openMap() } else { store.mapWorkspace() }
+        } label: {
+            HStack(spacing: zoom.s(4)) {
+                Image(systemName: "map").font(zoom.font(10, .semibold))
+                Text(isOpening ? "Opening…" : (hasMap ? "Map" : "Draw map"))
+                    .font(zoom.font(10, .semibold))
+            }
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, zoom.s(7))
+            .padding(.vertical, zoom.s(3))
+            .background(
+                RoundedRectangle(cornerRadius: zoom.s(5), style: .continuous)
+                    .fill(Theme.accent.opacity(0.14))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isOpening)
+        .help(hasMap
+            ? "Open the map of this workspace"
+            : "Have Claude read every repository here and draw a map of how the app fits together")
+        .contextMenu {
+            if hasMap {
+                Button("Open the map") { store.openMap() }
+                Button("Refresh the map") { store.mapWorkspace() }
+            } else {
+                Button("Draw the map") { store.mapWorkspace() }
+            }
+        }
     }
 
     /// Which repositories belong to this workspace, and how each one is doing.

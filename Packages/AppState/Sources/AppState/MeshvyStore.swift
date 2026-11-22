@@ -2,6 +2,7 @@ import AgentKit
 import AppKit
 import BrowserKit
 import FileSystemKit
+import FloorplanKit
 import GitKit
 import MeshvyCore
 import MeshvyModels
@@ -150,6 +151,13 @@ public final class MeshvyStore {
     /// it, and without it every Start button opens a terminal that fails on
     /// its first line; only a definite no is worth saying anything about.
     public internal(set) var claudeInstalled: Bool?
+    /// Workspaces whose map server is starting, so the Map button can say so
+    /// rather than look like it did nothing. See `MeshvyStore+Map`.
+    public internal(set) var mapsOpening: Set<UUID> = []
+    /// What each workspace's map run is doing right now, while one runs.
+    public internal(set) var mapProgress: [UUID: String] = [:]
+    /// The runs themselves, kept alive while Claude draws.
+    @ObservationIgnored var mapRuns: [UUID: MapRun] = [:]
     public internal(set) var statusLine = "No workspace"
     public internal(set) var banner: Banner?
 

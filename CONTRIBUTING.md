@@ -99,10 +99,12 @@ Packages/
     BrowserKit/              a page an agent can drive
     WorkspaceKit/            cutting worktrees for a workspace
     UpdateKit/               finding and installing a new Meshvy
+    FloorplanKit/            the workspace map: finding the bundled engine and Node, serving the map
     AgentsUI/ CanvasUI/ InspectorUI/ WorkspacesUI/
   DesignSystem/              theme, zoom, shared chrome
   AppState/                  the board, and everything the views read
   AppShell/                  window, sidebar, palette, status bar
+Engine/Floorplan/            the map engine, bundled into the app (see MESHVY.md)
 Docs/
   architecture/              ADRs: why it is this way
   signing.md                 certificates and notarisation
@@ -122,7 +124,7 @@ MeshvyCore
   └─ MeshvyModels
        └─ ProcessKit · FileSystemKit
             └─ PersistenceKit · GitKit · TerminalKit · DesignSystem
-                 └─ AgentKit · SessionKit · BrowserKit · WorkspaceKit · UpdateKit
+                 └─ AgentKit · SessionKit · BrowserKit · WorkspaceKit · UpdateKit · FloorplanKit
                       └─ AppState
                            └─ AgentsUI · CanvasUI · InspectorUI · WorkspacesUI
                                 └─ AppShell

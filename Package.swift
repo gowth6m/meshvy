@@ -108,6 +108,9 @@ let package = Package(
         .meshvy("WorkspaceKit", tier: "Features",
                 deps: ["MeshvyModels", "ProcessKit", "GitKit"]),
         .meshvy("UpdateKit", tier: "Features", deps: ["MeshvyCore", "ProcessKit"]),
+        // The workspace map: Floorplan's engine, bundled from Engine/Floorplan.
+        // Finds it and Node, and serves the map; Claude draws it in a thread.
+        .meshvy("FloorplanKit", tier: "Features", deps: ["ProcessKit"]),
 
         // MARK: - Application state
         // The board, and everything the views read. Deliberately has no
@@ -117,7 +120,7 @@ let package = Package(
         .meshvy("AppState", deps: [
             "MeshvyCore", "MeshvyModels", "ProcessKit", "FileSystemKit", "PersistenceKit",
             "GitKit", "TerminalKit", "AgentKit", "SessionKit", "BrowserKit",
-            "WorkspaceKit", "UpdateKit",
+            "WorkspaceKit", "UpdateKit", "FloorplanKit",
         ]),
 
         // MARK: - Feature UI
@@ -154,6 +157,7 @@ let package = Package(
                 "CanvasUI", "InspectorUI", "AgentsUI", "WorkspacesUI",
                 "AgentKit", "SessionKit", "BrowserKit", "WorkspaceKit",
                 "TerminalKit", "GitKit", "PersistenceKit", "ProcessKit", "UpdateKit",
+                "FloorplanKit",
             ],
             path: "Apps/macOS/Sources/Meshvy",
             swiftSettings: [.swiftLanguageMode(.v5)]
@@ -171,6 +175,7 @@ let package = Package(
         .meshvyTests("AgentKit", tier: "Features", deps: ["MeshvyCore", "MeshvyModels"]),
         .meshvyTests("SessionKit", tier: "Features", deps: ["MeshvyCore", "MeshvyModels"]),
         .meshvyTests("GitKit", tier: "Platform", deps: ["MeshvyModels", "ProcessKit"]),
+        .meshvyTests("FloorplanKit", tier: "Features"),
     ]
 )
 

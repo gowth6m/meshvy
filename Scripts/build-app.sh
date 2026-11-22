@@ -49,6 +49,13 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp "$ROOT/Scripts/uninstall.sh" "$APP/Contents/Resources/uninstall.sh"
 chmod +x "$APP/Contents/Resources/uninstall.sh"
 
+# The map engine (Floorplan): the skill, its scripts and the map page. Only the
+# skill folder ships; its tests and licence notes stay in the repository, and
+# the licence goes alongside. See Engine/Floorplan/MESHVY.md.
+rm -rf "$APP/Contents/Resources/floorplan"
+cp -R "$ROOT/Engine/Floorplan/skills/floorplan" "$APP/Contents/Resources/floorplan"
+cp "$ROOT/Engine/Floorplan/LICENSE" "$APP/Contents/Resources/floorplan/LICENSE"
+
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 else
