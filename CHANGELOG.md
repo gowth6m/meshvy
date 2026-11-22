@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- **The workspace map.** Claude reads every repository in a workspace and
+  draws an interactive map of the app: its parts, files and endpoints, the
+  screens, the requests between frontend and backend (across repositories),
+  outside services, and a Health check. **Draw map** on the workspace node, or
+  **Draw the map** in ⌘K, starts it; the node shows what Claude is doing, and
+  the map opens on the board when it is done. **Map** opens it again later,
+  and right-click **Refresh the map** re-reads only what changed.
+  - The engine is [Floorplan](https://github.com/gowth6m/floorplan) 0.11.0
+    (MIT), bundled in the app. Claude runs headless with read access to the
+    code and permission to run only the engine's own scripts; the map is
+    written to `floorplan/` in the workspace folder, outside every
+    repository. Floorplan's waitlist card is removed, so the map never talks
+    to anything but its own server on `127.0.0.1`.
+  - Maps need **Node 18 or newer**. Meshvy looks in the usual places
+    (Homebrew, Volta, nvm, mise, asdf) and in your login shell, and says so
+    with a link if there is none.
+
 ## [0.13.1] - 2026-10-30
 
 - **Moving, resizing and selecting on the board are dependable again.**

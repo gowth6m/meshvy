@@ -24,6 +24,15 @@ jobs:
           # is the wrong shape.
           python3 Tools/check-architecture.py
 
+      - name: Map engine tests
+        run: |
+          # The bundled Floorplan engine has its own suite, plain `node --test`
+          # with no dependencies. Run before the Swift build: it is quicker,
+          # and a broken engine means a broken map whatever the app does.
+          cd Engine/Floorplan
+          node --version
+          npm test
+
       - name: Build
         run: |
           # `set -o pipefail`, or the step's exit status is `tee`'s and a build

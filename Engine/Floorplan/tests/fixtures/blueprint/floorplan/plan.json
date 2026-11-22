@@ -1,0 +1,48 @@
+{
+  "$schema": "floorplan/plan@1",
+  "source": "docs/prd.md",
+  "stack": ["Next.js websites for owners and walkers", "Node.js + Express server", "Postgres database", "Stripe for card payments", "Postmark for email"],
+  "assumptions": [
+    "Owners and walkers use the same sign-in, with walkers marked as staff.",
+    "The walker app is a website that works on phones, not a native app (native is out of scope for v1)."
+  ],
+  "questions": [
+    { "question": "Can owners cancel a walk for free, and up to when?", "about": ["POST /api/bookings/:id/cancel", "web/app/bookings/page.tsx"] }
+  ],
+  "files": [
+    { "path": "web/app/page.tsx", "name": "Home page", "description": "Lists the walkers near you, with their photo and price.", "screen": "/", "uses": ["web/components/WalkerCard.tsx", "web/lib/api.ts"], "calls": ["GET /api/walkers"] },
+    { "path": "web/app/book/[walkerId]/page.tsx", "name": "Booking page", "description": "Shows a walker's free slots and lets the owner pick one and pay.", "screen": "/book/:walkerId", "uses": ["web/lib/api.ts"], "calls": ["GET /api/walkers/:id/slots", "POST /api/bookings"] },
+    { "path": "web/app/bookings/page.tsx", "name": "My walks page", "description": "The owner's upcoming and past walks, with a cancel button.", "screen": "/bookings", "uses": ["web/lib/api.ts"], "calls": ["GET /api/bookings", "POST /api/bookings/:id/cancel"] },
+    { "path": "web/app/login/page.tsx", "name": "Sign-in page", "description": "Sign in or create an account.", "screen": "/login", "uses": ["web/lib/api.ts"], "calls": ["POST /api/auth/login", "POST /api/auth/signup"] },
+    { "path": "web/components/WalkerCard.tsx", "name": "Walker card", "description": "One walker's photo, name and price, used in lists." },
+    { "path": "web/lib/api.ts", "name": "Server connection", "description": "How the website talks to the server, keeping the owner signed in." },
+    { "path": "walker/app/schedule/page.tsx", "name": "Today's schedule", "description": "The walker's walks for today, with a button to mark each one done.", "screen": "/schedule", "calls": ["GET /api/walker/schedule", "POST /api/walks/:id/complete"] },
+    { "path": "api/src/server.ts", "name": "Server start", "description": "Starts the server and plugs in every group of endpoints.", "uses": ["api/src/routes/walkers.ts", "api/src/routes/bookings.ts", "api/src/routes/auth.ts", "api/src/routes/walks.ts", "api/src/routes/webhooks.ts", "api/src/routes/admin.ts"] },
+    { "path": "api/src/routes/walkers.ts", "name": "Walker endpoints", "description": "Lists walkers and their free slots.", "uses": ["api/src/db/walkers.ts"] },
+    { "path": "api/src/routes/bookings.ts", "name": "Booking endpoints", "description": "Books, lists and cancels walks.", "uses": ["api/src/services/payments.ts", "api/src/db/bookings.ts"] },
+    { "path": "api/src/routes/auth.ts", "name": "Sign-in endpoints", "description": "Signs people in and creates accounts.", "uses": ["api/src/db/users.ts"] },
+    { "path": "api/src/routes/walks.ts", "name": "Walker schedule endpoints", "description": "Today's walks for a walker, and marking a walk done.", "uses": ["api/src/db/bookings.ts"] },
+    { "path": "api/src/routes/webhooks.ts", "name": "Stripe messages", "description": "Confirms a booking when Stripe says the payment went through.", "uses": ["api/src/db/bookings.ts", "api/src/services/email.ts"] },
+    { "path": "api/src/routes/admin.ts", "name": "Staff endpoints", "description": "Removes a walker who has left." , "uses": ["api/src/db/walkers.ts"] },
+    { "path": "api/src/services/payments.ts", "name": "Card payments", "description": "Charges and refunds cards through Stripe.", "services": ["stripe"] },
+    { "path": "api/src/services/email.ts", "name": "Emails", "description": "Sends booking confirmations and reminders.", "services": ["postmark"] },
+    { "path": "api/src/db/bookings.ts", "name": "Saved bookings", "description": "Reads and saves walks.", "data": ["db"] },
+    { "path": "api/src/db/users.ts", "name": "Saved accounts", "description": "Reads and saves owners and walkers.", "data": ["db"] },
+    { "path": "api/src/db/walkers.ts", "name": "Saved walkers", "description": "Reads and saves walker profiles and their free slots.", "data": ["db"] },
+    { "path": "api/src/lib/geo.ts", "name": "Distance helper", "description": "Works out how far a walker is from an owner." },
+    { "path": "jobs/reminders.ts", "name": "Evening reminders", "description": "Every evening, emails owners about tomorrow's walks.", "uses": ["api/src/db/bookings.ts", "api/src/services/email.ts"] }
+  ],
+  "endpoints": [
+    { "method": "GET", "path": "/api/walkers", "file": "api/src/routes/walkers.ts", "name": "List walkers", "description": "Walkers near the owner.", "access": "public" },
+    { "method": "GET", "path": "/api/walkers/:id/slots", "file": "api/src/routes/walkers.ts", "name": "A walker's free slots", "description": "When a walker is free this week.", "access": "public" },
+    { "method": "POST", "path": "/api/bookings", "file": "api/src/routes/bookings.ts", "name": "Book a walk", "description": "Holds the slot and starts the card payment.", "access": "signed-in" },
+    { "method": "GET", "path": "/api/bookings", "file": "api/src/routes/bookings.ts", "name": "My walks", "description": "The signed-in owner's walks.", "access": "signed-in" },
+    { "method": "POST", "path": "/api/bookings/:id/cancel", "file": "api/src/routes/bookings.ts", "name": "Cancel a walk", "description": "Cancels a walk and refunds it if allowed.", "access": "signed-in" },
+    { "method": "POST", "path": "/api/auth/login", "file": "api/src/routes/auth.ts", "name": "Sign in", "description": "Checks the email and password.", "access": "public", "publicBecause": "people have to sign in before they are signed in; 5 wrong tries lock the account for 15 minutes" },
+    { "method": "POST", "path": "/api/auth/signup", "file": "api/src/routes/auth.ts", "name": "Create an account", "description": "Creates an owner account.", "access": "public" },
+    { "method": "GET", "path": "/api/walker/schedule", "file": "api/src/routes/walks.ts", "name": "Today's walks", "description": "The signed-in walker's walks for today.", "access": "signed-in", "who": "walkers" },
+    { "method": "POST", "path": "/api/walks/:id/complete", "file": "api/src/routes/walks.ts", "name": "Mark a walk done", "description": "Records that a walk happened.", "access": "signed-in", "who": "the walker doing that walk" },
+    { "method": "POST", "path": "/api/webhooks/stripe", "file": "api/src/routes/webhooks.ts", "name": "Payment went through", "description": "Stripe's message that a card payment succeeded.", "access": "webhook" },
+    { "method": "DELETE", "path": "/api/walkers/:id", "file": "api/src/routes/admin.ts", "name": "Remove a walker", "description": "Removes a walker who has left." }
+  ]
+}

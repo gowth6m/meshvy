@@ -20,6 +20,24 @@ in two of them, and the app they are all changing running on the board beside
 them. Every screenshot here is the app drawing itself — see
 [Shots](#shots).
 
+## The map
+
+**Draw map** on a workspace has Claude read every repository in it and draw
+how the app fits together: the main parts with plain-English names, every file
+and endpoint inside them, the screens, the requests from frontend to backend
+(across repositories), the outside services, and a Health check for things
+like keys in code and endpoints anyone can call. The map opens on the board;
+ask it questions, follow a flow, or take the tour.
+
+The workspace node shows what Claude is doing while it draws. Afterwards
+**Map** opens it again, and right-click **Refresh the map** re-reads only what
+changed. The map lives in `floorplan/` in the workspace folder, outside every
+repository, so nothing is committed.
+
+The engine is [Floorplan](https://github.com/gowth6m/floorplan) (MIT),
+bundled in the app — see [Engine/Floorplan/MESHVY.md](Engine/Floorplan/MESHVY.md).
+It needs **Node 18+** and a signed-in Claude Code.
+
 ## Install
 
 One command, and nothing to sign in to:
@@ -424,6 +442,7 @@ Each has a `README.md` saying what it owns.
 
 ```
 Apps/macOS/                  entry point, menus, snapshot + test harnesses
+Engine/Floorplan/            the map engine (Floorplan, MIT), bundled into the app
 Packages/
   Foundation/                pure values; no platform, no UI
     MeshvyCore/              canvas camera, zoom thresholds, board metrics,
@@ -443,6 +462,7 @@ Packages/
     BrowserKit/              WebKit sessions and the browser_* MCP server
     WorkspaceKit/            cutting and tearing down worktrees
     UpdateKit/               the updater
+    FloorplanKit/            the workspace map: bundled engine, Node, serving
     AgentsUI/                badges, status strips, per-node agent settings
     CanvasUI/                the canvas and a view per node kind
     InspectorUI/             transcript, changes, diffs, files

@@ -316,6 +316,21 @@ public enum PaletteCommands {
                 }
             })
 
+            if store.workspaceHasMap {
+                items.append(item(
+                    "act:map", "Open the map", "map",
+                    subtitle: "How the app across these repositories fits together",
+                    keywords: "floorplan map diagram architecture workflow overview",
+                    tint: Theme.accent
+                ) { store.openMap() })
+            }
+            items.append(item(
+                "act:drawMap", store.workspaceHasMap ? "Refresh the map" : "Draw the map", "map.fill",
+                subtitle: "Claude reads every repository and draws how the app fits together",
+                keywords: "floorplan map diagram architecture workflow update refresh draw",
+                tint: Theme.accent
+            ) { store.mapWorkspace() })
+
             items.append(item(
                 "act:thread", "New thread", TerminalNode.Role.repo.icon,
                 subtitle: "Work you drive yourself, at the workspace root",
